@@ -1,0 +1,9 @@
+[package]
+name = "read_clipboard"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+wl-clipboard-rs = "0.9.1"
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
