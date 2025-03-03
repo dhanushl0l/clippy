@@ -7,14 +7,14 @@ fn main() {
             if env::var("WAYLAND_DISPLAY").is_ok() {
                 read_wayland()
             } else if env::var("DISPLAY").is_ok() {
-                unimplemented!("hell")
+                read();
             } else {
                 eprint!("No display server detected");
                 process::exit(1);
             }
         }
-        "windows" => unimplemented!(""),
-        "macos" => unimplemented!(""),
+        "windows" => read(),
+        "macos" => read(),
         _ => {
             eprintln!("unsuported hardware");
             process::exit(1);
@@ -45,6 +45,52 @@ fn read_wayland() {
 
         thread::sleep(Duration::from_millis(1000));
     }
+}
+
+use clipboard_rs::{
+    Clipboard, ClipboardContext, ClipboardHandler, ClipboardWatcher, ClipboardWatcherContext,
+};
+
+struct Manager {
+    ctx: ClipboardContext,
+}
+
+impl Manager {
+    pub fn new() -> Self {
+        let ctx = ClipboardContext::new().unwrap();
+        Manager { ctx }
+    }
+}
+
+impl ClipboardHandler for Manager {
+    fn on_clipboard_change(&mut self) {
+        let ctx = &self.ctx;
+        let types = ctx.available_formats().unwrap();
+        if env::var("DEBUG").is_ok() {
+            println!("{:?}", types);
+
+            let content = ctx.get_text().unwrap_or("".to_string());
+
+            println!("txt={}", content);
+        }
+
+        if let Ok(val) = ctx.get_image() {
+            unimplemented!("");
+        } else if let Ok(val) = ctx.get_text() {
+            write_to_json(val.into_bytes(), String::from("String"), String::from("os"));
+        }
+    }
+}
+
+fn read() {
+    let manager = Manager::new();
+
+    let mut watcher = ClipboardWatcherContext::new().unwrap();
+
+    let _watcher_shutdown = watcher.add_handler(manager).get_shutdown_channel();
+
+    println!("start watch!");
+    watcher.start_watch();
 }
 
 fn write_to_json(data: Vec<u8>, typ: String, device: String) {
