@@ -120,18 +120,23 @@ pub fn write_to_json(data: Vec<u8>, typ: String, device: String) {
 fn write_img_json(img: RustImageData, os: String, file_data: Vec<u8>) -> Result<(), io::Error> {
     let time = Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
 
-    fs::create_dir_all(&get_path(PATH))?;
+    let path = get_path(PATH).join(format!("{}", time));
+
+    fs::create_dir_all(path.to_str().unwrap())?;
 
     let json_data = Data::new(file_data, "IMG".to_string(), os);
-    let file_path = get_path(PATH).join(format!("{}.json", time));
 
     let json_data = serde_json::to_string_pretty(&json_data)?;
 
-    let mut file = File::create(file_path)?;
-    file.write_all(json_data.as_bytes())?;
-
-    match img.save_to_path(get_path(PATH).to_str().unwrap()) {
-        Ok(_) => (),
+    match img
+        .to_png()
+        .expect("error exporting img")
+        .save_to_path(path.join("img.png").to_str().expect("error exporting img"))
+    {
+        Ok(_) => {
+            let mut file = File::create(&path.join("data.json"))?;
+            file.write_all(json_data.as_bytes())?;
+        }
         Err(err) => eprint!("{:?}", err),
     };
 
