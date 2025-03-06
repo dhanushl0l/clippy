@@ -130,6 +130,7 @@ dependencies = [
  "clipboard-rs",
  "serde",
  "serde_json",
+ "wayland-clipboard-listener",
  "wl-clipboard-rs",
 ]
 
@@ -805,6 +806,19 @@ dependencies = [
  "rustix",
  "wayland-backend",
  "wayland-scanner",
+]
+
+[[package]]
+name = "wayland-clipboard-listener"
+version = "0.2.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b213d78fe3fcc17c39f80cdc8cc0015e3a31d4f781af1c52df442bc4c394d2f"
+dependencies = [
+ "os_pipe",
+ "thiserror",
+ "wayland-client",
+ "wayland-protocols",
+ "wayland-protocols-wlr",
 ]
 
 [[package]]

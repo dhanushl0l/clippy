@@ -1,6 +1,7 @@
 use clipboard_rs::{ClipboardWatcher, ClipboardWatcherContext};
-use clippy::read_clipboard;
-use std::{env, process, thread, time::Duration};
+use clippy::read_clipboard::{self, read_wayland_clipboard};
+use std::{env, process};
+use wayland_clipboard_listener::{WlClipboardPasteStream, WlListenType};
 
 fn main() {
     match env::consts::OS {
@@ -25,26 +26,13 @@ fn main() {
 
 // need to find a way to monitor clipboard changes in wayland the current way is not optimized
 fn read_wayland() {
-    let mut old_data = Vec::new();
-    loop {
-        let a = read_clipboard::read_wayland_clipboard();
-        match a {
-            Ok((data, typ)) => {
-                if data != old_data {
-                    old_data = data;
-                    if env::var("DEBUG").is_ok() {
-                        println!(
-                            "{:?}",
-                            String::from_utf8(old_data.to_owned()).expect("Invalid UTF-8")
-                        );
-                    }
-                    read_clipboard::write_to_json(old_data.to_owned(), typ, "os".to_owned());
-                }
-            }
-            Err(_) => (),
-        }
+    let mut stream = WlClipboardPasteStream::init(WlListenType::ListenOnCopy).unwrap();
 
-        thread::sleep(Duration::from_millis(1000));
+    for _ in stream.paste_stream().flatten().flatten() {
+        match read_wayland_clipboard() {
+            Ok(_) => (),
+            Err(err) => println!("{}", err),
+        }
     }
 }
 
@@ -55,6 +43,8 @@ fn read() {
 
     let _watcher_shutdown = watcher.add_handler(manager).get_shutdown_channel();
 
-    println!("start watch!");
+    if env::var("DEBUG").is_ok() {
+        println!("start watch!");
+    }
     watcher.start_watch();
 }
