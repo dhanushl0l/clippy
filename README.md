@@ -10,15 +10,18 @@ We appreciate any contributions! Whether it's reporting bugs, suggesting feature
 ## 📌 Roadmap  
 Below is our planned development roadmap. Features and priorities may change over time based on feedback.  
 
+<img align="right" src="/assets/rust.png" width="250" />
+
 ### ✅ Phase 1: Core Features (In Progress)  
-- [ ] Basic clipboard history  
-- [ ] Note-taking functionality  
-- [ ] Multi-device sync  
+- [x] Basic clipboard history
+- [ ] build a basic ui 
+- [ ] Note-taking functionality
 
 ### 🔜 Phase 2: Enhancements & Improvements  
 - [ ] Advanced settings
 - [ ] End-to-end encryption for sync  
-- [ ] UI customization  
+- [ ] UI customization 
+- [ ] Multi-device sync  
 
 ### 🚀 Phase 3: Stable Release & Beyond  
 - [ ] Platform-specific optimizations  
