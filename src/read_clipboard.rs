@@ -1,19 +1,15 @@
+use crate::{Data, PATH};
 use chrono::prelude::Utc;
 use clipboard_rs::common::RustImage;
 use clipboard_rs::{Clipboard, ClipboardContext, ClipboardHandler, RustImageData};
-use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::{
     env,
     fs::File,
     fs::{self},
     io::{self},
-    path::PathBuf,
-    process,
 };
 use wl_clipboard_rs::paste::{ClipboardType, Error, MimeType, Seat, get_contents, get_mime_types};
-
-static PATH: &str = env::consts::OS;
 
 pub fn read_wayland_clipboard() -> Result<(), Error> {
     let typ: std::collections::HashSet<String> =
@@ -48,34 +44,6 @@ pub fn read_wayland_clipboard() -> Result<(), Error> {
     parse_wayland_clipboard(typ, vec);
 
     Ok(())
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct Data {
-    data: Vec<u8>,
-    typ: String,
-    device: String,
-}
-
-impl Data {
-    pub fn new(data: Vec<u8>, typ: String, device: String) -> Self {
-        Data { data, typ, device }
-    }
-
-    pub fn write_to_json(&self) -> Result<(), io::Error> {
-        let time = Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
-
-        fs::create_dir_all(&get_path(PATH))?;
-
-        let file_path = get_path(PATH).join(format!("{}.json", time));
-
-        let json_data = serde_json::to_string_pretty(self)?;
-
-        let mut file = File::create(file_path)?;
-        file.write_all(json_data.as_bytes())?;
-
-        Ok(())
-    }
 }
 
 pub struct Manager {
@@ -120,7 +88,7 @@ impl ClipboardHandler for Manager {
 }
 
 pub fn write_to_json(data: Vec<u8>, typ: String, device: String) {
-    let data = Data::new(data, typ, device);
+    let data = Data::new(data, typ, device, false);
     match data.write_to_json() {
         Ok(_) => (),
         Err(err) => eprintln!("{}", err),
@@ -130,11 +98,11 @@ pub fn write_to_json(data: Vec<u8>, typ: String, device: String) {
 fn write_img_json(img: RustImageData, os: String, file_data: Vec<u8>) -> Result<(), io::Error> {
     let time = Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
 
-    let path = get_path(PATH).join(format!("{}", time));
+    let path = crate::get_path(PATH).join(format!("{}", time));
 
     fs::create_dir_all(path.to_str().unwrap())?;
 
-    let json_data = Data::new(file_data, "IMG".to_string(), os);
+    let json_data = Data::new(file_data, "IMG".to_string(), os, false);
 
     let json_data = serde_json::to_string_pretty(&json_data)?;
 
@@ -153,25 +121,6 @@ fn write_img_json(img: RustImageData, os: String, file_data: Vec<u8>) -> Result<
     Ok(())
 }
 
-fn get_path(os: &str) -> PathBuf {
-    match os {
-        "linux" | "mac" => {
-            let home = env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-            [home.as_str(), ".local/share/clippy/data"].iter().collect()
-        }
-        "windows" => {
-            let home =
-                env::var("APPDATA").unwrap_or_else(|_| "C:\\Users\\Public\\AppData".to_string());
-            [home.as_str(), "clippy\\data"].iter().collect()
-        }
-
-        _ => {
-            eprintln!("unsuported hardware");
-            process::exit(1)
-        }
-    }
-}
-
 pub fn parse_wayland_clipboard(typ: String, data: Vec<u8>) {
     println!("{}", typ);
     match typ.as_str() {
@@ -180,7 +129,7 @@ pub fn parse_wayland_clipboard(typ: String, data: Vec<u8>) {
             Err(err) => println!("{:?}", err),
         },
         _ => {
-            let result = Data::new(data, typ, "os".to_owned());
+            let result = Data::new(data, typ, "os".to_owned(), false);
             match result.write_to_json() {
                 Ok(_) => (),
                 Err(err) => eprintln!("{:?}", err),
@@ -192,11 +141,11 @@ pub fn parse_wayland_clipboard(typ: String, data: Vec<u8>) {
 fn save_image(image_data: &[u8], typ: &str) -> Result<(), io::Error> {
     let time = Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
 
-    let path = get_path(PATH).join(format!("{}", time));
+    let path = crate::get_path(PATH).join(format!("{}", time));
 
     fs::create_dir_all(path.to_str().unwrap())?;
 
-    let json_data = Data::new(vec![], typ.to_owned(), "os".to_owned());
+    let json_data = Data::new(vec![], typ.to_owned(), "os".to_owned(), false);
 
     let json_data = serde_json::to_string_pretty(&json_data)?;
 

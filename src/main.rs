@@ -1,21 +1,14 @@
+use clippy::{Data, PATH};
 use gtk::{
-    Application, ApplicationWindow, Box, Button, Label, ScrolledWindow, Stack, StackSwitcher,
+    Application, ApplicationWindow, Box, Button, Entry, ScrolledWindow, Stack, StackSwitcher,
 };
 use gtk::{glib, prelude::*};
-use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-#[derive(Debug, Deserialize, Serialize)]
-struct Data {
-    data: Vec<u8>,
-    typ: String,
-    device: String,
-}
-
-fn read_json_files(directory: &str) -> Vec<Data> {
+fn read_json_files(directory: PathBuf) -> Vec<Data> {
     let mut results = Vec::new();
-    let path = Path::new(directory);
+    let path = Path::new(&directory);
 
     if let Ok(entries) = fs::read_dir(path) {
         for entry in entries.flatten() {
@@ -31,20 +24,23 @@ fn read_json_files(directory: &str) -> Vec<Data> {
 
 fn build_ui(application: &Application) {
     let window = ApplicationWindow::new(application);
-    window.set_title(Some("GTK JSON Viewer"));
-    window.set_default_size(800, 600);
+    window.set_title(Some("Clippy"));
+    window.set_default_size(400, 600);
 
     let stack = Stack::new();
     let switcher = StackSwitcher::new();
     switcher.set_stack(Some(&stack));
 
-    let button_page1 = Button::with_label("Go to Page 2");
-    let button_page2 = Button::with_label("Go to Page 1");
+    let button_page1 = Button::with_label("clipboard");
+    let button_page2 = Button::with_label("Pined");
+    let button_page3 = Button::with_label("📍");
 
     button_page1.add_css_class("flat");
     button_page1.add_css_class("no-radius");
     button_page2.add_css_class("flat");
     button_page2.add_css_class("no-radius");
+    button_page3.add_css_class("flat");
+    button_page3.add_css_class("no-radius");
 
     let header_box = Box::new(gtk::Orientation::Horizontal, 0);
     header_box.set_hexpand(true);
@@ -55,6 +51,7 @@ fn build_ui(application: &Application) {
 
     header_box.append(&button_page1);
     header_box.append(&button_page2);
+    header_box.append(&button_page3);
 
     let page1 = Box::new(gtk::Orientation::Vertical, 10);
     let scrollable1 = ScrolledWindow::new();
@@ -70,28 +67,33 @@ fn build_ui(application: &Application) {
 
     page2.append(&scrollable2);
 
-    let data_list = read_json_files("/home/dhanu/.local/share/clippy/data");
+    let data_list = read_json_files(clippy::get_path(crate::PATH));
+    let page1_inner = Box::new(gtk::Orientation::Vertical, 10);
     let page2_inner = Box::new(gtk::Orientation::Vertical, 10);
 
     for data in data_list {
-        let truncated_text = String::from_utf8_lossy(&data.data);
+        let truncated_text = data.get_data();
         let display_text = if truncated_text.len() > 30 {
             format!("{}...", &truncated_text[..30])
         } else {
-            truncated_text.to_string()
+            truncated_text
         };
 
-        let label = Label::new(Some(&format!("{}", display_text)));
-        label.set_margin_top(10);
-        label.set_margin_bottom(10);
-        label.set_margin_start(20);
-        label.set_margin_end(20);
-        label.set_css_classes(&["highlight"]);
-        label.set_width_request(200);
-        label.set_height_request(30);
-        page2_inner.append(&label);
+        let label = Button::builder()
+            .label(display_text)
+            .margin_end(10)
+            .margin_start(10)
+            .build();
+
+        if data.get_pined() {
+            page1_inner.append(&label);
+        } else {
+            page2_inner.append(&label);
+        }
     }
+
     scrollable2.set_child(Some(&page2_inner));
+    scrollable1.set_child(Some(&page1_inner));
 
     button_page1.connect_clicked(glib::clone!(
         #[weak]
@@ -109,21 +111,75 @@ fn build_ui(application: &Application) {
         }
     ));
 
+    button_page3.connect_clicked(|_| add_pin_window());
+
     stack.add_named(&page1, Some("page1"));
     stack.add_named(&page2, Some("page2"));
 
     let vbox = Box::new(gtk::Orientation::Vertical, 5);
     vbox.append(&header_box);
     vbox.append(&stack);
-    vbox.set_hexpand(true);
-    vbox.set_vexpand(true);
 
     window.set_child(Some(&vbox));
     window.present();
 }
 
+fn add_pin_window() {
+    let window = ApplicationWindow::builder()
+        .title("Add Pin")
+        .default_width(300)
+        .default_height(150)
+        .build();
+
+    let vbox = Box::new(gtk::Orientation::Vertical, 10);
+
+    let entry = Entry::new();
+    entry.set_placeholder_text(Some("Enter text..."));
+
+    let button_box = Box::new(gtk::Orientation::Horizontal, 10);
+
+    let save_button = Button::with_label("Save");
+    save_button.connect_clicked(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        entry,
+        move |_| {
+            let text = entry.text().to_string();
+            if !text.is_empty() {
+                let data = Data::new(text.into(), "pined".into(), "os".into(), true);
+                match data.write_to_json() {
+                    Ok(_) => (),
+                    Err(err) => eprintln!("{err}"),
+                };
+            }
+            window.close();
+        }
+    ));
+
+    let cancel_button = Button::with_label("Cancel");
+    cancel_button.connect_clicked(glib::clone!(
+        #[weak]
+        window,
+        move |_| {
+            window.close();
+        }
+    ));
+
+    button_box.append(&save_button);
+    button_box.append(&cancel_button);
+
+    vbox.append(&entry);
+    vbox.append(&button_box);
+
+    window.set_child(Some(&vbox));
+
+    window.present();
+}
+
 fn main() {
-    let application = Application::new(Some("com.example.gtkjson"), Default::default());
+    let application = Application::new(Some("com.clippy.gtkapp"), Default::default());
+
     application.connect_activate(build_ui);
     application.run();
 }
