@@ -10,22 +10,7 @@ We appreciate any contributions! Whether it's reporting bugs, suggesting feature
 ## 📌 Roadmap  
 Below is our planned development roadmap. Features and priorities may change over time based on feedback.  
 
-<style>
-  .rust-m {
-    display: block;
-  }
-
-  @media (min-width: 800px) { 
-    .rust-m {
-      display: flex;
-      position:absolute;
-      margin: 0;
-      right: 5%;
-    }
-  }
-</style>
-
-<img class="rust-m" src="/assets/rust.png" width="200"/>
+<img src="/assets/rust.png" alt="Rust Logo" width="200">
 
 
 ### ✅ Phase 1: Core Features (In Progress)  
