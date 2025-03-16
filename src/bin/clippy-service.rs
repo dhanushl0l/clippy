@@ -1,7 +1,10 @@
 use clipboard_rs::{ClipboardWatcher, ClipboardWatcherContext};
-use clippy::read_clipboard::{self, read_wayland_clipboard};
+use clippy::read_clipboard;
 use std::error::Error;
 use std::{env, process};
+
+#[cfg(target_os = "linux")]
+use clippy::read_clipboard::read_wayland_clipboard;
 
 #[cfg(target_os = "linux")]
 use wayland_clipboard_listener::{WlClipboardPasteStream, WlListenType};

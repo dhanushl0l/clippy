@@ -9,8 +9,11 @@ use std::{
     fs::{self},
     io::{self},
 };
+
+#[cfg(target_os = "linux")]
 use wl_clipboard_rs::paste::{ClipboardType, Error, MimeType, Seat, get_contents, get_mime_types};
 
+#[cfg(target_os = "linux")]
 pub fn read_wayland_clipboard() -> Result<(), Error> {
     let typ: std::collections::HashSet<String> =
         get_mime_types(ClipboardType::Regular, Seat::Unspecified)?;
