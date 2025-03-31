@@ -148,10 +148,10 @@ fn add_pin_window() {
             let text = entry.text().to_string();
             if !text.is_empty() {
                 let data = Data::new(text.into(), "pined".into(), "os".into(), true);
-                match data.write_to_json() {
-                    Ok(_) => (),
-                    Err(err) => eprintln!("{err}"),
-                };
+                // match data.write_to_json() {
+                //     Ok(_) => (),
+                //     Err(err) => eprintln!("{err}"),
+                // };
             }
             window.close();
         }

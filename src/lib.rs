@@ -1,9 +1,14 @@
+pub mod http;
 pub mod read_clipboard;
 
+use bytes::Bytes;
 use chrono::prelude::Utc;
 use serde::{Deserialize, Serialize};
-use std::io::Write;
+use std::io::{Cursor, Write};
+use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex};
 use std::{
+    collections::BTreeSet,
     env,
     fs::File,
     fs::{self},
@@ -11,6 +16,7 @@ use std::{
     path::PathBuf,
     process,
 };
+use zip::ZipArchive;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Data {
@@ -32,18 +38,22 @@ impl Data {
         }
     }
 
-    pub fn write_to_json(&self) -> Result<(), io::Error> {
+    pub fn write_to_json(&self, tx: &Sender<(String, String)>) -> Result<(), io::Error> {
         let time = Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
 
         fs::create_dir_all(&get_path(PATH))?;
 
-        let file_path = &get_path(PATH).join(format!("{}.json", time));
+        let file_path = &get_path(PATH).join(&time);
 
         let json_data = serde_json::to_string_pretty(self)?;
 
         let mut file = File::create(file_path)?;
         file.write_all(json_data.as_bytes())?;
 
+        match tx.send((file_path.to_str().unwrap().into(), time)) {
+            Ok(_) => (),
+            Err(err) => eprintln!("{}", err),
+        }
         Ok(())
     }
 
@@ -53,6 +63,54 @@ impl Data {
 
     pub fn get_pined(&self) -> bool {
         self.pined
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct UserData {
+    data: Arc<Mutex<BTreeSet<String>>>,
+}
+
+impl UserData {
+    pub fn new() -> Self {
+        let mut temp = BTreeSet::new();
+
+        fs::create_dir_all(&get_path(PATH)).unwrap();
+
+        let folder_path = &get_path(PATH);
+
+        if let Ok(entries) = fs::read_dir(folder_path.as_path()) {
+            for entry in entries.flatten() {
+                if let Some(file_name) = entry.file_name().to_str() {
+                    temp.insert(file_name.to_string());
+                }
+            }
+        }
+
+        println!("{:?}", temp);
+
+        Self {
+            data: Arc::new(Mutex::new(temp)),
+        }
+    }
+
+    pub fn add(&self, id: String) {
+        self.data.lock().unwrap().insert(id);
+    }
+
+    pub fn add_vec(&self, id: Vec<String>) {
+        for id in id {
+            self.data.lock().unwrap().insert(id);
+        }
+    }
+
+    pub fn last_one(&self) -> String {
+        self.data
+            .lock()
+            .unwrap()
+            .last()
+            .unwrap_or(&"".to_string())
+            .clone()
     }
 }
 
@@ -73,4 +131,28 @@ pub fn get_path(os: &str) -> PathBuf {
             process::exit(1)
         }
     }
+}
+
+pub fn extract_zip(data: Bytes) -> Result<Vec<String>, zip::result::ZipError> {
+    let target_dir = get_path(PATH);
+    let mut id = Vec::new();
+    let cursor = Cursor::new(data);
+    let mut archive = ZipArchive::new(cursor)?;
+
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i)?;
+        let file_name = file.name();
+        id.push(file_name.to_string());
+        let mut out_path = target_dir.clone();
+        out_path.push(file_name);
+
+        if let Some(parent) = out_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        let mut outfile = File::create(&out_path)?;
+        std::io::copy(&mut file, &mut outfile)?;
+    }
+
+    Ok(id)
 }

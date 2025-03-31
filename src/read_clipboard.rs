@@ -3,6 +3,7 @@ use chrono::prelude::Utc;
 use clipboard_rs::common::RustImage;
 use clipboard_rs::{Clipboard, ClipboardContext, ClipboardHandler, RustImageData};
 use std::io::{Read, Write};
+use std::sync::mpsc::{self, Sender};
 use std::{
     env,
     fs::File,
@@ -14,7 +15,7 @@ use std::{
 use wl_clipboard_rs::paste::{ClipboardType, Error, MimeType, Seat, get_contents, get_mime_types};
 
 #[cfg(target_os = "linux")]
-pub fn read_wayland_clipboard() -> Result<(), Error> {
+pub fn read_wayland_clipboard(tx: &Sender<(String, String)>) -> Result<(), Error> {
     let typ: std::collections::HashSet<String> =
         get_mime_types(ClipboardType::Regular, Seat::Unspecified)?;
     let preferred_formats = [
@@ -44,23 +45,24 @@ pub fn read_wayland_clipboard() -> Result<(), Error> {
     let mut vec = Vec::new();
     let _ = dat.read_to_end(&mut vec);
 
-    parse_wayland_clipboard(typ, vec);
+    parse_wayland_clipboard(typ, vec, tx);
 
     Ok(())
 }
 
-pub struct Manager {
+pub struct Manager<'a> {
     ctx: ClipboardContext,
+    tx: &'a Sender<(String, String)>,
 }
 
-impl Manager {
-    pub fn new() -> Self {
+impl<'a> Manager<'a> {
+    pub fn new(tx: &'a Sender<(String, String)>) -> Self {
         let ctx = ClipboardContext::new().unwrap();
-        Manager { ctx }
+        Manager { ctx, tx }
     }
 }
 
-impl ClipboardHandler for Manager {
+impl<'a> ClipboardHandler for Manager<'a> {
     fn on_clipboard_change(&mut self) {
         let ctx = &self.ctx;
         let types = ctx.available_formats().unwrap();
@@ -85,14 +87,19 @@ impl ClipboardHandler for Manager {
                 Err(err) => eprintln!("{:?}", err),
             }
         } else if let Ok(val) = ctx.get_text() {
-            write_to_json(val.into_bytes(), String::from("String"), String::from("os"));
+            write_to_json(
+                val.into_bytes(),
+                String::from("String"),
+                String::from("os"),
+                &self.tx,
+            );
         }
     }
 }
 
-pub fn write_to_json(data: Vec<u8>, typ: String, device: String) {
+pub fn write_to_json(data: Vec<u8>, typ: String, device: String, tx: &Sender<(String, String)>) {
     let data = Data::new(data, typ, device, false);
-    match data.write_to_json() {
+    match data.write_to_json(tx) {
         Ok(_) => (),
         Err(err) => eprintln!("{}", err),
     }
@@ -124,16 +131,16 @@ fn write_img_json(img: RustImageData, os: String, file_data: Vec<u8>) -> Result<
     Ok(())
 }
 
-pub fn parse_wayland_clipboard(typ: String, data: Vec<u8>) {
+pub fn parse_wayland_clipboard(typ: String, data: Vec<u8>, tx: &Sender<(String, String)>) {
     println!("{}", typ);
     match typ.as_str() {
-        _ if typ.starts_with("image/") => match save_image(&data, "output.png") {
+        _ if typ.starts_with("image/") => match save_image(&data, "output.png", tx) {
             Ok(_) => (),
             Err(err) => println!("{:?}", err),
         },
         _ => {
             let result = Data::new(data, typ, "os".to_owned(), false);
-            match result.write_to_json() {
+            match result.write_to_json(tx) {
                 Ok(_) => (),
                 Err(err) => eprintln!("{:?}", err),
             }
@@ -141,7 +148,11 @@ pub fn parse_wayland_clipboard(typ: String, data: Vec<u8>) {
     }
 }
 
-fn save_image(image_data: &[u8], typ: &str) -> Result<(), io::Error> {
+fn save_image(
+    image_data: &[u8],
+    typ: &str,
+    tx: &Sender<(String, String)>,
+) -> Result<(), io::Error> {
     let time = Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
 
     let path = crate::get_path(PATH).join(format!("{}", time));
