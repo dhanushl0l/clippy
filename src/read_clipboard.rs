@@ -2,8 +2,9 @@ use crate::{Data, PATH};
 use chrono::prelude::Utc;
 use clipboard_rs::common::RustImage;
 use clipboard_rs::{Clipboard, ClipboardContext, ClipboardHandler, RustImageData};
+use std::collections::HashSet;
 use std::io::{Read, Write};
-use std::sync::mpsc::{self, Sender};
+use std::sync::mpsc::Sender;
 use std::{
     env,
     fs::File,
@@ -16,8 +17,14 @@ use wl_clipboard_rs::paste::{ClipboardType, Error, MimeType, Seat, get_contents,
 
 #[cfg(target_os = "linux")]
 pub fn read_wayland_clipboard(tx: &Sender<(String, String)>) -> Result<(), Error> {
-    let typ: std::collections::HashSet<String> =
-        get_mime_types(ClipboardType::Regular, Seat::Unspecified)?;
+    let typ: HashSet<String> = get_mime_types(ClipboardType::Regular, Seat::Unspecified)?;
+
+    for i in &typ {
+        if i == "text/clippy" {
+            return Ok(());
+        }
+    }
+
     let preferred_formats = [
         "image/png",
         "image/jpeg",
@@ -133,41 +140,10 @@ fn write_img_json(img: RustImageData, os: String, file_data: Vec<u8>) -> Result<
 
 pub fn parse_wayland_clipboard(typ: String, data: Vec<u8>, tx: &Sender<(String, String)>) {
     println!("{}", typ);
-    match typ.as_str() {
-        _ if typ.starts_with("image/") => match save_image(&data, "output.png", tx) {
-            Ok(_) => (),
-            Err(err) => println!("{:?}", err),
-        },
-        _ => {
-            let result = Data::new(data, typ, "os".to_owned(), false);
-            match result.write_to_json(tx) {
-                Ok(_) => (),
-                Err(err) => eprintln!("{:?}", err),
-            }
-        }
+
+    let result = Data::new(data, typ, "os".to_owned(), false);
+    match result.write_to_json(tx) {
+        Ok(_) => (),
+        Err(err) => eprintln!("{:?}", err),
     }
-}
-
-fn save_image(
-    image_data: &[u8],
-    typ: &str,
-    tx: &Sender<(String, String)>,
-) -> Result<(), io::Error> {
-    let time = Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
-
-    let path = crate::get_path(PATH).join(format!("{}", time));
-
-    fs::create_dir_all(path.to_str().unwrap())?;
-
-    let json_data = Data::new(vec![], typ.to_owned(), "os".to_owned(), false);
-
-    let json_data = serde_json::to_string_pretty(&json_data)?;
-
-    let mut img_file = File::create(path.join("img.png"))?;
-    let mut json_file = File::create(path.join("data.json"))?;
-
-    json_file.write_all(json_data.as_bytes())?;
-    img_file.write_all(image_data)?;
-
-    Ok(())
 }

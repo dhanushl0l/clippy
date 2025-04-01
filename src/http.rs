@@ -1,7 +1,7 @@
 use reqwest::blocking::{Client, multipart};
 use std::fs::File;
 
-use crate::{UserData, extract_zip};
+use crate::{UserData, extract_zip, write_clipboard::copy_to_clipboard};
 
 const SERVER: &str = "http://127.0.0.1:8080";
 
@@ -85,6 +85,8 @@ pub fn download(userdata: &UserData) -> Result<(), String> {
         }
         Err(_) => (),
     }
+
+    copy_to_clipboard(userdata)?;
 
     Ok(())
 }

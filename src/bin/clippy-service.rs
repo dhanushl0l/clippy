@@ -2,6 +2,7 @@ use clipboard_rs::{ClipboardWatcher, ClipboardWatcherContext};
 use clippy::UserData;
 use clippy::http;
 use clippy::read_clipboard;
+use core::time;
 use std::error::Error;
 use std::sync::mpsc::{self, Sender};
 use std::{env, process, thread};
@@ -17,7 +18,7 @@ fn main() {
     thread::spawn(move || {
         let user_data = UserData::new();
         loop {
-            if let Ok((path, id)) = rx.recv() {
+            if let Ok((path, id)) = rx.try_recv() {
                 println!("|{:?}|", path);
                 match http::send(path, id, &user_data) {
                     Ok(()) => (),
@@ -27,7 +28,15 @@ fn main() {
 
             match http::state(&user_data) {
                 Ok(result) => {
-                    http::download(&user_data);
+                    if !result {
+                        match http::download(&user_data) {
+                            Ok(_) => (),
+                            Err(err) => eprintln!("{}", err),
+                        };
+                    } else {
+                        println!("every thihng is uptodate");
+                        thread::sleep(time::Duration::from_secs(3));
+                    }
                 }
                 Err(err) => {
                     eprintln!("{:?}", err);

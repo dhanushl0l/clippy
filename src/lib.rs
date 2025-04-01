@@ -1,5 +1,6 @@
 pub mod http;
 pub mod read_clipboard;
+pub mod write_clipboard;
 
 use bytes::Bytes;
 use chrono::prelude::Utc;
@@ -45,6 +46,10 @@ impl Data {
 
         let file_path = &get_path(PATH).join(&time);
 
+        if self.typ.starts_with("image/") {
+            self.save_image(&time)?;
+        }
+
         let json_data = serde_json::to_string_pretty(self)?;
 
         let mut file = File::create(file_path)?;
@@ -54,15 +59,34 @@ impl Data {
             Ok(_) => (),
             Err(err) => eprintln!("{}", err),
         }
+
         Ok(())
     }
 
-    pub fn get_data(&self) -> String {
-        String::from_utf8_lossy(&self.data).into_owned()
+    pub fn get_data(&self) -> Option<String> {
+        if self.typ.starts_with("image/") {
+            Some(String::from_utf8_lossy(&self.data).into_owned())
+        } else {
+            None
+        }
     }
 
     pub fn get_pined(&self) -> bool {
         self.pined
+    }
+
+    pub fn save_image(&self, time: &str) -> Result<(), io::Error> {
+        let mut path: PathBuf = crate::get_path(PATH);
+        path.pop();
+        let path: PathBuf = path.join("image").join(time);
+
+        fs::create_dir_all(&path)?;
+
+        let mut img_file = File::create(path.join("img.png"))?;
+
+        img_file.write_all(&self.data)?;
+
+        Ok(())
     }
 }
 
@@ -111,6 +135,19 @@ impl UserData {
             .last()
             .unwrap_or(&"".to_string())
             .clone()
+    }
+}
+
+#[derive(Serialize)]
+pub struct UserCred {
+    pub username: String,
+    pub key: String,
+    pub id: String,
+}
+
+impl UserCred {
+    pub fn new(username: String, key: String, id: String) -> Self {
+        Self { username, key, id }
     }
 }
 

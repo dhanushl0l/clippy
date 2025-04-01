@@ -270,6 +270,7 @@ dependencies = [
  "bytes",
  "chrono",
  "clipboard-rs",
+ "gio",
  "gtk4",
  "reqwest",
  "serde",

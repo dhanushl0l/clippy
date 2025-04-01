@@ -72,12 +72,14 @@ fn build_ui(application: &Application) {
     let page2_inner = Box::new(gtk::Orientation::Vertical, 10);
 
     for data in data_list {
-        let truncated_text = data.get_data();
-        let display_text = if truncated_text.len() > 30 {
-            format!("{}...", &truncated_text[..30])
-        } else {
-            truncated_text
-        };
+        let mut display_text = String::new();
+        if let Some(truncated_text) = data.get_data() {
+            display_text = if truncated_text.len() > 30 {
+                format!("{}...", &truncated_text[..30])
+            } else {
+                truncated_text
+            };
+        }
 
         let label = Button::builder()
             .label(display_text)
