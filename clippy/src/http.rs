@@ -5,7 +5,7 @@ use crate::{UserData, extract_zip, write_clipboard::copy_to_clipboard};
 
 const SERVER: &str = "http://127.0.0.1:8080";
 
-pub fn send(file_path: String, id: String, userdata: &UserData) -> Result<(), String> {
+pub fn send(file_path: String, id: &str, userdata: &UserData) -> Result<(), String> {
     match state(userdata) {
         Ok(true) => (),
         Ok(false) => {
@@ -35,7 +35,7 @@ pub fn send(file_path: String, id: String, userdata: &UserData) -> Result<(), St
         .text()
         .unwrap_or_else(|_| "<Failed to read body>".to_string());
 
-    userdata.add(id);
+    userdata.add(id.to_string());
     println!("Body: {}", body);
 
     Ok(())

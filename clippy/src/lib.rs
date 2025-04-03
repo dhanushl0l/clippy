@@ -6,6 +6,7 @@ use bytes::Bytes;
 use chrono::prelude::Utc;
 use serde::{Deserialize, Serialize};
 use std::io::{Cursor, Write};
+use std::path::Path;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::{
@@ -19,7 +20,7 @@ use std::{
 };
 use zip::ZipArchive;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Data {
     data: Vec<u8>,
     typ: String,
@@ -64,7 +65,7 @@ impl Data {
     }
 
     pub fn get_data(&self) -> Option<String> {
-        if self.typ.starts_with("image/") {
+        if !self.typ.starts_with("image/") {
             Some(String::from_utf8_lossy(&self.data).into_owned())
         } else {
             None
@@ -88,6 +89,23 @@ impl Data {
 
         Ok(())
     }
+
+    pub fn get_meta_data(&self) -> Result<String, ()> {
+        let mut display_text = String::new();
+
+        if self.typ.starts_with("text") {
+            if let Some(truncated_text) = self.get_data() {
+                display_text = if truncated_text.len() > 30 {
+                    format!("{}...", &truncated_text[..30])
+                } else {
+                    truncated_text
+                }
+            }
+        } else {
+            return Err(());
+        }
+        Ok(display_text)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -97,6 +115,12 @@ pub struct UserData {
 
 impl UserData {
     pub fn new() -> Self {
+        Self {
+            data: Arc::new(Mutex::new(BTreeSet::new())),
+        }
+    }
+
+    pub fn build() -> Self {
         let mut temp = BTreeSet::new();
 
         fs::create_dir_all(&get_path(PATH)).unwrap();
@@ -192,4 +216,30 @@ pub fn extract_zip(data: Bytes) -> Result<Vec<String>, zip::result::ZipError> {
     }
 
     Ok(id)
+}
+
+pub fn set_global_bool(value: bool) {
+    let mut path = get_path(PATH);
+    path.pop();
+    let path = Path::new(&path).join("OK");
+
+    if let Err(e) = fs::create_dir_all(path.parent().unwrap()) {
+        eprintln!("Failed to create directories: {}", e);
+        return;
+    }
+
+    if value {
+        if let Err(e) = fs::File::create(&path) {
+            eprintln!("Failed to create file: {}", e);
+        }
+    } else {
+        if let Err(e) = fs::remove_file(&path) {
+            eprintln!("Failed to delete file: {}", e);
+        }
+    }
+}
+
+pub fn get_global_bool() -> bool {
+    let path = Path::new(PATH).join("OK");
+    !path.exists()
 }

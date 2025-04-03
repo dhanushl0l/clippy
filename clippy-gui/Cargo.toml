@@ -1,0 +1,11 @@
+[package]
+name = "clippy-gui"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+eframe = "0.31.1"
+serde_json = "1.0.140"
+clippy = { path = "../clippy" }
+egui = "0.31.1"
+env_logger = "0.11.8"

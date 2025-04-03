@@ -3,6 +3,7 @@ use clippy::UserData;
 use clippy::http;
 use clippy::read_clipboard;
 use core::time;
+use env_logger::{Builder, Env};
 use std::error::Error;
 use std::sync::mpsc::{self, Sender};
 use std::{env, process, thread};
@@ -14,15 +15,22 @@ use clippy::read_clipboard::read_wayland_clipboard;
 use wayland_clipboard_listener::{WlClipboardPasteStream, WlListenType};
 
 fn main() {
-    let (tx, rx) = mpsc::channel();
+    Builder::from_env(Env::default().filter_or("LOG", "info")).init();
+
+    let (tx, rx) = mpsc::channel::<(String, String)>();
     thread::spawn(move || {
-        let user_data = UserData::new();
+        let user_data = UserData::build();
+        let pending = UserData::new();
+
         loop {
             if let Ok((path, id)) = rx.try_recv() {
                 println!("|{:?}|", path);
-                match http::send(path, id, &user_data) {
+                match http::send(path, &id, &user_data) {
                     Ok(()) => (),
-                    Err(err) => eprintln!("{}", err),
+                    Err(err) => {
+                        pending.add(id);
+                        eprintln!("{}", err)
+                    }
                 };
             }
 
