@@ -1,22 +1,15 @@
-use reqwest::blocking::{Client, multipart};
-use std::fs::File;
+use core::time;
+use reqwest::{
+    Error,
+    blocking::{Client, multipart},
+};
+use std::{fs::File, thread, time::Duration};
 
 use crate::{UserData, extract_zip, write_clipboard::copy_to_clipboard};
 
 const SERVER: &str = "http://127.0.0.1:8080";
 
-pub fn send(file_path: String, id: &str, userdata: &UserData) -> Result<(), String> {
-    match state(userdata) {
-        Ok(true) => (),
-        Ok(false) => {
-            let log = download(userdata);
-            println!("{:?}", log)
-        }
-        Err(err) => eprintln!("{:?}", err),
-    }
-
-    let client = Client::new();
-
+pub fn send(file_path: &str, id: &str, userdata: &UserData, client: &Client) -> Result<(), String> {
     let _file = File::open(&file_path).map_err(|e| format!("File error: {}", e))?;
 
     let form = multipart::Form::new()
@@ -41,9 +34,8 @@ pub fn send(file_path: String, id: &str, userdata: &UserData) -> Result<(), Stri
     Ok(())
 }
 
-pub fn state(userdata: &UserData) -> Result<bool, String> {
+pub fn state(userdata: &UserData, client: &Client) -> Result<bool, String> {
     let user = "d";
-    let client = Client::new();
     let response = client
         .get(&format!("{}/state/{}", SERVER, user))
         .query(&[("id", userdata.last_one())])
@@ -62,9 +54,8 @@ pub fn state(userdata: &UserData) -> Result<bool, String> {
     }
 }
 
-pub fn download(userdata: &UserData) -> Result<(), String> {
+pub fn download(userdata: &UserData, client: &Client) -> Result<(), String> {
     let user = "d";
-    let client = Client::new();
     let response = client
         .get(&format!("{}/get", SERVER))
         .query(&[("username", user)])
@@ -89,4 +80,27 @@ pub fn download(userdata: &UserData) -> Result<(), String> {
     copy_to_clipboard(userdata)?;
 
     Ok(())
+}
+
+pub fn health(client: &Client) {
+    loop {
+        let response = client
+            .get(format!("{}/health", SERVER))
+            .timeout(Duration::from_secs(5))
+            .send();
+
+        match response {
+            Ok(response) => {
+                if response.status().is_success() {
+                    break;
+                } else {
+                    println!("Server is out")
+                }
+            }
+            Err(err) => {
+                eprintln!("{}", err);
+                thread::sleep(time::Duration::from_secs(5));
+            }
+        }
+    }
 }

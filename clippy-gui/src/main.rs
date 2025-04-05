@@ -1,4 +1,4 @@
-use clippy::{Data, PATH, get_path};
+use clippy::{Data, get_path};
 use eframe::{
     App, NativeOptions,
     egui::{CentralPanel, ScrollArea, ViewportBuilder},
@@ -14,7 +14,7 @@ struct Clipboard {
 impl Clipboard {
     fn new() -> Self {
         let mut data = Vec::new();
-        if let Ok(entries) = fs::read_dir(get_path(PATH)) {
+        if let Ok(entries) = fs::read_dir(get_path()) {
             let mut entries: Vec<_> = entries.flatten().collect();
             entries.sort_unstable_by_key(|entry| Reverse(entry.path()));
             for entry in entries {

@@ -1,6 +1,6 @@
 use std::{fs::File, io::Read};
 
-use crate::{Data, PATH, UserData, get_path};
+use crate::{Data, UserData, get_path};
 use wl_clipboard_rs::copy::{ClipboardType, MimeType, Options, Source};
 
 #[cfg(target_os = "linux")]
@@ -11,11 +11,11 @@ pub fn copy_to_clipboard(userdata: &UserData) -> Result<(), String> {
     opts.clipboard(ClipboardType::Regular);
 
     let data = read_data(userdata.last_one());
+    set_global_bool(false);
 
     let typ = data.typ;
     let data = data.data.into_boxed_slice();
 
-    set_global_bool(false);
     if typ.starts_with("image/") {
         let a = opts.clone().copy(
             Source::Bytes(data.clone()),
@@ -30,7 +30,7 @@ pub fn copy_to_clipboard(userdata: &UserData) -> Result<(), String> {
 }
 
 fn read_data(file: String) -> Data {
-    let target = get_path(PATH).join(file);
+    let target = get_path().join(file);
     let mut file = File::open(target).unwrap();
 
     let mut contents = String::new();

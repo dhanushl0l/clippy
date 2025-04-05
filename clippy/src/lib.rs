@@ -5,7 +5,7 @@ pub mod write_clipboard;
 use bytes::Bytes;
 use chrono::prelude::Utc;
 use serde::{Deserialize, Serialize};
-use std::io::{Cursor, Write};
+use std::io::{Cursor, Error, Write};
 use std::path::Path;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
@@ -16,7 +16,6 @@ use std::{
     fs::{self},
     io::{self},
     path::PathBuf,
-    process,
 };
 use zip::ZipArchive;
 
@@ -27,8 +26,6 @@ pub struct Data {
     device: String,
     pined: bool,
 }
-
-pub static PATH: &str = env::consts::OS;
 
 impl Data {
     pub fn new(data: Vec<u8>, typ: String, device: String, pined: bool) -> Self {
@@ -43,9 +40,9 @@ impl Data {
     pub fn write_to_json(&self, tx: &Sender<(String, String)>) -> Result<(), io::Error> {
         let time = Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
 
-        fs::create_dir_all(&get_path(PATH))?;
+        fs::create_dir_all(&get_path())?;
 
-        let file_path = &get_path(PATH).join(&time);
+        let file_path = &get_path().join(&time);
 
         if self.typ.starts_with("image/") {
             self.save_image(&time)?;
@@ -77,7 +74,7 @@ impl Data {
     }
 
     pub fn save_image(&self, time: &str) -> Result<(), io::Error> {
-        let mut path: PathBuf = crate::get_path(PATH);
+        let mut path: PathBuf = crate::get_path();
         path.pop();
         let path: PathBuf = path.join("image").join(time);
 
@@ -123,9 +120,9 @@ impl UserData {
     pub fn build() -> Self {
         let mut temp = BTreeSet::new();
 
-        fs::create_dir_all(&get_path(PATH)).unwrap();
+        fs::create_dir_all(&get_path()).unwrap();
 
-        let folder_path = &get_path(PATH);
+        let folder_path = &get_path();
 
         if let Ok(entries) = fs::read_dir(folder_path.as_path()) {
             for entry in entries.flatten() {
@@ -162,40 +159,73 @@ impl UserData {
     }
 }
 
-#[derive(Serialize)]
-pub struct UserCred {
-    pub username: String,
-    pub key: String,
-    pub id: String,
+// #[derive(Serialize)]
+// pub struct UserCred {
+//     pub username: String,
+//     pub key: String,
+//     pub id: String,
+// }
+
+// impl UserCred {
+//     pub fn new(username: String, key: String, id: String) -> Self {
+//         Self { username, key, id }
+//     }
+// }
+
+#[derive(Debug, Clone)]
+pub struct Pending {
+    data: Arc<Mutex<Vec<(String, String)>>>,
 }
 
-impl UserCred {
-    pub fn new(username: String, key: String, id: String) -> Self {
-        Self { username, key, id }
+impl Pending {
+    pub fn new() -> Self {
+        Self {
+            data: Arc::new(Mutex::new(Vec::new())),
+        }
     }
+
+    pub fn add(&self, id: (String, String)) {
+        self.data.lock().unwrap().push(id);
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.data.lock().unwrap().is_empty()
+    }
+
+    pub fn get(&self) -> Option<(&str, &str)> {
+        None
+    }
+
+    pub fn remove(&self) {}
 }
 
-pub fn get_path(os: &str) -> PathBuf {
-    match os {
-        "linux" | "mac" => {
-            let home = env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-            [home.as_str(), ".local/share/clippy/data"].iter().collect()
-        }
-        "windows" => {
-            let home =
-                env::var("APPDATA").unwrap_or_else(|_| "C:\\Users\\Public\\AppData".to_string());
-            [home.as_str(), "clippy\\data"].iter().collect()
-        }
+pub fn get_path() -> PathBuf {
+    #[cfg(target_os = "linux")]
+    {
+        let home = env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+        return [home.as_str(), ".local/share/clippy/data"].iter().collect();
+    }
 
-        _ => {
-            eprintln!("unsuported hardware");
-            process::exit(1)
-        }
+    #[cfg(target_os = "macos")]
+    {
+        let home = env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+        return [home.as_str(), ".local/share/clippy/data"].iter().collect();
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let home = env::var("APPDATA").unwrap_or_else(|_| "C:\\Users\\Public\\AppData".to_string());
+        return [home.as_str(), "clippy\\data"].iter().collect();
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    {
+        compile_error!("Unsupported operating system");
     }
 }
 
 pub fn extract_zip(data: Bytes) -> Result<Vec<String>, zip::result::ZipError> {
-    let target_dir = get_path(PATH);
+    let target_dir = get_path();
     let mut id = Vec::new();
     let cursor = Cursor::new(data);
     let mut archive = ZipArchive::new(cursor)?;
@@ -215,31 +245,52 @@ pub fn extract_zip(data: Bytes) -> Result<Vec<String>, zip::result::ZipError> {
         std::io::copy(&mut file, &mut outfile)?;
     }
 
+    match store_image(&id, target_dir) {
+        Ok(_) => (),
+        Err(err) => eprintln!("{}", err),
+    }
     Ok(id)
 }
 
-pub fn set_global_bool(value: bool) {
-    let mut path = get_path(PATH);
-    path.pop();
-    let path = Path::new(&path).join("OK");
+pub fn store_image(id: &[String], target_dir: PathBuf) -> Result<(), Error> {
+    for i in id {
+        let mut path = target_dir.clone();
+        path.push(i);
 
+        let file = fs::read_to_string(path)?;
+        let data: Data = serde_json::from_str(&file)?;
+
+        if data.typ.starts_with("image/") {
+            data.save_image(i)?;
+        }
+    }
+    Ok(())
+}
+
+pub fn set_global_bool(value: bool) {
+    let mut path = get_path();
     if let Err(e) = fs::create_dir_all(path.parent().unwrap()) {
         eprintln!("Failed to create directories: {}", e);
         return;
     }
 
+    path.pop();
+    let path = Path::new(&path).join("OK");
+
     if value {
-        if let Err(e) = fs::File::create(&path) {
-            eprintln!("Failed to create file: {}", e);
-        }
-    } else {
         if let Err(e) = fs::remove_file(&path) {
             eprintln!("Failed to delete file: {}", e);
+        }
+    } else {
+        if let Err(e) = fs::File::create(&path) {
+            eprintln!("Failed to create file: {}", e);
         }
     }
 }
 
 pub fn get_global_bool() -> bool {
-    let path = Path::new(PATH).join("OK");
+    let mut path = get_path();
+    path.pop();
+    let path = Path::new(&path).join("OK");
     !path.exists()
 }

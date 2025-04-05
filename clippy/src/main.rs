@@ -1,10 +1,15 @@
 use clipboard_rs::{ClipboardWatcher, ClipboardWatcherContext};
+use clippy::Pending;
 use clippy::UserData;
 use clippy::http;
+use clippy::http::health;
+use clippy::http::send;
 use clippy::read_clipboard;
 use core::time;
 use env_logger::{Builder, Env};
+use reqwest::blocking::Client;
 use std::error::Error;
+use std::sync::Arc;
 use std::sync::mpsc::{self, Sender};
 use std::{env, process, thread};
 
@@ -18,26 +23,30 @@ fn main() {
     Builder::from_env(Env::default().filter_or("LOG", "info")).init();
 
     let (tx, rx) = mpsc::channel::<(String, String)>();
-    thread::spawn(move || {
-        let user_data = UserData::build();
-        let pending = UserData::new();
+    let user_data = UserData::build();
+    let user_data1 = user_data.clone();
+    let pending = Pending::new();
+    let pending1 = pending.clone();
+    let client = Arc::new(Client::new());
+    let client1 = client.clone();
 
+    thread::spawn(move || {
         loop {
-            if let Ok((path, id)) = rx.try_recv() {
-                println!("|{:?}|", path);
-                match http::send(path, &id, &user_data) {
-                    Ok(()) => (),
+            while let Some((path, id)) = pending.get() {
+                match send(&path, &id, &user_data, &client) {
+                    Ok(_) => pending.remove(),
                     Err(err) => {
-                        pending.add(id);
-                        eprintln!("{}", err)
+                        eprintln!("{:?}", err);
+                        health(&client);
+                        continue;
                     }
                 };
             }
 
-            match http::state(&user_data) {
+            match http::state(&user_data, &client) {
                 Ok(result) => {
                     if !result {
-                        match http::download(&user_data) {
+                        match http::download(&user_data, &client) {
                             Ok(_) => (),
                             Err(err) => eprintln!("{}", err),
                         };
@@ -47,9 +56,22 @@ fn main() {
                     }
                 }
                 Err(err) => {
-                    eprintln!("{:?}", err);
+                    eprintln!("11111{:?}", err);
+                    health(&client);
                 }
             }
+        }
+    });
+
+    thread::spawn(move || {
+        for (path, id) in rx {
+            match send(&path, &id, &user_data1, &client1) {
+                Ok(_) => (),
+                Err(err) => {
+                    pending1.add((id, path));
+                    eprintln!("{}", err)
+                }
+            };
         }
     });
     run(&tx)

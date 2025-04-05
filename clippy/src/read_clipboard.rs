@@ -1,4 +1,4 @@
-use crate::{Data, PATH, get_global_bool, set_global_bool};
+use crate::{Data, get_global_bool, set_global_bool};
 use chrono::prelude::Utc;
 use clipboard_rs::common::RustImage;
 use clipboard_rs::{Clipboard, ClipboardContext, ClipboardHandler, RustImageData};
@@ -124,7 +124,7 @@ pub fn write_to_json(data: Vec<u8>, typ: String, device: String, tx: &Sender<(St
 fn write_img_json(img: RustImageData, os: String, file_data: Vec<u8>) -> Result<(), io::Error> {
     let time = Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
 
-    let path = crate::get_path(PATH).join(format!("{}", time));
+    let path = crate::get_path().join(format!("{}", time));
 
     fs::create_dir_all(path.to_str().unwrap())?;
 
