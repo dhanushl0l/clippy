@@ -1,6 +1,9 @@
-use std::{fs::File, io::Read};
+use std::{error::Error, fs::File, io::Read};
 
 use crate::{Data, UserData, get_path};
+
+use clipboard_rs::{Clipboard, ClipboardContext, RustImageData, common::RustImage};
+#[cfg(target_os = "linux")]
 use wl_clipboard_rs::copy::{ClipboardType, MimeType, Options, Source};
 
 #[cfg(target_os = "linux")]
@@ -26,6 +29,25 @@ pub fn copy_to_clipboard(userdata: &UserData) -> Result<(), String> {
             .clone()
             .copy(Source::Bytes(data.clone()), MimeType::Text);
     }
+    Ok(())
+}
+
+pub fn copy_to_clipboard(userdata: &UserData) -> Result<(), Box<dyn Error + Send + Sync>> {
+    use crate::set_global_bool;
+    let data = read_data(userdata.last_one());
+    let ctx = ClipboardContext::new()?;
+
+    set_global_bool(false);
+
+    let typ = data.typ;
+    let data = data.data;
+
+    if typ.starts_with("image/") {
+        ctx.set_image(RustImageData::from_bytes(&data)?);
+    } else {
+        ctx.set_text(String::from_utf8(data)?);
+    }
+
     Ok(())
 }
 

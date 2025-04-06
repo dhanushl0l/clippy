@@ -1,23 +1,16 @@
 use crate::{Data, get_global_bool, set_global_bool};
-use chrono::prelude::Utc;
 use clipboard_rs::common::RustImage;
-use clipboard_rs::{Clipboard, ClipboardContext, ClipboardHandler, RustImageData};
-use std::collections::HashSet;
-use std::io::{Read, Write};
+use clipboard_rs::{Clipboard, ClipboardContext, ClipboardHandler};
 use std::sync::mpsc::Sender;
-use std::{
-    env,
-    fs::File,
-    fs::{self},
-    io::{self},
-};
 
 #[cfg(target_os = "linux")]
-use wl_clipboard_rs::paste::{ClipboardType, Error, MimeType, Seat, get_contents, get_mime_types};
-
-#[cfg(target_os = "linux")]
-pub fn read_wayland_clipboard(tx: &Sender<(String, String)>) -> Result<(), Error> {
+pub fn read_wayland_clipboar1d(tx: &Sender<(String, String)>) -> Result<(), Error> {
     use crate::{get_global_bool, set_global_bool};
+    use std::collections::HashSet;
+    use std::io::Read;
+    use wl_clipboard_rs::paste::{
+        ClipboardType, Error, MimeType, Seat, get_contents, get_mime_types,
+    };
 
     if get_global_bool() {
         let typ: HashSet<String> = get_mime_types(ClipboardType::Regular, Seat::Unspecified)?;
@@ -83,10 +76,13 @@ impl<'a> ClipboardHandler for Manager<'a> {
             eprintln!("{:?}", types);
 
             if let Ok(val) = ctx.get_image() {
-                match write_img_json(val, String::from("os")) {
-                    Ok(_) => (),
-                    Err(err) => eprintln!("{:?}", err),
-                }
+                println!("img");
+                write_to_json(
+                    val.to_png().unwrap().get_bytes().to_vec(),
+                    String::from("image/png"),
+                    String::from("os"),
+                    &self.tx,
+                );
             } else if let Ok(val) = ctx.get_text() {
                 write_to_json(
                     val.into_bytes(),
@@ -107,33 +103,6 @@ pub fn write_to_json(data: Vec<u8>, typ: String, device: String, tx: &Sender<(St
         Ok(_) => (),
         Err(err) => eprintln!("{}", err),
     }
-}
-
-fn write_img_json(img: RustImageData, os: String) -> Result<(), io::Error> {
-    let time = Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
-
-    let path = crate::get_path().join(format!("{}", time));
-
-    fs::create_dir_all(path.to_str().unwrap())?;
-
-    let image = img.to_png().expect("msg");
-
-    let json_data = Data::new(image.get_bytes().to_vec(), "IMG".to_string(), os, false);
-    let json_data = serde_json::to_string_pretty(&json_data)?;
-
-    let img_path = path.join("img.png");
-    let img_path_str = img_path
-        .to_str()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Invalid UTF-8 in path"))?;
-
-    image
-        .save_to_path(img_path_str)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Failed to save image: {e}")))?;
-
-    let mut file = File::create(&path.join("data.json"))?;
-    file.write_all(json_data.as_bytes())?;
-
-    Ok(())
 }
 
 pub fn parse_wayland_clipboard(typ: String, data: Vec<u8>, tx: &Sender<(String, String)>) {

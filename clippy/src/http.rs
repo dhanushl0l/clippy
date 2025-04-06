@@ -1,3 +1,5 @@
+use crate::write_clipboard::copy_to_clipboard;
+use crate::{UserData, extract_zip};
 use core::time;
 use reqwest::{
     Error,
@@ -5,9 +7,7 @@ use reqwest::{
 };
 use std::{fs::File, thread, time::Duration};
 
-use crate::{UserData, extract_zip, write_clipboard::copy_to_clipboard};
-
-const SERVER: &str = "http://127.0.0.1:8080";
+const SERVER: &str = "http://192.168.1.106:8080";
 
 pub fn send(file_path: &str, id: &str, userdata: &UserData, client: &Client) -> Result<(), String> {
     let _file = File::open(&file_path).map_err(|e| format!("File error: {}", e))?;
@@ -77,7 +77,7 @@ pub fn download(userdata: &UserData, client: &Client) -> Result<(), String> {
         Err(_) => (),
     }
 
-    copy_to_clipboard(userdata)?;
+    copy_to_clipboard(userdata).map_err(|err| format!("{}", err))?;
 
     Ok(())
 }

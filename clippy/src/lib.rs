@@ -76,11 +76,11 @@ impl Data {
     pub fn save_image(&self, time: &str) -> Result<(), io::Error> {
         let mut path: PathBuf = crate::get_path();
         path.pop();
-        let path: PathBuf = path.join("image").join(time);
+        let path: PathBuf = path.join("image");
 
         fs::create_dir_all(&path)?;
 
-        let mut img_file = File::create(path.join("img.png"))?;
+        let mut img_file = File::create(path.join(format!("{}.png", time)))?;
 
         img_file.write_all(&self.data)?;
 
