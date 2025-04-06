@@ -134,6 +134,10 @@ async fn get(
     }
 }
 
+async fn health() -> impl Responder {
+    HttpResponse::Ok()
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     env_logger::init();
@@ -147,6 +151,7 @@ async fn main() -> std::io::Result<()> {
             .route("/update", web::get().to(update))
             .route("/signin", web::get().to(signin))
             .route("/get", web::get().to(get))
+            .route("/health", web::get().to(health))
     })
     .bind(("0.0.0.0", 8080))?
     .run()

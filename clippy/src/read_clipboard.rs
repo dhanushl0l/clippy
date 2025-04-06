@@ -80,22 +80,10 @@ impl<'a> ClipboardHandler for Manager<'a> {
             let ctx = &self.ctx;
             let types = ctx.available_formats().unwrap();
 
-            // debug
-            if env::var("DEBUG").is_ok() {
-                eprintln!("{:?}", types);
-
-                let content = ctx.get_text().unwrap_or("".to_string());
-
-                println!("txt={}", content);
-            }
+            eprintln!("{:?}", types);
 
             if let Ok(val) = ctx.get_image() {
-                let data: Vec<u8> = ctx
-                    .get_text()
-                    .map(|s| s.as_bytes().to_vec())
-                    .unwrap_or_default();
-
-                match write_img_json(val, String::from("os"), data) {
+                match write_img_json(val, String::from("os")) {
                     Ok(_) => (),
                     Err(err) => eprintln!("{:?}", err),
                 }
@@ -121,28 +109,29 @@ pub fn write_to_json(data: Vec<u8>, typ: String, device: String, tx: &Sender<(St
     }
 }
 
-fn write_img_json(img: RustImageData, os: String, file_data: Vec<u8>) -> Result<(), io::Error> {
+fn write_img_json(img: RustImageData, os: String) -> Result<(), io::Error> {
     let time = Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
 
     let path = crate::get_path().join(format!("{}", time));
 
     fs::create_dir_all(path.to_str().unwrap())?;
 
-    let json_data = Data::new(file_data, "IMG".to_string(), os, false);
+    let image = img.to_png().expect("msg");
 
+    let json_data = Data::new(image.get_bytes().to_vec(), "IMG".to_string(), os, false);
     let json_data = serde_json::to_string_pretty(&json_data)?;
 
-    match img
-        .to_png()
-        .expect("error exporting img")
-        .save_to_path(path.join("img.png").to_str().expect("error exporting img"))
-    {
-        Ok(_) => {
-            let mut file = File::create(&path.join("data.json"))?;
-            file.write_all(json_data.as_bytes())?;
-        }
-        Err(err) => eprint!("{:?}", err),
-    };
+    let img_path = path.join("img.png");
+    let img_path_str = img_path
+        .to_str()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Invalid UTF-8 in path"))?;
+
+    image
+        .save_to_path(img_path_str)
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Failed to save image: {e}")))?;
+
+    let mut file = File::create(&path.join("data.json"))?;
+    file.write_all(json_data.as_bytes())?;
 
     Ok(())
 }
