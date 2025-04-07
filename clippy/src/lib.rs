@@ -2,6 +2,8 @@ pub mod http;
 pub mod read_clipboard;
 pub mod write_clipboard;
 
+use base64::Engine;
+use base64::engine::general_purpose;
 use bytes::Bytes;
 use chrono::prelude::Utc;
 use serde::{Deserialize, Serialize};
@@ -21,14 +23,14 @@ use zip::ZipArchive;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Data {
-    data: Vec<u8>,
+    data: String,
     typ: String,
     device: String,
     pined: bool,
 }
 
 impl Data {
-    pub fn new(data: Vec<u8>, typ: String, device: String, pined: bool) -> Self {
+    pub fn new(data: String, typ: String, device: String, pined: bool) -> Self {
         Data {
             data,
             typ,
@@ -63,7 +65,15 @@ impl Data {
 
     pub fn get_data(&self) -> Option<String> {
         if !self.typ.starts_with("image/") {
-            Some(String::from_utf8_lossy(&self.data).into_owned())
+            Some(self.data.clone())
+        } else {
+            None
+        }
+    }
+
+    pub fn get_image(&self) -> Option<Vec<u8>> {
+        if self.typ.starts_with("image/") {
+            Some(general_purpose::STANDARD.decode(&self.data).unwrap())
         } else {
             None
         }
@@ -82,7 +92,9 @@ impl Data {
 
         let mut img_file = File::create(path.join(format!("{}.png", time)))?;
 
-        img_file.write_all(&self.data)?;
+        let data: Vec<u8> = self.get_image().unwrap();
+
+        img_file.write_all(&data)?;
 
         Ok(())
     }

@@ -1,10 +1,7 @@
-use crate::write_clipboard::copy_to_clipboard;
+use crate::write_clipboard::{copy_to_clipboard, copy_to_linux};
 use crate::{UserData, extract_zip};
 use core::time;
-use reqwest::{
-    Error,
-    blocking::{Client, multipart},
-};
+use reqwest::blocking::{Client, multipart};
 use std::{fs::File, thread, time::Duration};
 
 const SERVER: &str = "http://192.168.1.106:8080";
@@ -77,8 +74,11 @@ pub fn download(userdata: &UserData, client: &Client) -> Result<(), String> {
         Err(_) => (),
     }
 
+    #[cfg(not(target_os = "linux"))]
     copy_to_clipboard(userdata).map_err(|err| format!("{}", err))?;
 
+    #[cfg(target_os = "linux")]
+    copy_to_linux(userdata).map_err(|err| format!("{}", err))?;
     Ok(())
 }
 

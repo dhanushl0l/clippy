@@ -1132,6 +1132,7 @@ dependencies = [
 name = "clippy"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "bytes",
  "chrono",
  "clipboard-rs",
@@ -1165,6 +1166,7 @@ dependencies = [
  "actix-web",
  "actix-web-actors",
  "env_logger",
+ "flate2",
  "futures-util",
  "log",
  "rand 0.9.0",

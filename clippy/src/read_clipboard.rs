@@ -1,16 +1,18 @@
 use crate::{Data, get_global_bool, set_global_bool};
+use base64::Engine;
+use base64::engine::general_purpose;
 use clipboard_rs::common::RustImage;
 use clipboard_rs::{Clipboard, ClipboardContext, ClipboardHandler};
 use std::sync::mpsc::Sender;
 
 #[cfg(target_os = "linux")]
-pub fn read_wayland_clipboar1d(tx: &Sender<(String, String)>) -> Result<(), Error> {
+pub fn read_wayland_clipboard(
+    tx: &Sender<(String, String)>,
+) -> Result<(), wl_clipboard_rs::paste::Error> {
     use crate::{get_global_bool, set_global_bool};
     use std::collections::HashSet;
     use std::io::Read;
-    use wl_clipboard_rs::paste::{
-        ClipboardType, Error, MimeType, Seat, get_contents, get_mime_types,
-    };
+    use wl_clipboard_rs::paste::{ClipboardType, MimeType, Seat, get_contents, get_mime_types};
 
     if get_global_bool() {
         let typ: HashSet<String> = get_mime_types(ClipboardType::Regular, Seat::Unspecified)?;
@@ -98,6 +100,7 @@ impl<'a> ClipboardHandler for Manager<'a> {
 }
 
 pub fn write_to_json(data: Vec<u8>, typ: String, device: String, tx: &Sender<(String, String)>) {
+    let data = compress_str(data).unwrap();
     let data = Data::new(data, typ, device, false);
     match data.write_to_json(tx) {
         Ok(_) => (),
@@ -108,9 +111,20 @@ pub fn write_to_json(data: Vec<u8>, typ: String, device: String, tx: &Sender<(St
 pub fn parse_wayland_clipboard(typ: String, data: Vec<u8>, tx: &Sender<(String, String)>) {
     println!("{}", typ);
 
-    let result = Data::new(data, typ, "os".to_owned(), false);
+    let json_data;
+    if !typ.starts_with("image/") {
+        json_data = String::from_utf8(data).unwrap_or("".to_string());
+    } else {
+        json_data = compress_str(data).unwrap();
+    }
+
+    let result = Data::new(json_data, typ, "os".to_owned(), false);
     match result.write_to_json(tx) {
         Ok(_) => (),
         Err(err) => eprintln!("{:?}", err),
     }
+}
+
+fn compress_str(data: Vec<u8>) -> Result<String, ()> {
+    Ok(general_purpose::STANDARD.encode(data))
 }
