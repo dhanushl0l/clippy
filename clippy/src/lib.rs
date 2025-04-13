@@ -1,11 +1,13 @@
 pub mod http;
 pub mod read_clipboard;
+pub mod user;
 pub mod write_clipboard;
 
 use base64::Engine;
 use base64::engine::general_purpose;
 use bytes::Bytes;
 use chrono::prelude::Utc;
+use log::{debug, error, warn};
 use serde::{Deserialize, Serialize};
 use std::io::{Cursor, Error, Write};
 use std::path::Path;
@@ -57,7 +59,11 @@ impl Data {
 
         match tx.send((file_path.to_str().unwrap().into(), time)) {
             Ok(_) => (),
-            Err(err) => eprintln!("{}", err),
+            Err(err) => warn!(
+                "Failed to send file '{}' to channel: {}",
+                file_path.display(),
+                err
+            ),
         }
 
         Ok(())
@@ -144,7 +150,7 @@ impl UserData {
             }
         }
 
-        println!("{:?}", temp);
+        debug!("{:?}", temp);
 
         Self {
             data: Arc::new(Mutex::new(temp)),
@@ -259,7 +265,7 @@ pub fn extract_zip(data: Bytes) -> Result<Vec<String>, zip::result::ZipError> {
 
     match store_image(&id, target_dir) {
         Ok(_) => (),
-        Err(err) => eprintln!("{}", err),
+        Err(err) => error!("Failed to store image file: {}", err),
     }
     Ok(id)
 }
@@ -282,7 +288,7 @@ pub fn store_image(id: &[String], target_dir: PathBuf) -> Result<(), Error> {
 pub fn set_global_bool(value: bool) {
     let mut path = get_path();
     if let Err(e) = fs::create_dir_all(path.parent().unwrap()) {
-        eprintln!("Failed to create directories: {}", e);
+        error!("Failed to create directories: {}", e);
         return;
     }
 
@@ -291,11 +297,11 @@ pub fn set_global_bool(value: bool) {
 
     if value {
         if let Err(e) = fs::remove_file(&path) {
-            eprintln!("Failed to delete file: {}", e);
+            error!("Failed to delete state file: {}", e);
         }
     } else {
         if let Err(e) = fs::File::create(&path) {
-            eprintln!("Failed to create file: {}", e);
+            error!("Failed to create state file: {}", e);
         }
     }
 }

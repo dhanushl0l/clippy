@@ -1,6 +1,7 @@
-use crate::write_clipboard::{copy_to_clipboard, copy_to_linux};
+use crate::write_clipboard::copy_to_linux;
 use crate::{UserData, extract_zip};
 use core::time;
+use log::{debug, info, warn};
 use reqwest::blocking::{Client, multipart};
 use std::{fs::File, thread, time::Duration};
 
@@ -13,20 +14,16 @@ pub fn send(file_path: &str, id: &str, userdata: &UserData, client: &Client) -> 
         .file("file", &file_path)
         .map_err(|e| format!("Multipart error: {}", e))?;
 
-    let response = client
+    client
         .get(&format!("{}/update", SERVER))
         .query(&[("username", "d"), ("pass", "1"), ("id", &id)])
         .multipart(form)
         .send()
         .map_err(|e| format!("Request error: {}", e))?;
 
-    println!("Status: {}", response.status());
-    let body = response
-        .text()
-        .unwrap_or_else(|_| "<Failed to read body>".to_string());
+    info!("Sent file [{}] successfully.", id);
 
     userdata.add(id.to_string());
-    println!("Body: {}", body);
 
     Ok(())
 }
@@ -68,7 +65,8 @@ pub fn download(userdata: &UserData, client: &Client) -> Result<(), String> {
 
     match extract_zip(body) {
         Ok(val) => {
-            println!("{:?}", &val);
+            info!("Successfully fetched data from server.");
+            debug!("{:?}", &val);
             userdata.add_vec(val)
         }
         Err(_) => (),
@@ -83,6 +81,7 @@ pub fn download(userdata: &UserData, client: &Client) -> Result<(), String> {
 }
 
 pub fn health(client: &Client) {
+    let mut log = true;
     loop {
         let response = client
             .get(format!("{}/health", SERVER))
@@ -94,11 +93,14 @@ pub fn health(client: &Client) {
                 if response.status().is_success() {
                     break;
                 } else {
-                    println!("Server is out")
+                    if log {
+                        warn!("Server is out");
+                        log = false
+                    }
                 }
             }
             Err(err) => {
-                eprintln!("{}", err);
+                debug!("{}", err);
                 thread::sleep(time::Duration::from_secs(5));
             }
         }

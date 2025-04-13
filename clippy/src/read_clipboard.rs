@@ -3,6 +3,7 @@ use base64::Engine;
 use base64::engine::general_purpose;
 use clipboard_rs::common::RustImage;
 use clipboard_rs::{Clipboard, ClipboardContext, ClipboardHandler};
+use log::{debug, error, info};
 use std::sync::mpsc::Sender;
 
 #[cfg(target_os = "linux")]
@@ -75,10 +76,10 @@ impl<'a> ClipboardHandler for Manager<'a> {
             let ctx = &self.ctx;
             let types = ctx.available_formats().unwrap();
 
-            eprintln!("{:?}", types);
+            debug!("Available types: {:?}", types);
 
             if let Ok(val) = ctx.get_image() {
-                println!("img");
+                debug!("Type img");
                 write_to_json(
                     val.to_png().unwrap().get_bytes().to_vec(),
                     String::from("image/png"),
@@ -104,12 +105,12 @@ pub fn write_to_json(data: Vec<u8>, typ: String, device: String, tx: &Sender<(St
     let data = Data::new(data, typ, device, false);
     match data.write_to_json(tx) {
         Ok(_) => (),
-        Err(err) => eprintln!("{}", err),
+        Err(err) => error!("Unable to write to json: {}", err),
     }
 }
 
 pub fn parse_wayland_clipboard(typ: String, data: Vec<u8>, tx: &Sender<(String, String)>) {
-    println!("{}", typ);
+    info!("Clipboard data stored: {}", typ);
 
     let json_data;
     if !typ.starts_with("image/") {
@@ -121,7 +122,7 @@ pub fn parse_wayland_clipboard(typ: String, data: Vec<u8>, tx: &Sender<(String, 
     let result = Data::new(json_data, typ, "os".to_owned(), false);
     match result.write_to_json(tx) {
         Ok(_) => (),
-        Err(err) => eprintln!("{:?}", err),
+        Err(err) => error!("Unable to write to json: {}", err),
     }
 }
 
