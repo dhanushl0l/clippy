@@ -80,10 +80,15 @@ fn main() {
 
     let (tx, rx) = mpsc::channel::<(String, String)>();
 
-    if user() {
-        cloud(rx);
-    } else {
-        info!("user not logged in")
+    match user() {
+        Ok(usersettings) => {
+            if let Some(sync) = usersettings.get_sync() {
+                cloud(rx);
+            }
+        }
+        Err(err) => {
+            info!("user not logged in: {}", err);
+        }
     }
 
     run(&tx)

@@ -1,16 +1,39 @@
-use crate::{Pending, UserData, get_path, http};
+use crate::{
+    Pending, UserData, UserSettings,
+    encryption_decryption::{decrypt_file, encrept_file},
+    get_path, http,
+};
 use log::{info, warn};
 use reqwest::blocking::Client;
 use std::{
+    error::Error,
+    fs::{self, create_dir},
     sync::{Arc, mpsc::Receiver},
     thread, time,
 };
 
-pub fn user() -> bool {
+const API_KEY: Option<&str> = option_env!("KEY");
+
+pub fn user() -> Result<UserSettings, Box<dyn Error>> {
     let mut user_config = get_path();
     user_config.pop();
-    user_config.push("user/.user");
-    user_config.is_file()
+    user_config.push("user");
+    if !user_config.is_dir() {
+        create_dir(&user_config)?;
+    }
+
+    user_config.push(".user");
+    if user_config.is_file() {
+        let file = fs::read(user_config)?;
+        let file = decrypt_file(API_KEY.unwrap().as_bytes(), &file).unwrap();
+        Ok(serde_json::from_str(&String::from_utf8(file).unwrap()).unwrap())
+    } else {
+        let usersettings: UserSettings = UserSettings::new();
+        let file = serde_json::to_string_pretty(&usersettings)?;
+        let file = encrept_file(API_KEY.unwrap().as_bytes(), file.as_bytes()).unwrap();
+        fs::write(&user_config, file)?;
+        Ok(usersettings)
+    }
 }
 
 pub fn cloud(rx: Receiver<(String, String)>) {

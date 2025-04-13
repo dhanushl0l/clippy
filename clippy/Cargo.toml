@@ -14,6 +14,7 @@ bytes = "1.10.1"
 env_logger = "0.11.8"
 base64 = "0.22.1"
 log = "0.4.27"
+aes-gcm = "0.10.3"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 wayland-clipboard-listener = "0.2.6"

@@ -1,3 +1,4 @@
+pub mod encryption_decryption;
 pub mod http;
 pub mod read_clipboard;
 pub mod user;
@@ -177,18 +178,38 @@ impl UserData {
     }
 }
 
-// #[derive(Serialize)]
-// pub struct UserCred {
-//     pub username: String,
-//     pub key: String,
-//     pub id: String,
-// }
+#[derive(Serialize, Deserialize, Clone)]
+pub struct UserCred {
+    pub username: String,
+    pub key: String,
+}
 
-// impl UserCred {
-//     pub fn new(username: String, key: String, id: String) -> Self {
-//         Self { username, key, id }
-//     }
-// }
+impl UserCred {
+    pub fn new(username: String, key: String) -> Self {
+        Self { username, key }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct UserSettings {
+    sync: Option<UserCred>,
+    store_image: bool,
+    encrept: Option<String>,
+}
+
+impl UserSettings {
+    pub fn new() -> Self {
+        Self {
+            sync: None,
+            store_image: true,
+            encrept: None,
+        }
+    }
+
+    pub fn get_sync(&self) -> &Option<UserCred> {
+        &self.sync
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Pending {
