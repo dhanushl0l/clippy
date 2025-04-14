@@ -6,10 +6,14 @@ use eframe::{
     run_native,
 };
 use egui::{Align, Button, Layout, RichText, Stroke, TopBottomPanel, Vec2};
-use std::{cmp::Reverse, fs};
+use std::{
+    cmp::Reverse,
+    fs::{self, DirEntry},
+};
 
 struct Clipboard {
-    data: Vec<Data>,
+    data: Vec<(Option<(Vec<u8>, (u32, u32))>, Data)>,
+    loaded: bool,
 }
 
 impl Clipboard {
@@ -22,7 +26,7 @@ impl Clipboard {
                 if entry.path().is_file() {
                     if let Ok(content) = fs::read_to_string(entry.path()) {
                         match serde_json::from_str::<Data>(&content) {
-                            Ok(file) => data.push(file),
+                            Ok(file) => data.push((file.get_image_thumbnail(&entry), file)),
                             Err(e) => {
                                 eprintln!("Failed to parse {}: {}", entry.path().display(), e)
                             }
@@ -32,7 +36,11 @@ impl Clipboard {
             }
         }
 
-        Self { data }
+        Self { data, loaded: true }
+    }
+
+    fn loaded(&mut self, state: bool) {
+        self.loaded = state;
     }
 }
 impl App for Clipboard {
@@ -42,22 +50,19 @@ impl App for Clipboard {
 
             ui.allocate_ui(Vec2::new(available_width, 0.0), |ui| {
                 ui.horizontal(|ui| {
-                    // Add some padding on the left
                     ui.add_space(20.0);
 
-                    // Expand to center Clippy
                     ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                        ui.add_space((available_width / 2.0) - 60.0); // center Clippy, adjust as needed
+                        ui.add_space((available_width / 2.0) - 60.0);
                         ui.label(RichText::new("Clippy").size(40.0));
                     });
 
-                    // Spacer to push settings button to the right
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.add_space(10.0); // right padding
 
                         let button = Button::new(RichText::new("⚙").size(20.0))
                             .min_size(Vec2::new(30.0, 30.0))
-                            .corner_radius(50.0) // ✅ updated method
+                            .corner_radius(50.0) //
                             .stroke(Stroke::new(1.0, ui.visuals().widgets.inactive.bg_fill)); // optional border
 
                         if ui.add(button).on_hover_text("Settings").clicked() {
@@ -69,15 +74,39 @@ impl App for Clipboard {
         });
         CentralPanel::default().show(ctx, |ui| {
             ScrollArea::vertical().show(ui, |ui| {
-                for i in &self.data {
+                for (image, i) in &self.data {
                     if let Some(dat) = i.get_data() {
                         if ui.button(&dat).clicked() {
-                            set_global_bool(false);
+                            set_global_bool(true);
                             #[cfg(not(target_os = "linux"))]
                             write_clipboard::push_to_clipboard("String".to_string(), dat).unwrap();
 
                             #[cfg(target_os = "linux")]
                             copy_to_linux("String".to_string(), dat);
+
+                            set_global_bool(false);
+                        }
+                    } else if let Some((image_data, (width, height))) = image {
+                        let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                            [*width as usize, *height as usize],
+                            &image_data,
+                        );
+
+                        let texture = ctx.load_texture(
+                            "thumbnail",
+                            color_image,
+                            egui::TextureOptions::LINEAR,
+                        );
+
+                        if ui.add(egui::ImageButton::new(&texture)).clicked() {
+                            set_global_bool(true);
+
+                            copy_to_linux(
+                                "image/png".to_string(),
+                                i.get_image_as_string().unwrap().to_string(),
+                            );
+
+                            set_global_bool(false);
                         }
                     }
                 }
@@ -85,6 +114,7 @@ impl App for Clipboard {
         });
     }
 }
+
 fn main() -> Result<(), eframe::Error> {
     let ui = Clipboard::new();
     let options = NativeOptions {

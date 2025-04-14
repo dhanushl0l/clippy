@@ -14,7 +14,7 @@ use std::{
 
 const API_KEY: Option<&str> = option_env!("KEY");
 
-pub fn user() -> Result<UserSettings, Box<dyn Error>> {
+pub fn get_user() -> Result<UserSettings, Box<dyn Error>> {
     let mut user_config = get_path();
     user_config.pop();
     user_config.push("user");
@@ -36,7 +36,7 @@ pub fn user() -> Result<UserSettings, Box<dyn Error>> {
     }
 }
 
-pub fn cloud(rx: Receiver<(String, String)>) {
+pub fn start_cloud(rx: Receiver<(String, String)>) {
     let user_data = UserData::build();
     let user_data1 = user_data.clone();
     let pending = Pending::new();

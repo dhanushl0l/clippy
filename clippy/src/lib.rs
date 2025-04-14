@@ -8,8 +8,10 @@ use base64::Engine;
 use base64::engine::general_purpose;
 use bytes::Bytes;
 use chrono::prelude::Utc;
+use image::ImageReader;
 use log::{debug, error, warn};
 use serde::{Deserialize, Serialize};
+use std::fs::DirEntry;
 use std::io::{Cursor, Error, Write};
 use std::path::Path;
 use std::sync::mpsc::Sender;
@@ -78,9 +80,30 @@ impl Data {
         }
     }
 
+    pub fn get_image_thumbnail(&self, id: &DirEntry) -> Option<(Vec<u8>, (u32, u32))> {
+        let mut path = get_path_image();
+        let file_nema = format!("{}.png", id.file_name().to_str().unwrap());
+        path.push(file_nema);
+
+        let image = ImageReader::open(path).ok()?.decode().ok()?;
+
+        let rgba = image.to_rgba8();
+
+        let size = (rgba.width(), rgba.height());
+        Some((rgba.into_raw(), size))
+    }
+
     pub fn get_image(&self) -> Option<Vec<u8>> {
         if self.typ.starts_with("image/") {
             Some(general_purpose::STANDARD.decode(&self.data).unwrap())
+        } else {
+            None
+        }
+    }
+
+    pub fn get_image_as_string(&self) -> Option<&str> {
+        if self.typ.starts_with("image/") {
+            Some(&self.data)
         } else {
             None
         }
@@ -93,15 +116,29 @@ impl Data {
     pub fn save_image(&self, time: &str) -> Result<(), io::Error> {
         let mut path: PathBuf = crate::get_path();
         path.pop();
-        let path: PathBuf = path.join("image");
+        let path = path.join("image");
 
         fs::create_dir_all(&path)?;
 
-        let mut img_file = File::create(path.join(format!("{}.png", time)))?;
+        let img_path = path.join(format!("{}.png", time));
+        let mut img_file = File::create(img_path)?;
 
-        let data: Vec<u8> = self.get_image().unwrap();
+        let data: Vec<u8> = self
+            .get_image()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Failed to get image data"))?;
 
-        img_file.write_all(&data)?;
+        let image = image::load_from_memory(&data).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Image decode error: {e}"),
+            )
+        })?;
+
+        let resized = image.thumbnail(128, 128);
+
+        resized
+            .write_to(&mut img_file, image::ImageFormat::Png)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Image write error: {e}")))?;
 
         Ok(())
     }
@@ -255,6 +292,35 @@ pub fn get_path() -> PathBuf {
     {
         let home = env::var("APPDATA").unwrap_or_else(|_| "C:\\Users\\Public\\AppData".to_string());
         return [home.as_str(), "clippy\\data"].iter().collect();
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    {
+        compile_error!("Unsupported operating system");
+    }
+}
+
+pub fn get_path_image() -> PathBuf {
+    #[cfg(target_os = "linux")]
+    {
+        let home = env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+        return [home.as_str(), ".local/share/clippy/image"]
+            .iter()
+            .collect();
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let home = env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+        return [home.as_str(), ".local/share/clippy/image"]
+            .iter()
+            .collect();
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let home = env::var("APPDATA").unwrap_or_else(|_| "C:\\Users\\Public\\AppData".to_string());
+        return [home.as_str(), "clippy\\image"].iter().collect();
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]

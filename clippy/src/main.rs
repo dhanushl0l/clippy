@@ -1,7 +1,7 @@
 use clipboard_rs::{ClipboardWatcher, ClipboardWatcherContext};
 use clippy::read_clipboard;
-use clippy::user::cloud;
-use clippy::user::user;
+use clippy::user::get_user;
+use clippy::user::start_cloud;
 use env_logger::{Builder, Env};
 use log::debug;
 use log::{error, info, warn};
@@ -80,10 +80,10 @@ fn main() {
 
     let (tx, rx) = mpsc::channel::<(String, String)>();
 
-    match user() {
+    match get_user() {
         Ok(usersettings) => {
             if let Some(sync) = usersettings.get_sync() {
-                cloud(rx);
+                start_cloud(rx);
             }
         }
         Err(err) => {
