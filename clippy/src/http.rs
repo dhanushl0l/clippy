@@ -1,5 +1,4 @@
-use crate::write_clipboard::copy_to_linux;
-use crate::{UserData, extract_zip};
+use crate::{UserData, extract_zip, write_clipboard::copy_to_clipboard};
 use core::time;
 use log::{debug, info, warn};
 use reqwest::blocking::{Client, multipart};

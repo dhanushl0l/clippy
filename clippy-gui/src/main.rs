@@ -1,5 +1,4 @@
-use clippy::{Data, get_path, set_global_bool};
-use clippy_gui::copy_to_linux;
+use clippy::{Data, get_path, set_global_bool, write_clipboard};
 use eframe::{
     App, NativeOptions,
     egui::{CentralPanel, ScrollArea, ViewportBuilder},
@@ -8,7 +7,7 @@ use eframe::{
 use egui::{Align, Button, Layout, RichText, Stroke, TopBottomPanel, Vec2};
 use std::{
     cmp::Reverse,
-    fs::{self, DirEntry},
+    fs::{self},
 };
 
 struct Clipboard {
@@ -82,7 +81,7 @@ impl App for Clipboard {
                             write_clipboard::push_to_clipboard("String".to_string(), dat).unwrap();
 
                             #[cfg(target_os = "linux")]
-                            copy_to_linux("String".to_string(), dat);
+                            clippy_gui::copy_to_linux("String".to_string(), dat);
 
                             set_global_bool(false);
                         }
@@ -101,10 +100,18 @@ impl App for Clipboard {
                         if ui.add(egui::ImageButton::new(&texture)).clicked() {
                             set_global_bool(true);
 
-                            copy_to_linux(
+                            #[cfg(target_os = "linux")]
+                            clippy_gui::copy_to_linux(
                                 "image/png".to_string(),
                                 i.get_image_as_string().unwrap().to_string(),
                             );
+
+                            #[cfg(not(target_os = "linux"))]
+                            write_clipboard::push_to_clipboard(
+                                "image/png".to_string(),
+                                i.get_image_as_string().unwrap().to_string(),
+                            )
+                            .unwrap();
 
                             set_global_bool(false);
                         }

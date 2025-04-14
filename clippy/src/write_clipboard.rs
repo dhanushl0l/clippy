@@ -1,4 +1,5 @@
 use crate::{Data, UserData, get_path};
+use base64::{Engine, engine::general_purpose};
 use clipboard_rs::{Clipboard, ClipboardContext, RustImageData, common::RustImage};
 use std::{error::Error, fs::File, io::Read};
 
@@ -23,18 +24,18 @@ fn copy_to_clipboard_wl(userdata: &UserData) -> Result<(), String> {
     push_to_clipboard_wl(data.typ, data.data)
 }
 
+#[cfg(target_os = "linux")]
 pub fn push_to_clipboard_wl(typ: String, data: String) -> Result<(), String> {
-    use base64::{Engine, engine::general_purpose};
     use wl_clipboard_rs::copy::{ClipboardType, MimeType, Options, Source};
 
     let mut opts = Options::new();
     opts.clipboard(ClipboardType::Regular);
 
     if typ.starts_with("image/") {
-        let data = general_purpose::STANDARD.decode(data).unwrap();
-        opts.clone()
+        let data = opts
+            .clone()
             .copy(
-                Source::Bytes(data.into_boxed_slice()),
+                Source::Bytes(string_to_vecu8(data).into_boxed_slice()),
                 MimeType::Specific("image/png".to_string()),
             )
             .map_err(|err| format!("{}", err))?;
@@ -64,8 +65,9 @@ pub fn copy_to_clipboard(userdata: &UserData) -> Result<(), Box<dyn Error + Send
 
 pub fn push_to_clipboard(typ: String, data: String) -> Result<(), Box<dyn Error + Send + Sync>> {
     let ctx = ClipboardContext::new()?;
+
     if typ.starts_with("image/") {
-        ctx.set_image(RustImageData::from_bytes(&data.into_bytes())?)?;
+        ctx.set_image(RustImageData::from_bytes(&string_to_vecu8(data))?)?;
     } else {
         ctx.set_text(data)?;
     }
@@ -88,4 +90,8 @@ fn read_data(file: String) -> Data {
     ));
 
     data
+}
+
+pub fn string_to_vecu8(data: String) -> Vec<u8> {
+    general_purpose::STANDARD.decode(data).unwrap()
 }

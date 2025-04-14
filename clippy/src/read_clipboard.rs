@@ -1,6 +1,5 @@
 use crate::{Data, get_global_bool, set_global_bool};
-use base64::Engine;
-use base64::engine::general_purpose;
+use base64::{Engine, engine::general_purpose};
 use clipboard_rs::common::RustImage;
 use clipboard_rs::{Clipboard, ClipboardContext, ClipboardHandler};
 use log::{debug, error, info};
@@ -101,7 +100,12 @@ impl<'a> ClipboardHandler for Manager<'a> {
 }
 
 pub fn write_to_json(data: Vec<u8>, typ: String, device: String, tx: &Sender<(String, String)>) {
-    let data = compress_str(data).unwrap();
+    let data = if typ.starts_with("image/") {
+        compress_str(data).unwrap()
+    } else {
+        String::from_utf8(data).unwrap()
+    };
+
     let data = Data::new(data, typ, device, false);
     match data.write_to_json(tx) {
         Ok(_) => (),
