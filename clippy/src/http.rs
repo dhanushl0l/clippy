@@ -1,4 +1,7 @@
-use crate::{UserData, extract_zip, write_clipboard::copy_to_clipboard};
+use crate::{
+    UserData, extract_zip,
+    write_clipboard::{self},
+};
 use core::time;
 use log::{debug, info, warn};
 use reqwest::blocking::{Client, multipart};
@@ -72,10 +75,10 @@ pub fn download(userdata: &UserData, client: &Client) -> Result<(), String> {
     }
 
     #[cfg(not(target_os = "linux"))]
-    copy_to_clipboard(userdata).map_err(|err| format!("{}", err))?;
+    write_clipboard::copy_to_clipboard(userdata).map_err(|err| format!("{}", err))?;
 
     #[cfg(target_os = "linux")]
-    copy_to_linux(userdata).map_err(|err| format!("{}", err))?;
+    write_clipboard::copy_to_linux(userdata).map_err(|err| format!("{}", err))?;
     Ok(())
 }
 
