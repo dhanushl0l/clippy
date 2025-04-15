@@ -233,6 +233,7 @@ pub struct UserSettings {
     pub store_image: bool,
     pub click_on_quit: bool,
     encrept: Option<String>,
+    pub intrevel: u32,
 }
 
 impl UserSettings {
@@ -242,6 +243,7 @@ impl UserSettings {
             store_image: true,
             encrept: None,
             click_on_quit: true,
+            intrevel: 3,
         }
     }
 
