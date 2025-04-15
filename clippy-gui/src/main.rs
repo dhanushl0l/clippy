@@ -1,4 +1,4 @@
-use clippy::{Data, get_path, set_global_bool, write_clipboard};
+use clippy::{Data, UserSettings, get_path, set_global_bool, write_clipboard};
 use eframe::{
     App, NativeOptions,
     egui::{CentralPanel, ScrollArea, ViewportBuilder},
@@ -13,6 +13,7 @@ use std::{
 struct Clipboard {
     data: Vec<(Option<(Vec<u8>, (u32, u32))>, Data)>,
     loaded: bool,
+    settings: UserSettings,
 }
 
 impl Clipboard {
@@ -35,7 +36,11 @@ impl Clipboard {
             }
         }
 
-        Self { data, loaded: true }
+        Self {
+            data,
+            loaded: true,
+            settings: UserSettings::new(),
+        }
     }
 
     fn loaded(&mut self, state: bool) {
@@ -81,9 +86,13 @@ impl App for Clipboard {
                             write_clipboard::push_to_clipboard("String".to_string(), dat).unwrap();
 
                             #[cfg(target_os = "linux")]
-                            clippy_gui::copy_to_linux("String".to_string(), dat);
+                            clippy_gui::copy_to_linux("text/plain;charset=utf-8".to_string(), dat);
 
                             set_global_bool(false);
+
+                            if self.settings.click_on_quit {
+                                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                            }
                         }
                     } else if let Some((image_data, (width, height))) = image {
                         let color_image = egui::ColorImage::from_rgba_unmultiplied(
@@ -114,6 +123,10 @@ impl App for Clipboard {
                             .unwrap();
 
                             set_global_bool(false);
+
+                            if self.settings.click_on_quit {
+                                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                            }
                         }
                     }
                 }

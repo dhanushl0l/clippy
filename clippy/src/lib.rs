@@ -230,7 +230,8 @@ impl UserCred {
 #[derive(Serialize, Deserialize)]
 pub struct UserSettings {
     sync: Option<UserCred>,
-    store_image: bool,
+    pub store_image: bool,
+    pub click_on_quit: bool,
     encrept: Option<String>,
 }
 
@@ -240,6 +241,7 @@ impl UserSettings {
             sync: None,
             store_image: true,
             encrept: None,
+            click_on_quit: true,
         }
     }
 
