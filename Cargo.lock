@@ -1254,6 +1254,8 @@ dependencies = [
  "eframe",
  "egui",
  "env_logger",
+ "reqwest",
+ "serde",
  "serde_json",
 ]
 
@@ -1266,6 +1268,7 @@ dependencies = [
  "actix-multipart",
  "actix-web",
  "actix-web-actors",
+ "clippy",
  "env_logger",
  "flate2",
  "futures-util",

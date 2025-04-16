@@ -8,11 +8,13 @@ use base64::Engine;
 use base64::engine::general_purpose;
 use bytes::Bytes;
 use chrono::prelude::Utc;
+use encryption_decryption::{decrypt_file, encrept_file};
 use image::ImageReader;
 use log::{debug, error, warn};
 use serde::{Deserialize, Serialize};
-use std::fs::DirEntry;
-use std::io::{Cursor, Error, Write};
+use std::error::Error;
+use std::fs::{DirEntry, create_dir, create_dir_all};
+use std::io::{Cursor, Write};
 use std::path::Path;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
@@ -25,6 +27,8 @@ use std::{
     path::PathBuf,
 };
 use zip::ZipArchive;
+
+const API_KEY: Option<&str> = option_env!("KEY");
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Data {
@@ -215,7 +219,7 @@ impl UserData {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct UserCred {
     pub username: String,
     pub key: String,
@@ -247,8 +251,62 @@ impl UserSettings {
         }
     }
 
+    pub fn remove_user(&mut self) {
+        self.sync = None;
+    }
+
     pub fn get_sync(&self) -> &Option<UserCred> {
         &self.sync
+    }
+
+    pub fn set_user(&mut self, val: UserCred) {
+        self.sync = Some(val)
+    }
+
+    pub fn build_user() -> Result<Self, Box<dyn Error>> {
+        let mut user_config = get_path();
+        user_config.pop();
+        user_config.push("user");
+        if !user_config.is_dir() {
+            create_dir(&user_config)?;
+        }
+
+        user_config.push(".user");
+        if user_config.is_file() {
+            let file = fs::read(user_config)?;
+            let file = decrypt_file(API_KEY.unwrap().as_bytes(), &file).unwrap();
+            Ok(serde_json::from_str(&String::from_utf8(file).unwrap()).unwrap())
+        } else {
+            let usersettings: UserSettings = UserSettings::new();
+            let file = serde_json::to_string_pretty(&usersettings)?;
+            let file = encrept_file(API_KEY.unwrap().as_bytes(), file.as_bytes()).unwrap();
+            fs::write(&user_config, file)?;
+            Ok(usersettings)
+        }
+    }
+
+    pub fn write(&self) -> Result<(), Box<dyn Error>> {
+        let mut user_config = get_path();
+        user_config.pop();
+        user_config.push("user");
+
+        // Ensure directory exists
+        if !user_config.is_dir() {
+            create_dir_all(&user_config)?;
+        }
+
+        // Create file path
+        user_config.push(".user");
+
+        // Serialize and encrypt
+        let data = serde_json::to_vec_pretty(self)?;
+        let en_data = encrept_file(API_KEY.unwrap().as_bytes(), &data)
+            .map_err(|e| Box::<dyn std::error::Error>::from(e.to_string()))?;
+
+        let mut file = File::create(&user_config)?;
+        file.write_all(&en_data)?;
+
+        Ok(())
     }
 }
 
@@ -277,6 +335,17 @@ impl Pending {
     }
 
     pub fn remove(&self) {}
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Username {
+    pub user: String,
+}
+
+impl Username {
+    pub fn new(user: String) -> Self {
+        Self { user }
+    }
 }
 
 pub fn get_path() -> PathBuf {
@@ -361,7 +430,7 @@ pub fn extract_zip(data: Bytes) -> Result<Vec<String>, zip::result::ZipError> {
     Ok(id)
 }
 
-pub fn store_image(id: &[String], target_dir: PathBuf) -> Result<(), Error> {
+pub fn store_image(id: &[String], target_dir: PathBuf) -> Result<(), Box<dyn Error>> {
     for i in id {
         let mut path = target_dir.clone();
         path.push(i);

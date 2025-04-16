@@ -23,7 +23,5 @@ pub fn decrypt_file(key: &[u8], data: &[u8]) -> Result<Vec<u8>, Error> {
     let (nonce_bytes, ciphertext) = data.split_at(12);
     let nonce = Nonce::from_slice(nonce_bytes);
 
-    Ok(cipher
-        .decrypt(nonce, ciphertext)
-        .expect("decryption failed"))
+    Ok(cipher.decrypt(nonce, ciphertext)?)
 }

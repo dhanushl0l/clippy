@@ -7,7 +7,7 @@ use log::{debug, info, warn};
 use reqwest::blocking::{Client, multipart};
 use std::{fs::File, thread, time::Duration};
 
-const SERVER: &str = "http://192.168.1.106:8080";
+pub const SERVER: &str = "http://127.0.0.1:8080";
 
 pub fn send(file_path: &str, id: &str, userdata: &UserData, client: &Client) -> Result<(), String> {
     let _file = File::open(&file_path).map_err(|e| format!("File error: {}", e))?;

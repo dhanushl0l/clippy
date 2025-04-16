@@ -15,10 +15,10 @@ pub const CRED_PATH: &str = "credentials/users";
 const DATABASE_PATH: &str = "data-base/users";
 const MAX_SIZE: usize = 100 * 1024 * 1024;
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct Credentials {
-    username: String,
-    pass: String,
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+pub struct UserCred {
+    pub username: String,
+    pub key: String,
 }
 
 #[derive(Debug, Clone)]
@@ -32,12 +32,24 @@ impl UserState {
             data: Arc::new(Mutex::new(HashMap::new())),
         };
 
-        if let Ok(users) = fs::read_dir(DATABASE_PATH) {
+        let base_path = Path::new(CRED_PATH);
+
+        if let Ok(users) = fs::read_dir(base_path) {
             for user in users.flatten() {
-                if user.path().is_dir() {
+                let path = user.path();
+
+                if path.is_dir() && path.parent() == Some(base_path) {
                     if let Some(folder_name) = user.file_name().to_str() {
                         let mut files = BTreeSet::new();
-                        if let Ok(entries) = fs::read_dir(user.path()) {
+                        let base_path = user.path();
+                        let prefix = Path::new(CRED_PATH);
+
+                        let path = if let Ok(suffix) = base_path.strip_prefix(prefix) {
+                            Path::new(DATABASE_PATH).join(suffix)
+                        } else {
+                            panic!("path conflict on startup")
+                        };
+                        if let Ok(entries) = fs::read_dir(path) {
                             for entry in entries.flatten() {
                                 if let Some(file_name) = entry.file_name().to_str() {
                                     files.insert(file_name.to_string());
@@ -104,9 +116,9 @@ impl UserState {
     }
 }
 
-impl Credentials {
-    pub fn new(username: String, pass: String) -> Self {
-        Credentials { username, pass }
+impl UserCred {
+    pub fn new(username: String, key: String) -> Self {
+        UserCred { username, key }
     }
 
     pub fn write(&self) -> Result<(), std::io::Error> {
@@ -131,12 +143,12 @@ impl Credentials {
     }
 
     pub fn authentication(&self, key: String) -> bool {
-        if key == self.pass { true } else { false }
+        if key == self.key { true } else { false }
     }
 }
 
 #[derive(Deserialize)]
-pub struct UserCred {
+pub struct UserCredState {
     pub username: String,
     pub key: String,
     pub id: String,

@@ -12,30 +12,6 @@ use std::{
     thread, time,
 };
 
-const API_KEY: Option<&str> = option_env!("KEY");
-
-pub fn get_user() -> Result<UserSettings, Box<dyn Error>> {
-    let mut user_config = get_path();
-    user_config.pop();
-    user_config.push("user");
-    if !user_config.is_dir() {
-        create_dir(&user_config)?;
-    }
-
-    user_config.push(".user");
-    if user_config.is_file() {
-        let file = fs::read(user_config)?;
-        let file = decrypt_file(API_KEY.unwrap().as_bytes(), &file).unwrap();
-        Ok(serde_json::from_str(&String::from_utf8(file).unwrap()).unwrap())
-    } else {
-        let usersettings: UserSettings = UserSettings::new();
-        let file = serde_json::to_string_pretty(&usersettings)?;
-        let file = encrept_file(API_KEY.unwrap().as_bytes(), file.as_bytes()).unwrap();
-        fs::write(&user_config, file)?;
-        Ok(usersettings)
-    }
-}
-
 pub fn start_cloud(rx: Receiver<(String, String)>) {
     let user_data = UserData::build();
     let user_data1 = user_data.clone();
