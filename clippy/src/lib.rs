@@ -33,9 +33,9 @@ const API_KEY: Option<&str> = option_env!("KEY");
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Data {
     data: String,
-    typ: String,
+    pub typ: String,
     device: String,
-    pined: bool,
+    pub pined: bool,
 }
 
 impl Data {
@@ -115,6 +115,10 @@ impl Data {
 
     pub fn get_pined(&self) -> bool {
         self.pined
+    }
+
+    pub fn change_pined(&mut self) {
+        self.pined = !self.pined
     }
 
     pub fn save_image(&self, time: &str) -> Result<(), io::Error> {
@@ -236,18 +240,29 @@ pub struct UserSettings {
     sync: Option<UserCred>,
     pub store_image: bool,
     pub click_on_quit: bool,
+    pub auto_sync: bool,
     encrept: Option<String>,
     pub intrevel: u32,
+    pub theme: SystemTheam,
+}
+
+#[derive(Serialize, Deserialize, PartialEq)]
+pub enum SystemTheam {
+    System,
+    Dark,
+    Light,
 }
 
 impl UserSettings {
     pub fn new() -> Self {
         Self {
             sync: None,
+            auto_sync: true,
             store_image: true,
             encrept: None,
             click_on_quit: true,
             intrevel: 3,
+            theme: SystemTheam::System,
         }
     }
 

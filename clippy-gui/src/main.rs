@@ -1,23 +1,33 @@
-use clippy::{Data, UserCred, UserSettings, get_path, set_global_bool, write_clipboard};
+use clipboard_img_widget::item_card_image;
+use clipboard_widget::item_card;
+use clippy::{
+    Data, SystemTheam, UserCred, UserSettings, get_path, set_global_bool, write_clipboard,
+};
+use clippy_gui::{Thumbnail, str_formate};
+use custom_egui_widget::toggle;
 use eframe::{
     App, NativeOptions,
     egui::{CentralPanel, ScrollArea, ViewportBuilder},
     run_native,
 };
 use egui::{
-    Align, Button, Label, Layout, Margin, RichText, Stroke, TextEdit, TextStyle, TopBottomPanel,
-    Vec2,
+    Align, Align2, Button, ComboBox, Id, Label, Layout, Margin, RichText, Stroke, TextEdit,
+    TextStyle, Theme, TopBottomPanel, Vec2,
 };
 use http::{check_user, login, signin};
 use std::{
     cmp::Reverse,
     fs::{self},
+    path::PathBuf,
 };
+mod clipboard_img_widget;
+mod clipboard_widget;
+mod custom_egui_widget;
 mod http;
 
 struct Clipboard {
-    data: Vec<(Option<(Vec<u8>, (u32, u32))>, Data)>,
-    loaded: bool,
+    data: Vec<(Thumbnail, Data, PathBuf)>,
+    changed: bool,
     settings: UserSettings,
     show_settings: bool,
     show_signin_window: bool,
@@ -26,6 +36,7 @@ struct Clipboard {
     show_login_window: bool,
     show_createuser_window: bool,
     show_error: (bool, String),
+    show_data_popup: (bool, String),
 }
 
 impl Clipboard {
@@ -35,12 +46,23 @@ impl Clipboard {
             let mut entries: Vec<_> = entries.flatten().collect();
             entries.sort_unstable_by_key(|entry| Reverse(entry.path()));
             for entry in entries {
-                if entry.path().is_file() {
-                    if let Ok(content) = fs::read_to_string(entry.path()) {
+                let path = entry.path();
+                if path.is_file() {
+                    if let Ok(content) = fs::read_to_string(&path) {
                         match serde_json::from_str::<Data>(&content) {
-                            Ok(file) => data.push((file.get_image_thumbnail(&entry), file)),
+                            Ok(file) => {
+                                if file.typ.starts_with("image/") {
+                                    if let Some(val) = file.get_image_thumbnail(&entry) {
+                                        data.push((Thumbnail::Image(val), file, path));
+                                    }
+                                } else {
+                                    if let Some(val) = file.get_data() {
+                                        data.push((Thumbnail::Text(str_formate(&val)), file, path));
+                                    }
+                                }
+                            }
                             Err(e) => {
-                                eprintln!("Failed to parse {}: {}", entry.path().display(), e)
+                                eprintln!("Failed to parse {}: {}", path.display(), e)
                             }
                         }
                     }
@@ -50,7 +72,7 @@ impl Clipboard {
 
         Self {
             data,
-            loaded: true,
+            changed: false,
             settings: match UserSettings::build_user() {
                 Ok(val) => val,
                 Err(err) => {
@@ -65,7 +87,12 @@ impl Clipboard {
             show_error: (false, String::from("")),
             username: "enter the username".to_string(),
             key: "enter the Password".to_string(),
+            show_data_popup: (false, String::new()),
         }
+    }
+
+    fn refresh(&mut self) {
+        *self = Clipboard::new();
     }
 }
 impl App for Clipboard {
@@ -73,6 +100,12 @@ impl App for Clipboard {
         let button_size = Vec2::new(100.0, 35.0);
 
         TopBottomPanel::top("footer").show(ctx, |ui| {
+            match self.settings.theme {
+                SystemTheam::System => (),
+                SystemTheam::Dark => ctx.set_visuals(egui::Visuals::dark()),
+                SystemTheam::Light => ctx.set_visuals(egui::Visuals::light()),
+            }
+
             let available_width = ui.available_width();
 
             ui.allocate_ui(Vec2::new(available_width, 0.0), |ui| {
@@ -105,9 +138,10 @@ impl App for Clipboard {
                     .open(&mut open)
                     .resizable(false)
                     .collapsible(false)
-                    .fixed_pos(ctx.screen_rect().center() - egui::vec2(150.0, 100.0))
+                    .fixed_pos(ctx.screen_rect().center() - egui::vec2(170.0, 190.0))
                     .show(ctx, |ui| {
                         egui::Frame::group(ui.style()).show(ui, |ui| {
+                            ui.set_min_width(ui.available_width());
                             ui.vertical_centered(|ui| {
                                 if let Some(user_data) = self.settings.get_sync() {
                                     ui.vertical_centered(|ui| {
@@ -339,26 +373,110 @@ impl App for Clipboard {
                                 }
                             });
                         });
-                        ui.vertical(|ui| {
-                            if ui
-                                .checkbox(&mut self.settings.store_image, "Settings")
-                                .clicked()
-                            {
+                        egui::Frame::group(ui.style()).show(ui, |ui| {
+                            ui.set_min_width(ui.available_width());
+                            ui.horizontal(|ui| {
+                                ui.label("Theme");
+                                ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
+                                    egui::ComboBox::new("theme_selector", "")
+                                        .selected_text(match self.settings.theme {
+                                            SystemTheam::System => "System",
+                                            SystemTheam::Light => "Light",
+                                            SystemTheam::Dark => "Dark",
+                                        })
+                                        .show_ui(ui, |ui| {
+                                            ui.selectable_value(
+                                                &mut self.settings.theme,
+                                                SystemTheam::System,
+                                                "System",
+                                            );
+                                            ui.selectable_value(
+                                                &mut self.settings.theme,
+                                                SystemTheam::Light,
+                                                "Light",
+                                            );
+                                            ui.selectable_value(
+                                                &mut self.settings.theme,
+                                                SystemTheam::Dark,
+                                                "Dark",
+                                            );
+                                        });
+                                });
+
                                 self.settings.write();
-                            };
-                            if ui
-                                .checkbox(&mut self.settings.click_on_quit, "Change")
-                                .clicked()
-                            {
-                                self.settings.write();
-                            };
+                            });
+
+                            ui.horizontal(|ui| {
+                                ui.label("Interval");
+                                ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(&mut self.settings.intrevel, 3..=30)
+                                                .text(""),
+                                        )
+                                        .changed()
+                                    {
+                                        self.settings.write();
+                                    }
+                                });
+                            });
+
+                            ui.horizontal(|ui| {
+                                ui.label("Store Image");
+                                ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
+                                    if ui.add(toggle(&mut self.settings.store_image)).changed() {
+                                        self.settings.write();
+                                    }
+                                });
+                            });
+
+                            ui.horizontal(|ui| {
+                                ui.label("Select to Quit");
+                                ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
+                                    if ui.add(toggle(&mut self.settings.click_on_quit)).changed() {
+                                        self.settings.write();
+                                    }
+                                });
+                            });
+
+                            ui.horizontal(|ui| {
+                                ui.label("Change");
+                                ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
+                                    if ui.add(toggle(&mut self.settings.click_on_quit)).changed() {
+                                        self.settings.write();
+                                    }
+                                });
+                            });
+
+                            ui.horizontal(|ui| {
+                                ui.label("Auto sync");
+                                ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
+                                    if ui.add(toggle(&mut self.settings.auto_sync)).changed() {
+                                        self.settings.write();
+                                    }
+                                });
+                            });
+
+                            ui.horizontal(|ui| {
+                                ui.label("Change");
+                                ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
+                                    if ui.add(toggle(&mut self.settings.click_on_quit)).changed() {
+                                        self.settings.write();
+                                    }
+                                });
+                            });
                         });
 
                         ui.separator();
 
-                        if ui.button("Close").clicked() {
-                            self.show_settings = false;
-                        }
+                        ui.vertical_centered(|ui| {
+                            ui.label("Thanks for using the app!");
+
+                            ui.hyperlink_to(
+                                "Project Repository",
+                                "https://github.com/dhanushl0l/clippy",
+                            );
+                        });
                     });
 
                 if !open {
@@ -369,67 +487,76 @@ impl App for Clipboard {
                     self.show_signin_window = false;
                 }
             }
+
+            if self.show_data_popup.0 {
+                if let Some(mouse_pos) = ctx.input(|i| i.pointer.hover_pos()) {
+                    egui::Area::new(Id::new("source"))
+                        .anchor(Align2::LEFT_TOP, mouse_pos.to_vec2())
+                        .interactable(false)
+                        .show(ctx, |ui| {
+                            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                                ui.label(&self.show_data_popup.1);
+                            });
+                        });
+
+                    let clicked = ctx.input(|i| if i.pointer.any_click() { true } else { false });
+                    if clicked {
+                        self.show_data_popup = (false, String::new());
+                    }
+                }
+            }
         });
+
+        if self.changed {
+            self.refresh();
+            self.changed = false;
+        }
 
         CentralPanel::default().show(ctx, |ui| {
             ui.vertical_centered(|ui| {
                 ScrollArea::vertical().show(ui, |ui| {
-                    for (image, i) in &self.data {
+                    for (thumbnail, i, path) in &self.data {
                         if let Some(dat) = i.get_data() {
-                            if ui.button(&dat).clicked() {
-                                set_global_bool(true);
-                                #[cfg(not(target_os = "linux"))]
-                                write_clipboard::push_to_clipboard("String".to_string(), dat)
-                                    .unwrap();
-
-                                #[cfg(target_os = "linux")]
-                                clippy_gui::copy_to_linux(
-                                    "text/plain;charset=utf-8".to_string(),
-                                    dat,
-                                );
-
-                                set_global_bool(false);
-
-                                if self.settings.click_on_quit {
-                                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                                }
-                            }
-                        } else if let Some((image_data, (width, height))) = image {
+                            ui.add_enabled_ui(true, |ui| {
+                                item_card(
+                                    ui,
+                                    &dat,
+                                    thumbnail,
+                                    &mut i.get_pined(),
+                                    &mut i.get_pined(),
+                                    self.settings.click_on_quit,
+                                    &mut self.show_data_popup,
+                                    &mut self.changed,
+                                    path,
+                                    ctx,
+                                )
+                            });
+                        } else if let Thumbnail::Image((image_data, (width, height))) = thumbnail {
                             let color_image = egui::ColorImage::from_rgba_unmultiplied(
                                 [*width as usize, *height as usize],
                                 &image_data,
                             );
 
-                            let texture = ctx.load_texture(
+                            let texture: egui::TextureHandle = ctx.load_texture(
                                 "thumbnail",
                                 color_image,
                                 egui::TextureOptions::LINEAR,
                             );
-
-                            if ui.add(egui::ImageButton::new(&texture)).clicked() {
-                                set_global_bool(true);
-
-                                #[cfg(target_os = "linux")]
-                                clippy_gui::copy_to_linux(
-                                    "image/png".to_string(),
-                                    i.get_image_as_string().unwrap().to_string(),
-                                );
-
-                                #[cfg(not(target_os = "linux"))]
-                                write_clipboard::push_to_clipboard(
-                                    "image/png".to_string(),
-                                    i.get_image_as_string().unwrap().to_string(),
+                            ui.add_enabled_ui(true, |ui| {
+                                item_card_image(
+                                    ui,
+                                    &texture,
+                                    &mut i.get_pined(),
+                                    self.settings.click_on_quit,
+                                    i,
+                                    &mut self.changed,
+                                    path,
+                                    ctx,
                                 )
-                                .unwrap();
-
-                                set_global_bool(false);
-
-                                if self.settings.click_on_quit {
-                                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                                }
-                            }
+                            });
                         }
                     }
+                    ui.separator();
                 });
             });
         });
