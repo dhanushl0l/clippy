@@ -121,6 +121,10 @@ impl Data {
         self.pined = !self.pined
     }
 
+    pub fn change_data(&mut self, data: &str) {
+        self.data = data.to_string()
+    }
+
     pub fn save_image(&self, time: &str) -> Result<(), io::Error> {
         let mut path: PathBuf = crate::get_path();
         path.pop();

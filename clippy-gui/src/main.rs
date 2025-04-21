@@ -11,8 +11,8 @@ use eframe::{
     run_native,
 };
 use egui::{
-    Align, Align2, Button, ComboBox, Id, Label, Layout, Margin, RichText, Stroke, TextEdit,
-    TextStyle, Theme, TopBottomPanel, Vec2,
+    Align, Align2, Button, Color32, ComboBox, Id, Label, Layout, Margin, RichText, Stroke,
+    TextEdit, TextStyle, Theme, TopBottomPanel, Vec2,
 };
 use http::{check_user, login, signin};
 use std::{
@@ -23,6 +23,7 @@ use std::{
 mod clipboard_img_widget;
 mod clipboard_widget;
 mod custom_egui_widget;
+mod edit_window;
 mod http;
 
 struct Clipboard {
@@ -36,7 +37,7 @@ struct Clipboard {
     show_login_window: bool,
     show_createuser_window: bool,
     show_error: (bool, String),
-    show_data_popup: (bool, String),
+    show_data_popup: (bool, String, PathBuf),
 }
 
 impl Clipboard {
@@ -85,9 +86,9 @@ impl Clipboard {
             show_login_window: false,
             show_createuser_window: false,
             show_error: (false, String::from("")),
-            username: "enter the username".to_string(),
-            key: "enter the Password".to_string(),
-            show_data_popup: (false, String::new()),
+            username: "".to_string(),
+            key: "".to_string(),
+            show_data_popup: (false, String::new(), PathBuf::new()),
         }
     }
 
@@ -144,17 +145,12 @@ impl App for Clipboard {
                             ui.set_min_width(ui.available_width());
                             ui.vertical_centered(|ui| {
                                 if let Some(user_data) = self.settings.get_sync() {
+                                    let user_data = user_data.clone();
                                     ui.vertical_centered(|ui| {
                                         ui.label(RichText::new("😃").size(150.0).strong());
 
                                         ui.label(RichText::new("username:").size(12.3).strong());
-                                        ui.label(
-                                            RichText::new(
-                                                self.settings.get_sync().clone().unwrap().username,
-                                            )
-                                            .size(16.0)
-                                            .strong(),
-                                        );
+                                        ui.label(RichText::new(user_data.username).size(15.0));
 
                                         ui.add_space(10.0);
 
@@ -180,16 +176,17 @@ impl App for Clipboard {
                                         );
 
                                         ui.add_space(8.0);
-                                        ui.label(RichText::new("Username:").size(15.0).strong());
+                                        ui.label(RichText::new("Username:").size(17.0).strong());
+
+                                        ui.add_space(8.0);
 
                                         ui.style_mut().override_text_style =
                                             Some(TextStyle::Heading);
 
                                         ui.add(
                                             TextEdit::singleline(&mut self.username)
-                                                .desired_width(300.0)
-                                                .min_size(Vec2::new(200.0, 25.0))
-                                                .vertical_align(Align::Center),
+                                                .vertical_align(Align::Center)
+                                                .hint_text("enter the username"),
                                         );
 
                                         ui.style_mut().override_text_style = None;
@@ -197,7 +194,7 @@ impl App for Clipboard {
                                         ui.add_space(10.0);
 
                                         let total_button_width =
-                                            button_size.x * 2.0 + 20.0 + 2.0 * 35.0; // 2 buttons + spacing + side padding
+                                            button_size.x * 2.0 + 20.0 + 2.0 * 35.0;
                                         let available_width = ui.available_width();
                                         let horizontal_padding =
                                             (available_width - total_button_width).max(0.0) / 2.0;
@@ -283,11 +280,12 @@ impl App for Clipboard {
                                         ui.style_mut().override_text_style =
                                             Some(TextStyle::Heading);
 
+                                        ui.add_space(8.0);
+
                                         ui.add(
                                             TextEdit::singleline(&mut self.key)
-                                                .desired_width(300.0)
-                                                .min_size(Vec2::new(200.0, 25.0))
-                                                .vertical_align(Align::Center),
+                                                .vertical_align(Align::Center)
+                                                .hint_text("Enter the Password"),
                                         );
 
                                         ui.style_mut().override_text_style = None;
@@ -489,20 +487,10 @@ impl App for Clipboard {
             }
 
             if self.show_data_popup.0 {
-                if let Some(mouse_pos) = ctx.input(|i| i.pointer.hover_pos()) {
-                    egui::Area::new(Id::new("source"))
-                        .anchor(Align2::LEFT_TOP, mouse_pos.to_vec2())
-                        .interactable(false)
-                        .show(ctx, |ui| {
-                            egui::Frame::popup(ui.style()).show(ui, |ui| {
-                                ui.label(&self.show_data_popup.1);
-                            });
-                        });
-
-                    let clicked = ctx.input(|i| if i.pointer.any_click() { true } else { false });
-                    if clicked {
-                        self.show_data_popup = (false, String::new());
-                    }
+                self.edit_window(ctx);
+                let esc_pressed = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+                if esc_pressed {
+                    self.show_data_popup = (false, String::new(), PathBuf::new());
                 }
             }
         });
@@ -556,7 +544,7 @@ impl App for Clipboard {
                             });
                         }
                     }
-                    ui.separator();
+                    ui.label("");
                 });
             });
         });
