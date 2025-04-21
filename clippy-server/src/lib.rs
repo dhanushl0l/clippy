@@ -1,7 +1,11 @@
+use actix::fut::ok;
 use actix_multipart::Multipart;
 use actix_web::HttpResponse;
+use chrono::{Duration, Utc};
+use jsonwebtokens::{Algorithm, AlgorithmID, Verifier, encode};
 use rand::seq::IteratorRandom;
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 use std::{
     collections::{BTreeSet, HashMap},
     fs::{self, File},
@@ -244,4 +248,62 @@ pub fn to_zip(files: Vec<String>) -> Result<HttpResponse, ()> {
 
     zip.finish().unwrap();
     Ok(HttpResponse::Ok().body(buffer))
+}
+
+const SECRET_KEY: Option<&str> = option_env!("KEY");
+
+pub fn auth(
+    key: String,
+    userstate: &actix_web::web::Data<UserState>,
+) -> Result<String, jsonwebtokens::error::Error> {
+    let alg: Algorithm = Algorithm::new_hmac(AlgorithmID::HS256, SECRET_KEY.unwrap())?;
+
+    let verifier = Verifier::create().build()?;
+
+    let verified_claims: Value = verifier.verify(&key, &alg)?;
+
+    let user_id = match verified_claims["user"].as_str() {
+        Some(val) => val,
+        None => return Err(jsonwebtokens::error::Error::AlgorithmMismatch()),
+    };
+
+    let expiry_timestamp = match verified_claims["expiry"].as_i64() {
+        Some(val) => val,
+        None => return Err(jsonwebtokens::error::Error::InvalidSignature()),
+    };
+
+    if is_token_expired(expiry_timestamp) {
+        println!("Token has expired");
+        return Err(jsonwebtokens::error::Error::TokenExpiredAt(0));
+    } else {
+        println!("Token is still valid");
+    }
+
+    match userstate.verify(user_id) {
+        true => Ok(user_id.to_string()),
+        false => Err(jsonwebtokens::error::Error::InvalidSignature()),
+    }
+}
+
+pub fn get_auth(username: &str) -> Result<String, jsonwebtokens::error::Error> {
+    let alg = Algorithm::new_hmac(AlgorithmID::HS256, SECRET_KEY.unwrap())?;
+    let header = json!({ "alg": alg.name(), "typ": "JWT" });
+
+    let now = Utc::now();
+    let formatted = now.to_rfc3339();
+    let expiry_time = now + Duration::hours(1);
+    let expiry_time = expiry_time.timestamp();
+
+    let claims = json!({
+        "user": username,
+        "created": formatted,
+        "expiry": expiry_time
+    });
+
+    Ok(encode(&header, &claims, &alg)?)
+}
+
+fn is_token_expired(expiry_timestamp: i64) -> bool {
+    let now_timestamp = Utc::now().timestamp();
+    now_timestamp >= expiry_timestamp
 }

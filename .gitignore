@@ -1,3 +1,5 @@
 target/
 .vs/
+clippy-server/credentials/
+data-base/
 log.log
