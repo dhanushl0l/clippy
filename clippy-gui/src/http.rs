@@ -1,19 +1,20 @@
-use std::error::Error;
+use core::fmt;
+use std::io;
 
 use clippy::{UserCred, Username, http::SERVER};
-use reqwest::blocking::Client;
+use reqwest::{Client, Error};
 
-pub fn check_user(user: String) -> Option<bool> {
+pub async fn check_user(user: String) -> Option<bool> {
     let connection = Client::new();
     let data = Username { user };
 
     let response = connection
-        .post(format!("{}/usercheck", SERVER))
+        .get(format!("{}/usercheck", SERVER))
         .json(&data)
         .send();
 
-    match response {
-        Ok(resp) => match resp.json::<bool>() {
+    match response.await {
+        Ok(resp) => match resp.json::<bool>().await {
             Ok(value) => Some(value),
             Err(_) => None,
         },
@@ -21,29 +22,32 @@ pub fn check_user(user: String) -> Option<bool> {
     }
 }
 
-pub fn signin(username: String) -> Result<UserCred, Box<dyn Error>> {
+pub async fn signin(username: String) -> Result<UserCred, Error> {
     let connection = Client::new();
     let data = Username::new(username);
     let response = connection
         .post(format!("{}/signin", SERVER))
         .json(&data)
-        .send()?;
+        .send()
+        .await?;
 
-    let user: UserCred = response.json()?;
+    let user: UserCred = response.json().await?;
     Ok(user)
 }
 
-pub fn login(user: UserCred) -> Result<(), Box<dyn Error>> {
+pub async fn login(user: UserCred) -> Result<Option<UserCred>, Error> {
     let connection = Client::new();
     let response = connection
-        .post(format!("{}/login", SERVER))
+        .get(format!("{}/getkey", SERVER))
         .json(&user)
-        .send()?;
+        .send()
+        .await?;
 
     if response.status().is_success() {
-        Ok(())
+        let text = response.text().await?;
+        println!("{:?}", text);
+        Ok(Some(user))
     } else {
-        let err_msg = response.text()?;
-        Err(format!("Login failed: {}", err_msg).into())
+        Ok(None)
     }
 }

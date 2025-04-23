@@ -1,44 +1,98 @@
 use crate::{
-    UserData, extract_zip,
+    UserCred, UserData, extract_zip,
     write_clipboard::{self},
 };
 use core::time;
 use log::{debug, info, warn};
-use reqwest::blocking::{Client, multipart};
-use std::{fs::File, thread, time::Duration};
+use once_cell::sync::Lazy;
+use reqwest::{self, Client, multipart};
+use std::{
+    error::{self, Error},
+    sync::Mutex,
+    thread,
+    time::Duration,
+};
+use tokio::{fs::File, io::AsyncReadExt};
 
-pub const SERVER: &str = "http://127.0.0.1:8080";
+pub const SERVER: &str = "http://127.0.0.1:7777";
+static TOKEN: Lazy<Mutex<String>> = Lazy::new(|| {
+    Mutex::new(String::from(
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJjcmVhdGVkIjoiMjAyNS0wNC0yMlQxMTozOTo0NS40ODkyMjMxNTYrMDA6MDAiLCJleHBpcnkiOjE3NDUzMjU1ODUsInVzZXIiOiJleGFtcGxlX3VzZXIifQ.pW7kyzEXGCr2Y_qDM35uSha-5pslq3scrUpxXdGo_ew",
+    ))
+});
 
-pub fn send(file_path: &str, id: &str, userdata: &UserData, client: &Client) -> Result<(), String> {
-    let _file = File::open(&file_path).map_err(|e| format!("File error: {}", e))?;
-
-    let form = multipart::Form::new()
-        .file("file", &file_path)
-        .map_err(|e| format!("Multipart error: {}", e))?;
-
-    client
-        .get(&format!("{}/update", SERVER))
-        .query(&[("username", "d"), ("pass", "1"), ("id", &id)])
-        .multipart(form)
-        .send()
-        .map_err(|e| format!("Request error: {}", e))?;
-
-    info!("Sent file [{}] successfully.", id);
-
-    userdata.add(id.to_string());
-
-    Ok(())
+fn update_token(new_data: String) {
+    let mut key = TOKEN.lock().unwrap();
+    *key = new_data;
 }
 
-pub fn state(userdata: &UserData, client: &Client) -> Result<bool, String> {
-    let user = "d";
+fn get_token() -> String {
+    let key = TOKEN.lock().unwrap();
+    key.clone()
+}
+
+pub async fn send(
+    file_path: &str,
+    id: &str,
+    userdata: &UserData,
+    usercred: &UserCred,
+    client: &Client,
+) -> Result<(), Box<dyn error::Error>> {
+    let mut file = File::open(file_path).await?;
+    let mut buffer = Vec::new();
+    file.read_to_end(&mut buffer).await?;
+
+    let part = multipart::Part::bytes(buffer);
+    let form = multipart::Form::new().part("file", part);
+
     let response = client
-        .get(&format!("{}/state/{}", SERVER, user))
+        .post(&format!("{}/update", SERVER))
+        .query(&[("TEMP", get_token())])
+        .query(&[("ID", id)])
+        .multipart(form)
+        .send()
+        .await?;
+
+    if response.status().is_success() {
+        Ok(())
+    } else if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+        warn!("Token expired");
+        login(usercred);
+        Err(response.text().await.unwrap().into())
+    } else {
+        Err(response.text().await.unwrap().into())
+    }
+}
+
+pub async fn login(user: &UserCred) -> Result<(), Box<dyn Error>> {
+    let connection = Client::new();
+    let response = connection
+        .get(format!("{}/getkey", SERVER))
+        .json(&user)
+        .send()
+        .await?;
+
+    if response.status().is_success() {
+        let text = response.text().await?;
+        update_token(text);
+        Ok(())
+    } else {
+        let err_msg = response.text().await?;
+        Err(format!("Login failed: {}", err_msg).into())
+    }
+}
+
+pub async fn state(userdata: &UserData, client: &Client, user: &UserCred) -> Result<bool, String> {
+    let response = client
+        .get(&format!("{}/state/{}", SERVER, user.username))
         .query(&[("id", userdata.last_one())])
         .send()
+        .await
         .map_err(|e| format!("Request error: {}", e))?;
 
-    let body = match response.text() {
+    println!("{}", userdata.last_one());
+
+    let body = match response.text().await {
         Ok(text) => text,
         Err(e) => format!("<Failed to read body: {}>", e),
     };
@@ -50,19 +104,27 @@ pub fn state(userdata: &UserData, client: &Client) -> Result<bool, String> {
     }
 }
 
-pub fn download(userdata: &UserData, client: &Client) -> Result<(), String> {
-    let user = "d";
+pub async fn download(userdata: &UserData, client: &Client) -> Result<(), Box<dyn error::Error>> {
     let response = client
         .get(&format!("{}/get", SERVER))
-        .query(&[("username", user)])
-        .query(&[("pass", "1")])
+        .query(&[("TEMP", get_token())])
         .query(&[("current", userdata.last_one())])
         .send()
-        .map_err(|e| format!("Request error: {}", e))?;
+        .await?;
 
-    let body = match response.bytes() {
-        Ok(text) => text,
-        Err(e) => return Err(format!("<Failed to read body: {}>", e)),
+    let body = if response.status().is_success() {
+        response.bytes().await?
+    } else {
+        let status = response.status();
+        let err_msg = match response.text().await {
+            Ok(text) => text,
+            Err(_) => "<failed to read error body>".to_string(),
+        };
+
+        return Err(Box::new(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("Error getting data from server ({}): {}", status, err_msg),
+        )));
     };
 
     match extract_zip(body) {
@@ -71,18 +133,18 @@ pub fn download(userdata: &UserData, client: &Client) -> Result<(), String> {
             debug!("{:?}", &val);
             userdata.add_vec(val)
         }
-        Err(_) => (),
+        Err(err) => warn!("{}", err),
     }
 
     #[cfg(not(target_os = "linux"))]
-    write_clipboard::copy_to_clipboard(userdata).map_err(|err| format!("{}", err))?;
+    write_clipboard::copy_to_clipboard(userdata)?;
 
     #[cfg(target_os = "linux")]
-    write_clipboard::copy_to_linux(userdata).map_err(|err| format!("{}", err))?;
+    write_clipboard::copy_to_linux(userdata)?;
     Ok(())
 }
 
-pub fn health(client: &Client) {
+pub async fn health(client: &Client) {
     let mut log = true;
     loop {
         let response = client
@@ -90,7 +152,7 @@ pub fn health(client: &Client) {
             .timeout(Duration::from_secs(5))
             .send();
 
-        match response {
+        match response.await {
             Ok(response) => {
                 if response.status().is_success() {
                     break;

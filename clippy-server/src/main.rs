@@ -50,37 +50,6 @@ async fn signin(data: web::Json<Username>, state: web::Data<UserState>) -> impl 
     }
 }
 
-async fn login(data: web::Json<UserCred>, state: web::Data<UserState>) -> impl Responder {
-    let username = &data.username;
-
-    if !state.verify(username) {
-        return HttpResponse::Unauthorized().body("Failure: Username already exists");
-    }
-
-    let file_path = Path::new(CRED_PATH).join(username).join("user.json");
-    let file = match File::open(&file_path) {
-        Ok(f) => f,
-        Err(err) => {
-            eprintln!("Failed to open file: {}", err);
-            return HttpResponse::build(StatusCode::NOT_FOUND).body("User file not found");
-        }
-    };
-
-    let user: UserCred = match from_reader(file) {
-        Ok(u) => u,
-        Err(err) => {
-            eprintln!("Failed to parse user file: {}", err);
-            return HttpResponse::build(StatusCode::BAD_REQUEST).body("Invalid user file format");
-        }
-    };
-
-    if user == *data {
-        HttpResponse::Ok().body("Authenticated: Login successful")
-    } else {
-        HttpResponse::Unauthorized().body("Unauthenticated: Invalid username or password")
-    }
-}
-
 async fn check_user(state: web::Data<UserState>, data: web::Json<Username>) -> impl Responder {
     let username = &data.user;
 
@@ -118,7 +87,7 @@ async fn update(
     state: web::Data<UserState>,
 ) -> impl Responder {
     let key = param!(&key, "TEMP");
-    let id = param!(&id, "id");
+    let id = param!(&id, "ID");
 
     let username = match auth(key, &state) {
         Ok(val) => val,
@@ -146,6 +115,7 @@ async fn state(
     let id = param!(&id, "id");
 
     if state.is_updated(&user, &id) {
+        println!("updated");
         HttpResponse::Ok().body("UPDATED")
     } else {
         HttpResponse::Ok().body("OUTDATED")
@@ -169,9 +139,13 @@ async fn get(
         Ok(val) => val,
         Err(err) => return err,
     };
+    println!("{:?}", files);
     match to_zip(files) {
         Ok(data) => data,
-        Err(err) => HttpResponse::Unauthorized().body("Error: authentication failed"),
+        Err(err) => {
+            println!("{:?}", err);
+            HttpResponse::Unauthorized().body(err.to_string())
+        }
     }
 }
 
@@ -191,7 +165,6 @@ async fn main() -> std::io::Result<()> {
             .route("/state/{user}", web::get().to(state))
             .route("/update", web::post().to(update))
             .route("/signin", web::post().to(signin))
-            .route("/login", web::post().to(login))
             .route("/get", web::get().to(get))
             .route("/getkey", web::get().to(get_key))
             .route("/usercheck", web::get().to(check_user))

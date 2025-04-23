@@ -5,8 +5,8 @@ use env_logger::{Builder, Env};
 use log::debug;
 use log::{error, info, warn};
 use std::error::Error;
-use std::sync::mpsc::{self, Sender};
 use std::{env, process};
+use tokio::sync::mpsc::{Receiver, Sender};
 
 #[cfg(target_os = "linux")]
 use clippy::read_clipboard::read_wayland_clipboard;
@@ -77,12 +77,12 @@ fn read_clipboard(tx: &Sender<(String, String)>) -> Result<(), Box<dyn Error + S
 fn main() {
     Builder::from_env(Env::default().filter_or("LOG", "info")).init();
 
-    let (tx, rx) = mpsc::channel::<(String, String)>();
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<(String, String)>(30);
 
     match UserSettings::build_user() {
         Ok(usersettings) => {
             if let Some(sync) = usersettings.get_sync() {
-                start_cloud(rx);
+                start_cloud(rx, sync.clone());
             }
         }
         Err(err) => {

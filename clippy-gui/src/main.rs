@@ -3,7 +3,7 @@ use clipboard_widget::item_card;
 use clippy::{
     Data, SystemTheam, UserCred, UserSettings, get_path, set_global_bool, write_clipboard,
 };
-use clippy_gui::{Thumbnail, str_formate};
+use clippy_gui::{Thumbnail, Waiting, str_formate};
 use custom_egui_widget::toggle;
 use eframe::{
     App, NativeOptions,
@@ -19,7 +19,10 @@ use std::{
     cmp::Reverse,
     fs::{self},
     path::PathBuf,
+    sync::{Arc, Mutex},
+    thread,
 };
+use tokio::runtime::Runtime;
 mod clipboard_img_widget;
 mod clipboard_widget;
 mod custom_egui_widget;
@@ -34,6 +37,7 @@ struct Clipboard {
     show_signin_window: bool,
     username: String,
     key: String,
+    waiting: Arc<Mutex<Waiting>>,
     show_login_window: bool,
     show_createuser_window: bool,
     show_error: (bool, String),
@@ -88,6 +92,7 @@ impl Clipboard {
             show_error: (false, String::from("")),
             username: "".to_string(),
             key: "".to_string(),
+            waiting: Arc::new(Mutex::new(Waiting::None)),
             show_data_popup: (false, String::new(), PathBuf::new()),
         }
     }
@@ -215,21 +220,18 @@ impl App for Clipboard {
                                                 .clicked()
                                             {
                                                 self.show_signin_window = false;
-                                                match check_user(self.username.clone()) {
-                                                    Some(false) => {
-                                                        self.show_createuser_window = true;
-                                                    }
-                                                    Some(true) => {
-                                                        self.show_login_window = true;
-                                                    }
-                                                    None => {
-                                                        self.show_error = (
-                                                            true,
-                                                            "unable to connect to server"
-                                                                .to_string(),
-                                                        );
-                                                    }
-                                                }
+                                                let username = self.username.clone();
+                                                let wait = self.waiting.clone();
+
+                                                thread::spawn(move || {
+                                                    println!("started");
+                                                    let async_runtime = Runtime::new().unwrap();
+                                                    let status = async_runtime.block_on(async {
+                                                        check_user(username).await
+                                                    });
+                                                    let mut wait_lock = wait.lock().unwrap();
+                                                    *wait_lock = Waiting::CheckUser(status);
+                                                });
                                             }
 
                                             ui.add_space(20.0);
@@ -253,18 +255,27 @@ impl App for Clipboard {
                                         ui.add_space(10.0);
                                     });
                                 } else if self.show_createuser_window {
-                                    let login_button = ui.button("signin");
+                                    let signin_button = ui.button("signin");
 
-                                    if login_button.clicked() {
-                                        let user = signin(self.username.clone());
-                                        if let Ok(val) = user {
-                                            self.settings.set_user(val);
-                                            self.show_createuser_window = false;
-                                            self.settings.write();
-                                        } else if let Err(err) = user {
-                                            self.show_createuser_window = false;
-                                            self.show_error = (true, err.to_string());
-                                        }
+                                    if signin_button.clicked() {
+                                        let wait = self.waiting.clone();
+                                        let username = self.username.clone();
+                                        thread::spawn(move || {
+                                            let async_runtime = Runtime::new().unwrap();
+
+                                            let signin = async_runtime
+                                                .block_on(async { signin(username).await });
+                                            match signin {
+                                                Ok(val) => {
+                                                    let mut wait_lock = wait.lock().unwrap();
+                                                    *wait_lock = Waiting::Signin(Some(val));
+                                                }
+                                                Err(err) => {
+                                                    // self.show_createuser_window = false;
+                                                    // self.show_error = (true, err.to_string());
+                                                }
+                                            }
+                                        });
                                     }
                                 } else if self.show_login_window {
                                     ui.vertical_centered(|ui| {
@@ -318,16 +329,24 @@ impl App for Clipboard {
                                                     self.username.clone(),
                                                     self.key.clone(),
                                                 );
-                                                match login(user.clone()) {
-                                                    Ok(()) => {
-                                                        self.settings.set_user(user);
-                                                        self.settings.write();
+                                                let wait = self.waiting.clone();
+                                                thread::spawn(move || {
+                                                    let async_runtime = Runtime::new().unwrap();
+
+                                                    let login_result = async_runtime
+                                                        .block_on(async { login(user).await });
+
+                                                    match login_result {
+                                                        Err(err) => {
+                                                            eprintln!("error logging in {}", err)
+                                                        }
+                                                        Ok(val) => {
+                                                            let mut wait_lock =
+                                                                wait.lock().unwrap();
+                                                            *wait_lock = Waiting::Login(val);
+                                                        }
                                                     }
-                                                    Err(err) => {
-                                                        self.show_error = (true, err.to_string())
-                                                    }
-                                                };
-                                                self.show_login_window = false;
+                                                });
                                             }
 
                                             ui.add_space(20.0);
@@ -476,6 +495,43 @@ impl App for Clipboard {
                             );
                         });
                     });
+
+                let wait: Arc<Mutex<Waiting>> = self.waiting.clone();
+                if let Ok(mut val) = wait.try_lock() {
+                    match &*val {
+                        Waiting::None => (),
+                        Waiting::CheckUser(Some(true)) => {
+                            self.show_login_window = true;
+                            *val = Waiting::None;
+                        }
+                        Waiting::CheckUser(Some(false)) => {
+                            self.show_createuser_window = true;
+                            *val = Waiting::None;
+                        }
+                        Waiting::Login(Some(usercred)) => {
+                            self.settings.set_user(usercred.clone());
+                            *val = Waiting::None;
+                        }
+                        Waiting::Login(None) => {
+                            self.show_error = (true, String::from("Authentication failed"));
+                            self.show_login_window = false;
+                            *val = Waiting::None;
+                        }
+                        Waiting::CheckUser(None) => {
+                            self.show_error = (true, String::from("Problem connectiong to server"));
+                            *val = Waiting::None;
+                        }
+                        Waiting::Signin(None) => {
+                            self.show_error = (true, String::from("Authentication failed"));
+                            self.show_signin_window = false;
+                            *val = Waiting::None;
+                        }
+                        Waiting::Signin(Some(usercred)) => {
+                            self.settings.set_user(usercred.clone());
+                            *val = Waiting::None;
+                        }
+                    }
+                }
 
                 if !open {
                     self.show_settings = false;

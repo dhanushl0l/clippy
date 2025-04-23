@@ -13,7 +13,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
-use zip::write::FileOptions;
+use zip::{result::ZipError, write::FileOptions};
 
 pub const CRED_PATH: &str = "credentials/users";
 const DATABASE_PATH: &str = "data-base/users";
@@ -215,7 +215,7 @@ pub async fn write_file(
     Ok(())
 }
 
-pub fn to_zip(files: Vec<String>) -> Result<HttpResponse, ()> {
+pub fn to_zip(files: Vec<String>) -> Result<HttpResponse, ZipError> {
     let zip_options: FileOptions<'_, ()> =
         FileOptions::default().compression_method(zip::CompressionMethod::Stored);
 
@@ -240,13 +240,14 @@ pub fn to_zip(files: Vec<String>) -> Result<HttpResponse, ()> {
             }
         };
 
-        zip.start_file(filename, zip_options).unwrap();
+        zip.start_file(filename, zip_options)?;
         let mut buf = Vec::new();
         f.read_to_end(&mut buf).unwrap();
         zip.write_all(&buf).unwrap();
     }
 
-    zip.finish().unwrap();
+    zip.finish()?;
+
     Ok(HttpResponse::Ok().body(buffer))
 }
 

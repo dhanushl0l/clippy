@@ -12,11 +12,11 @@ use encryption_decryption::{decrypt_file, encrept_file};
 use image::ImageReader;
 use log::{debug, error, warn};
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::error::Error;
 use std::fs::{DirEntry, create_dir, create_dir_all};
-use std::io::{Cursor, Write};
+use std::io::{Cursor, Read, Write};
 use std::path::Path;
-use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::{
     collections::BTreeSet,
@@ -26,7 +26,9 @@ use std::{
     io::{self},
     path::PathBuf,
 };
+use tokio::sync::mpsc::{Receiver, Sender};
 use zip::ZipArchive;
+use zip::result::ZipError;
 
 const API_KEY: Option<&str> = option_env!("KEY");
 
@@ -64,7 +66,7 @@ impl Data {
         let mut file = File::create(file_path)?;
         file.write_all(json_data.as_bytes())?;
 
-        match tx.send((file_path.to_str().unwrap().into(), time)) {
+        match tx.try_send((file_path.to_str().unwrap().into(), time)) {
             Ok(_) => (),
             Err(err) => warn!(
                 "Failed to send file '{}' to channel: {}",

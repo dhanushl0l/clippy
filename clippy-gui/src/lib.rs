@@ -1,6 +1,16 @@
+use clippy::UserCred;
+use reqwest::Error;
+
 pub enum Thumbnail {
     Image((Vec<u8>, (u32, u32))),
     Text(String),
+}
+
+pub enum Waiting {
+    CheckUser(Option<bool>),
+    Login(Option<UserCred>),
+    Signin(Option<UserCred>),
+    None,
 }
 
 #[cfg(target_os = "linux")]
