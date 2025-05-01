@@ -82,6 +82,23 @@ pub async fn login(user: &UserCred) -> Result<(), Box<dyn Error>> {
     }
 }
 
+pub async fn get_token_serv(user: &UserCred, client: &Client) -> Result<(), Box<dyn Error>> {
+    let response = client
+        .get(format!("{}/getkey", SERVER))
+        .json(&user)
+        .send()
+        .await?;
+
+    if response.status().is_success() {
+        let text = response.text().await?;
+        update_token(text);
+        Ok(())
+    } else {
+        let err_msg = response.text().await?;
+        Err(format!("Login failed: {}", err_msg).into())
+    }
+}
+
 pub async fn state(userdata: &UserData, client: &Client, user: &UserCred) -> Result<bool, String> {
     let response = client
         .get(&format!("{}/state/{}", SERVER, user.username))

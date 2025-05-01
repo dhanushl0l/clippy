@@ -351,11 +351,13 @@ impl Pending {
         self.data.lock().unwrap().is_empty()
     }
 
-    pub fn get(&self) -> Option<(&str, &str)> {
-        None
+    pub fn get(&self) -> Option<(String, String)> {
+        self.data.lock().unwrap().last().cloned()
     }
 
-    pub fn remove(&self) {}
+    pub fn remove(&self) {
+        self.data.lock().unwrap().pop();
+    }
 }
 
 #[derive(Serialize, Deserialize)]
