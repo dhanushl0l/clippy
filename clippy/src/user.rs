@@ -1,23 +1,11 @@
 use crate::{
-    Pending, UserCred, UserData, UserSettings,
-    encryption_decryption::{decrypt_file, encrept_file},
-    get_path,
-    http::{self, download, get_token_serv, health, login, state},
+    Pending, UserCred, UserData,
+    http::{self, download, get_token_serv, health, state},
 };
 use log::{debug, info, warn};
 use reqwest::{self, Client};
-use std::{
-    error::Error,
-    fs::{self, create_dir},
-    sync::Arc,
-    thread, time,
-};
-use tokio::{
-    join,
-    runtime::Runtime,
-    sync::mpsc::{Receiver, Sender},
-    time::sleep,
-};
+use std::{fs, sync::Arc, thread, time};
+use tokio::{join, runtime::Runtime, sync::mpsc::Receiver, time::sleep};
 
 pub fn start_cloud(mut rx: Receiver<(String, String)>, usercred: UserCred) {
     thread::spawn(move || {
@@ -69,6 +57,7 @@ pub fn start_cloud(mut rx: Receiver<(String, String)>, usercred: UserCred) {
                                 }
                             };
                         } else {
+                            get_token_serv(&usercred, &client).await;
                             sleep(time::Duration::from_secs(5)).await;
                         };
                         if api_health {

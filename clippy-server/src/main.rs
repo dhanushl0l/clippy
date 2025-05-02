@@ -3,6 +3,8 @@ use clippy::Username;
 use clippy_server::{
     CRED_PATH, UserCred, UserState, auth, gen_password, get_auth, get_param, to_zip, write_file,
 };
+use env_logger::{Builder, Env};
+use log::debug;
 use serde_json::from_reader;
 use std::{
     collections::HashMap,
@@ -64,7 +66,10 @@ async fn get_key(cred: web::Json<UserCred>, state: web::Data<UserState>) -> impl
     if state.verify(&cred.username) {
         let user_cred_db = match UserCred::read(&cred.username) {
             Ok(val) => val,
-            Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+            Err(err) => {
+                return HttpResponse::Unauthorized()
+                    .body(format!("User not found: {}", err.to_string()));
+            }
         };
         if user_cred_db == *cred {
             let key = match get_auth(&cred.username) {
@@ -97,11 +102,12 @@ async fn update(
     match write_file(payload, &username, &id).await {
         Ok(_) => (),
         Err(err) => {
-            let response = err.error_response();
-            return response;
+            return err.error_response();
         }
     }
+    println!("{:?}", state);
     state.update(&username, &id);
+    println!("{:?}", state);
 
     HttpResponse::Ok().body("SURCESS")
 }
@@ -115,7 +121,6 @@ async fn state(
     let id = param!(&id, "id");
 
     if state.is_updated(&user, &id) {
-        println!("updated");
         HttpResponse::Ok().body("UPDATED")
     } else {
         HttpResponse::Ok().body("OUTDATED")
@@ -155,9 +160,11 @@ async fn health() -> impl Responder {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    env_logger::init();
+    Builder::from_env(Env::default().filter_or("LOG", "info")).init();
 
     let user_state = web::Data::new(UserState::new());
+
+    debug!("User state: {:?}", user_state);
 
     HttpServer::new(move || {
         App::new()

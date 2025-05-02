@@ -15,11 +15,7 @@ use std::{
 use tokio::{fs::File, io::AsyncReadExt};
 
 pub const SERVER: &str = "http://127.0.0.1:7777";
-static TOKEN: Lazy<Mutex<String>> = Lazy::new(|| {
-    Mutex::new(String::from(
-        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJjcmVhdGVkIjoiMjAyNS0wNC0yMlQxMTozOTo0NS40ODkyMjMxNTYrMDA6MDAiLCJleHBpcnkiOjE3NDUzMjU1ODUsInVzZXIiOiJleGFtcGxlX3VzZXIifQ.pW7kyzEXGCr2Y_qDM35uSha-5pslq3scrUpxXdGo_ew",
-    ))
-});
+static TOKEN: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new(String::new()));
 
 fn update_token(new_data: String) {
     let mut key = TOKEN.lock().unwrap();
@@ -111,13 +107,13 @@ pub async fn state(userdata: &UserData, client: &Client, user: &UserCred) -> Res
 
     let body = match response.text().await {
         Ok(text) => text,
-        Err(e) => format!("<Failed to read body: {}>", e),
+        Err(e) => format!("Failed to read body: {}", e),
     };
 
     match body.as_str() {
         "OUTDATED" => Ok(false),
         "UPDATED" => Ok(true),
-        _ => Err("<Failed to read body: {}>".to_string()),
+        _ => Err("Failed to read body: {}".to_string()),
     }
 }
 

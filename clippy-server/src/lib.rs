@@ -1,8 +1,8 @@
-use actix::fut::ok;
 use actix_multipart::Multipart;
 use actix_web::HttpResponse;
 use chrono::{Duration, Utc};
 use jsonwebtokens::{Algorithm, AlgorithmID, Verifier, encode};
+use log::error;
 use rand::seq::IteratorRandom;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -88,17 +88,20 @@ impl UserState {
         let mut map = self.data.lock().unwrap();
         if let Some(set) = map.get_mut(username) {
             set.insert(id.to_string());
+        } else {
+            error!("Unabe to update user state: {}", id);
         }
     }
 
     pub fn is_updated(&self, username: &str, id: &str) -> bool {
-        self.data
+        !self
+            .data
             .lock()
             .unwrap()
             .get(username)
             .and_then(|set| set.iter().last())
             .map(|val| val == id)
-            .unwrap_or(false)
+            .unwrap_or(true) // Return true if the vec is empty or current id is not available
     }
 
     pub fn next(&self, username: &str, id: &str) -> Result<Vec<String>, HttpResponse> {
@@ -115,7 +118,7 @@ impl UserState {
                 .map(|x| format!("{}/{}/{}", DATABASE_PATH, username, x))
                 .collect())
         } else {
-            Err(HttpResponse::Unauthorized().body("Error: authentication failed"))
+            Err(HttpResponse::InternalServerError().body("Error: failed to get data position"))
         }
     }
 }
