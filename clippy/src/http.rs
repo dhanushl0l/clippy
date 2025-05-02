@@ -30,7 +30,6 @@ fn get_token() -> String {
 pub async fn send(
     file_path: &str,
     id: &str,
-    userdata: &UserData,
     usercred: &UserCred,
     client: &Client,
 ) -> Result<(), Box<dyn error::Error>> {
@@ -53,7 +52,14 @@ pub async fn send(
         Ok(())
     } else if response.status() == reqwest::StatusCode::UNAUTHORIZED {
         warn!("Token expired");
-        login(usercred);
+        match get_token_serv(usercred, client).await {
+            Ok(_) => debug!("Fetched a new authentication token"),
+            Err(err) => {
+                warn!("Unable to fetch authentication token");
+                debug!("{}", err);
+            }
+        };
+
         Err(response.text().await.unwrap().into())
     } else {
         Err(response.text().await.unwrap().into())
@@ -86,8 +92,8 @@ pub async fn get_token_serv(user: &UserCred, client: &Client) -> Result<(), Box<
         .await?;
 
     if response.status().is_success() {
-        let text = response.text().await?;
-        update_token(text);
+        let token = response.text().await?;
+        update_token(token);
         Ok(())
     } else {
         let err_msg = response.text().await?;
@@ -131,7 +137,7 @@ pub async fn download(userdata: &UserData, client: &Client) -> Result<(), Box<dy
         let status = response.status();
         let err_msg = match response.text().await {
             Ok(text) => text,
-            Err(_) => "<failed to read error body>".to_string(),
+            Err(_) => "failed to read error body".to_string(),
         };
 
         return Err(Box::new(std::io::Error::new(

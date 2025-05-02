@@ -12,10 +12,9 @@ use encryption_decryption::{decrypt_file, encrept_file};
 use image::ImageReader;
 use log::{debug, error, warn};
 use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
 use std::error::Error;
 use std::fs::{DirEntry, create_dir, create_dir_all};
-use std::io::{Cursor, Read, Write};
+use std::io::{Cursor, Write};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::{
@@ -26,9 +25,8 @@ use std::{
     io::{self},
     path::PathBuf,
 };
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::Sender;
 use zip::ZipArchive;
-use zip::result::ZipError;
 
 const API_KEY: Option<&str> = option_env!("KEY");
 

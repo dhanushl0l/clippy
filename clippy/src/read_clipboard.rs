@@ -3,7 +3,7 @@ use base64::{Engine, engine::general_purpose};
 use clipboard_rs::common::RustImage;
 use clipboard_rs::{Clipboard, ClipboardContext, ClipboardHandler};
 use log::{debug, error, info};
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::Sender;
 
 #[cfg(target_os = "linux")]
 pub fn read_wayland_clipboard(

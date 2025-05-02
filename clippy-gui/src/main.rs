@@ -1,8 +1,6 @@
 use clipboard_img_widget::item_card_image;
 use clipboard_widget::item_card;
-use clippy::{
-    Data, SystemTheam, UserCred, UserSettings, get_path, set_global_bool, write_clipboard,
-};
+use clippy::{Data, SystemTheam, UserCred, UserSettings, get_path};
 use clippy_gui::{Thumbnail, Waiting, str_formate};
 use custom_egui_widget::toggle;
 use eframe::{
@@ -11,12 +9,13 @@ use eframe::{
     run_native,
 };
 use egui::{
-    Align, Align2, Button, Color32, ComboBox, Id, Label, Layout, Margin, RichText, Stroke,
-    TextEdit, TextStyle, Theme, TopBottomPanel, Vec2,
+    Align, Button, Color32, Frame, Layout, Margin, Rect, RichText, Shadow, Stroke, TextEdit,
+    TextStyle, TopBottomPanel, Vec2, vec2,
 };
 use http::{check_user, login, signin};
 use std::{
     cmp::Reverse,
+    collections::HashMap,
     fs::{self},
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -30,7 +29,8 @@ mod edit_window;
 mod http;
 
 struct Clipboard {
-    data: Vec<(Thumbnail, Data, PathBuf)>,
+    data: HashMap<u32, Vec<(Thumbnail, Data, PathBuf)>>,
+    page: u32,
     changed: bool,
     settings: UserSettings,
     show_settings: bool,
@@ -46,23 +46,28 @@ struct Clipboard {
 
 impl Clipboard {
     fn new() -> Self {
-        let mut data = Vec::new();
+        let mut data = HashMap::new();
+        let mut temp = Vec::new();
         if let Ok(entries) = fs::read_dir(get_path()) {
             let mut entries: Vec<_> = entries.flatten().collect();
             entries.sort_unstable_by_key(|entry| Reverse(entry.path()));
-            for entry in entries {
+            let max = entries.len() - 1;
+            let mut count = 0;
+            let mut page = 1;
+            for (i, entry) in entries.iter().enumerate() {
                 let path = entry.path();
                 if path.is_file() {
                     if let Ok(content) = fs::read_to_string(&path) {
+                        count += 1;
                         match serde_json::from_str::<Data>(&content) {
                             Ok(file) => {
                                 if file.typ.starts_with("image/") {
                                     if let Some(val) = file.get_image_thumbnail(&entry) {
-                                        data.push((Thumbnail::Image(val), file, path));
+                                        temp.push((Thumbnail::Image(val), file, path));
                                     }
                                 } else {
                                     if let Some(val) = file.get_data() {
-                                        data.push((Thumbnail::Text(str_formate(&val)), file, path));
+                                        temp.push((Thumbnail::Text(str_formate(&val)), file, path));
                                     }
                                 }
                             }
@@ -71,12 +76,23 @@ impl Clipboard {
                             }
                         }
                     }
+
+                    if count >= 20 || i == max {
+                        data.insert(page, temp);
+                        temp = vec![];
+                        page += 1;
+                        if page > 10 {
+                            break;
+                        }
+                        count = 0;
+                    }
                 }
             }
         }
 
         Self {
             data,
+            page: 1,
             changed: false,
             settings: match UserSettings::build_user() {
                 Ok(val) => val,
@@ -98,7 +114,10 @@ impl Clipboard {
     }
 
     fn refresh(&mut self) {
-        *self = Clipboard::new();
+        let page = self.page;
+        let mut new = Clipboard::new();
+        new.page = page;
+        *self = new;
     }
 }
 impl App for Clipboard {
@@ -134,6 +153,38 @@ impl App for Clipboard {
                         if ui.add(button).on_hover_text("Settings").clicked() {
                             self.show_settings = true;
                         }
+
+                        ui.add_space(10.0);
+                        Frame::group(ui.style())
+                            .corner_radius(9)
+                            .outer_margin(Margin::same(4))
+                            .show(ui, |ui| {
+                                let button_next = Button::new(RichText::new("➡").size(15.0))
+                                    .min_size(Vec2::new(20.0, 20.0))
+                                    .corner_radius(50.0)
+                                    .stroke(Stroke::new(
+                                        1.0,
+                                        ui.visuals().widgets.inactive.bg_fill,
+                                    ));
+
+                                if ui.add(button_next).on_hover_text("Next page").clicked() {
+                                    self.page += 1;
+                                }
+
+                                ui.label(self.page.to_string());
+
+                                let button_prev = Button::new(RichText::new("⬅").size(15.0))
+                                    .min_size(Vec2::new(20.0, 20.0))
+                                    .corner_radius(50.0)
+                                    .stroke(Stroke::new(
+                                        1.0,
+                                        ui.visuals().widgets.inactive.bg_fill,
+                                    ));
+
+                                if ui.add(button_prev).on_hover_text("Previous page").clicked() {
+                                    self.page += 1;
+                                }
+                            });
                     });
                 });
             });
@@ -559,7 +610,16 @@ impl App for Clipboard {
         CentralPanel::default().show(ctx, |ui| {
             ui.vertical_centered(|ui| {
                 ScrollArea::vertical().show(ui, |ui| {
-                    for (thumbnail, i, path) in &self.data {
+                    let data = self
+                        .data
+                        .get(&self.page)
+                        .or_else(|| {
+                            self.page = 1;
+                            self.data.get(&self.page)
+                        })
+                        .unwrap();
+
+                    for (thumbnail, i, path) in data {
                         if let Some(dat) = i.get_data() {
                             ui.add_enabled_ui(true, |ui| {
                                 item_card(

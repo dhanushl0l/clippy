@@ -1,21 +1,18 @@
 use actix_multipart::Multipart;
+use actix_web::{
+    App, HttpResponse, HttpServer, Responder,
+    web::{self},
+};
 use clippy::Username;
 use clippy_server::{
     CRED_PATH, UserCred, UserState, auth, gen_password, get_auth, get_param, to_zip, write_file,
 };
 use env_logger::{Builder, Env};
 use log::debug;
-use serde_json::from_reader;
 use std::{
     collections::HashMap,
-    fs::{self, File},
+    fs::{self},
     path::Path,
-};
-
-use actix_web::{
-    App, HttpResponse, HttpServer, Responder,
-    http::StatusCode,
-    web::{self},
 };
 
 macro_rules! param {
