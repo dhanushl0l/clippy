@@ -81,8 +81,10 @@ fn main() {
 
     match UserSettings::build_user() {
         Ok(usersettings) => {
-            if let Some(sync) = usersettings.get_sync() {
-                start_cloud(rx, sync.clone());
+            if !usersettings.disable_sync {
+                if let Some(sync) = usersettings.get_sync() {
+                    start_cloud(rx, sync.clone());
+                }
             }
         }
         Err(err) => {

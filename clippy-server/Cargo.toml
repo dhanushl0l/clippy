@@ -19,5 +19,5 @@ zip = "2.5.0"
 serde = { workspace = true }
 serde_json = { workspace = true }
 clippy = { path = "../clippy" }
-jsonwebtokens = "1.2.0"
 chrono = "0.4.40"
+jsonwebtoken = "9.3.1"

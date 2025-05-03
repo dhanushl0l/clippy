@@ -91,7 +91,7 @@ async fn update(
     let key = param!(&key, "TEMP");
     let id = param!(&id, "ID");
 
-    let username = match auth(key, &state) {
+    let username = match auth(key) {
         Ok(val) => val,
         Err(err) => return HttpResponse::Unauthorized().body(err.to_string()),
     };
@@ -132,7 +132,7 @@ async fn get(
     let key = param!(&key, "TEMP");
     let current = param!(&current, "current");
 
-    let username = match auth(key, &state) {
+    let username = match auth(key) {
         Ok(val) => val,
         Err(err) => return HttpResponse::Unauthorized().body(err.to_string()),
     };

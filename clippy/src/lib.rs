@@ -262,7 +262,7 @@ impl UserSettings {
     pub fn new() -> Self {
         Self {
             sync: None,
-            disable_sync: true,
+            disable_sync: false,
             store_image: true,
             encrept: None,
             click_on_quit: true,
