@@ -227,7 +227,7 @@ impl UserData {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub struct UserCred {
     pub username: String,
     pub key: String,
@@ -244,9 +244,10 @@ pub struct UserSettings {
     sync: Option<UserCred>,
     pub store_image: bool,
     pub click_on_quit: bool,
-    pub auto_sync: bool,
+    pub disable_sync: bool,
     encrept: Option<String>,
     pub intrevel: u32,
+    pub max_clipboard: Option<u32>,
     pub theme: SystemTheam,
 }
 
@@ -261,11 +262,12 @@ impl UserSettings {
     pub fn new() -> Self {
         Self {
             sync: None,
-            auto_sync: true,
+            disable_sync: true,
             store_image: true,
             encrept: None,
             click_on_quit: true,
             intrevel: 3,
+            max_clipboard: Some(100),
             theme: SystemTheam::System,
         }
     }
@@ -280,6 +282,10 @@ impl UserSettings {
 
     pub fn set_user(&mut self, val: UserCred) {
         self.sync = Some(val)
+    }
+
+    pub fn is_login(&self) -> bool {
+        !(self.sync == None)
     }
 
     pub fn build_user() -> Result<Self, Box<dyn Error>> {

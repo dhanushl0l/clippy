@@ -9,8 +9,8 @@ use eframe::{
     run_native,
 };
 use egui::{
-    Align, Button, Color32, Frame, Layout, Margin, Rect, RichText, Shadow, Stroke, TextEdit,
-    TextStyle, TopBottomPanel, Vec2, vec2,
+    Align, Button, Frame, Layout, Margin, RichText, Stroke, TextEdit, TextStyle, Theme,
+    TopBottomPanel, Vec2,
 };
 use http::{check_user, login, signin};
 use std::{
@@ -121,26 +121,51 @@ impl Clipboard {
     }
 }
 impl App for Clipboard {
-    fn update(&mut self, ctx: &eframe::egui::Context, frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
         let button_size = Vec2::new(100.0, 35.0);
 
         TopBottomPanel::top("footer").show(ctx, |ui| {
-            match self.settings.theme {
-                SystemTheam::System => (),
-                SystemTheam::Dark => ctx.set_visuals(egui::Visuals::dark()),
-                SystemTheam::Light => ctx.set_visuals(egui::Visuals::light()),
-            }
-
             let available_width = ui.available_width();
 
             ui.allocate_ui(Vec2::new(available_width, 0.0), |ui| {
                 ui.horizontal(|ui| {
-                    ui.add_space(20.0);
+                    ui.add_space(10.0);
 
                     ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                        ui.add_space((available_width / 2.0) - 60.0);
-                        ui.label(RichText::new("Clippy").size(40.0));
+                        Frame::group(ui.style())
+                            .corner_radius(9)
+                            .outer_margin(Margin::same(4))
+                            .show(ui, |ui| {
+                                let button_next = Button::new(RichText::new("⬅").size(15.0))
+                                    .min_size(Vec2::new(20.0, 20.0))
+                                    .corner_radius(50.0)
+                                    .stroke(Stroke::new(
+                                        1.0,
+                                        ui.visuals().widgets.inactive.bg_fill,
+                                    ));
+
+                                if ui.add(button_next).on_hover_text("Previous page").clicked() {
+                                    self.page += 1;
+                                }
+
+                                ui.label(self.page.to_string());
+
+                                let button_prev = Button::new(RichText::new("➡").size(15.0))
+                                    .min_size(Vec2::new(20.0, 20.0))
+                                    .corner_radius(50.0)
+                                    .stroke(Stroke::new(
+                                        1.0,
+                                        ui.visuals().widgets.inactive.bg_fill,
+                                    ));
+
+                                if ui.add(button_prev).on_hover_text("Next page").clicked() {
+                                    self.page += 1;
+                                }
+                            });
                     });
+
+                    ui.add_space((available_width / 2.0) - 150.0);
+                    ui.label(RichText::new("Clippy").size(40.0));
 
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.add_space(10.0);
@@ -155,36 +180,6 @@ impl App for Clipboard {
                         }
 
                         ui.add_space(10.0);
-                        Frame::group(ui.style())
-                            .corner_radius(9)
-                            .outer_margin(Margin::same(4))
-                            .show(ui, |ui| {
-                                let button_next = Button::new(RichText::new("➡").size(15.0))
-                                    .min_size(Vec2::new(20.0, 20.0))
-                                    .corner_radius(50.0)
-                                    .stroke(Stroke::new(
-                                        1.0,
-                                        ui.visuals().widgets.inactive.bg_fill,
-                                    ));
-
-                                if ui.add(button_next).on_hover_text("Next page").clicked() {
-                                    self.page += 1;
-                                }
-
-                                ui.label(self.page.to_string());
-
-                                let button_prev = Button::new(RichText::new("⬅").size(15.0))
-                                    .min_size(Vec2::new(20.0, 20.0))
-                                    .corner_radius(50.0)
-                                    .stroke(Stroke::new(
-                                        1.0,
-                                        ui.visuals().widgets.inactive.bg_fill,
-                                    ));
-
-                                if ui.add(button_prev).on_hover_text("Previous page").clicked() {
-                                    self.page += 1;
-                                }
-                            });
                     });
                 });
             });
@@ -195,7 +190,7 @@ impl App for Clipboard {
                     .open(&mut open)
                     .resizable(false)
                     .collapsible(false)
-                    .fixed_pos(ctx.screen_rect().center() - egui::vec2(170.0, 190.0))
+                    .fixed_pos(ctx.screen_rect().center() - egui::vec2(170.0, 270.0))
                     .show(ctx, |ui| {
                         egui::Frame::group(ui.style()).show(ui, |ui| {
                             ui.set_min_width(ui.available_width());
@@ -322,8 +317,9 @@ impl App for Clipboard {
                                                     *wait_lock = Waiting::Signin(Some(val));
                                                 }
                                                 Err(err) => {
-                                                    // self.show_createuser_window = false;
-                                                    // self.show_error = (true, err.to_string());
+                                                    eprintln!("{}", err);
+                                                    let mut wait_lock = wait.lock().unwrap();
+                                                    *wait_lock = Waiting::Signin(None);
                                                 }
                                             }
                                         });
@@ -453,21 +449,44 @@ impl App for Clipboard {
                                             SystemTheam::Dark => "Dark",
                                         })
                                         .show_ui(ui, |ui| {
-                                            ui.selectable_value(
-                                                &mut self.settings.theme,
-                                                SystemTheam::System,
-                                                "System",
-                                            );
-                                            ui.selectable_value(
-                                                &mut self.settings.theme,
-                                                SystemTheam::Light,
-                                                "Light",
-                                            );
-                                            ui.selectable_value(
-                                                &mut self.settings.theme,
-                                                SystemTheam::Dark,
-                                                "Dark",
-                                            );
+                                            if ui
+                                                .selectable_value(
+                                                    &mut self.settings.theme,
+                                                    SystemTheam::System,
+                                                    "System",
+                                                )
+                                                .clicked()
+                                            {
+                                                if let Some(theam) = ctx.system_theme() {
+                                                    if theam == Theme::Dark {
+                                                        ctx.set_visuals(egui::Visuals::dark());
+                                                    } else {
+                                                        ctx.set_visuals(egui::Visuals::light());
+                                                    }
+                                                } else {
+                                                    ctx.set_visuals(egui::Visuals::dark());
+                                                };
+                                            };
+                                            if ui
+                                                .selectable_value(
+                                                    &mut self.settings.theme,
+                                                    SystemTheam::Light,
+                                                    "Light",
+                                                )
+                                                .changed()
+                                            {
+                                                ctx.set_visuals(egui::Visuals::light());
+                                            };
+                                            if ui
+                                                .selectable_value(
+                                                    &mut self.settings.theme,
+                                                    SystemTheam::Dark,
+                                                    "Dark",
+                                                )
+                                                .clicked()
+                                            {
+                                                ctx.set_visuals(egui::Visuals::dark());
+                                            };
                                         });
                                 });
 
@@ -489,6 +508,41 @@ impl App for Clipboard {
                                 });
                             });
 
+                            if let Some(mut val) = self.settings.max_clipboard {
+                                ui.horizontal(|ui| {
+                                    ui.label("Limite clipboard cache");
+                                    ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
+                                        if ui.add(toggle(&mut true)).changed() {
+                                            self.settings.max_clipboard = None;
+                                            self.settings.write();
+                                        }
+                                    });
+                                });
+
+                                ui.horizontal(|ui| {
+                                    ui.label("Total no of clipboard");
+                                    ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
+                                        if ui
+                                            .add(egui::Slider::new(&mut val, 10..=1000).text(""))
+                                            .changed()
+                                        {
+                                            self.settings.max_clipboard = Some(val);
+                                            self.settings.write();
+                                        }
+                                    });
+                                });
+                            } else {
+                                ui.horizontal(|ui| {
+                                    ui.label("Limite clipboard cache");
+                                    ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
+                                        if ui.add(toggle(&mut false)).changed() {
+                                            self.settings.max_clipboard = Some(100);
+                                            self.settings.write();
+                                        }
+                                    });
+                                });
+                            }
+
                             ui.horizontal(|ui| {
                                 ui.label("Store Image");
                                 ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
@@ -508,31 +562,34 @@ impl App for Clipboard {
                             });
 
                             ui.horizontal(|ui| {
-                                ui.label("Change");
+                                ui.label("Placeholder");
                                 ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
-                                    if ui.add(toggle(&mut self.settings.click_on_quit)).changed() {
+                                    if ui.add(toggle(&mut true)).changed() {
                                         self.settings.write();
                                     }
                                 });
                             });
 
-                            ui.horizontal(|ui| {
-                                ui.label("Auto sync");
-                                ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
-                                    if ui.add(toggle(&mut self.settings.auto_sync)).changed() {
-                                        self.settings.write();
-                                    }
+                            if self.settings.is_login() {
+                                ui.horizontal(|ui| {
+                                    ui.label("Disable sync");
+                                    ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
+                                        if ui.add(toggle(&mut self.settings.disable_sync)).changed()
+                                        {
+                                            self.settings.write();
+                                        }
+                                    });
                                 });
-                            });
 
-                            ui.horizontal(|ui| {
-                                ui.label("Change");
-                                ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
-                                    if ui.add(toggle(&mut self.settings.click_on_quit)).changed() {
-                                        self.settings.write();
-                                    }
+                                ui.horizontal(|ui| {
+                                    ui.label("Placeholder");
+                                    ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
+                                        if ui.add(toggle(&mut true)).changed() {
+                                            self.settings.write();
+                                        }
+                                    });
                                 });
-                            });
+                            }
                         });
 
                         ui.separator();
