@@ -8,6 +8,7 @@ pub enum Thumbnail {
 
 pub enum Waiting {
     CheckUser(Option<bool>),
+    SigninOTP(Option<bool>),
     Login(Option<UserCred>),
     Signin(Option<UserCred>),
     None,

@@ -1,12 +1,9 @@
-use core::fmt;
-use std::io;
-
-use clippy::{UserCred, Username, http::SERVER};
+use clippy::{NewUser, NewUserOtp, UserCred, http::SERVER};
 use reqwest::{Client, Error};
 
 pub async fn check_user(user: String) -> Option<bool> {
     let connection = Client::new();
-    let data = Username { user };
+    let data = NewUser::new(user);
 
     let response = connection
         .get(format!("{}/usercheck", SERVER))
@@ -22,17 +19,30 @@ pub async fn check_user(user: String) -> Option<bool> {
     }
 }
 
-pub async fn signin(username: String) -> Result<UserCred, Error> {
+pub async fn signin(data: NewUser) -> Result<bool, Error> {
     let connection = Client::new();
-    let data = Username::new(username);
     let response = connection
         .post(format!("{}/signin", SERVER))
         .json(&data)
         .send()
         .await?;
 
-    let user: UserCred = response.json().await?;
-    Ok(user)
+    if response.status().is_success() {
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
+pub async fn signin_otp_auth(data: NewUserOtp) -> Result<UserCred, Error> {
+    let connection = Client::new();
+    let response = connection
+        .post(format!("{}/authotp", SERVER))
+        .json(&data)
+        .send()
+        .await?;
+
+    Ok(response.json().await?)
 }
 
 pub async fn login(user: UserCred) -> Result<Option<UserCred>, Error> {

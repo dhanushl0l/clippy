@@ -4,11 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-actix = "0.13.5"
-actix-files = "0.6.6"
 actix-multipart = "0.7.2"
 actix-web = "4"
-actix-web-actors = "4.3.1"
 env_logger = "0.11.7"
 flate2 = "1.1.1"
 futures-util = "0.3.31"
@@ -21,3 +18,4 @@ serde_json = { workspace = true }
 clippy = { path = "../clippy" }
 chrono = "0.4.40"
 jsonwebtoken = "9.3.1"
+lettre = { version = "0.11", default-features = false, features = ["tokio1-native-tls", "smtp-transport", "builder"] }

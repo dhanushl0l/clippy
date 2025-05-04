@@ -364,14 +364,34 @@ impl Pending {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct Username {
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct NewUser {
     pub user: String,
+    pub email: Option<String>,
 }
 
-impl Username {
+impl NewUser {
     pub fn new(user: String) -> Self {
-        Self { user }
+        Self { user, email: None }
+    }
+
+    pub fn new_signin(user: String, email: String) -> Self {
+        Self {
+            user,
+            email: Some(email),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct NewUserOtp {
+    pub user: String,
+    pub otp: String,
+}
+
+impl NewUserOtp {
+    pub fn new(user: String, otp: String) -> Self {
+        Self { user, otp }
     }
 }
 

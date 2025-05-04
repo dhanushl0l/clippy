@@ -3,10 +3,12 @@ use actix_web::{
     App, HttpResponse, HttpServer, Responder,
     web::{self},
 };
-use clippy::Username;
+use clippy::{NewUser, NewUserOtp};
 use clippy_server::{
-    CRED_PATH, UserCred, UserState, auth, gen_password, get_auth, get_param, to_zip, write_file,
+    CRED_PATH, OTPState, UserCred, UserState, auth, gen_otp, gen_password, get_auth, get_param,
+    to_zip, write_file,
 };
+use email::send_otp;
 use env_logger::{Builder, Env};
 use log::debug;
 use std::{
@@ -14,6 +16,7 @@ use std::{
     fs::{self},
     path::Path,
 };
+mod email;
 
 macro_rules! param {
     ($map:expr, $key:expr) => {
@@ -24,32 +27,67 @@ macro_rules! param {
     };
 }
 
-async fn signin(data: web::Json<Username>, state: web::Data<UserState>) -> impl Responder {
+async fn signin(
+    data: web::Json<NewUser>,
+    state: web::Data<UserState>,
+    otp_state: web::Data<OTPState>,
+) -> impl Responder {
     let username = &data.user;
 
-    if state.entry_and_verify_user(username) {
+    if state.verify(username) {
         return HttpResponse::Unauthorized().body("Failure: Username already exists");
-    }
-
-    let password = gen_password();
-    if let Err(err) = UserCred::new(username.clone(), password).write() {
-        eprintln!("Failure: failed to write credentials\n{}", err);
-        return HttpResponse::InternalServerError().body("Error: Failed to write credentials");
-    }
-
-    let file_path = Path::new(CRED_PATH).join(username).join("user.json");
-    match fs::read_to_string(&file_path) {
-        Ok(content) => HttpResponse::Ok()
-            .content_type("application/json")
-            .body(content),
-        Err(err) => {
-            eprintln!("Error reading user file: {}", err);
-            HttpResponse::NotFound().body("Error: JSON file not found")
+    } else {
+        let otp = gen_otp();
+        otp_state.add_otp(username.to_string(), otp.clone());
+        match send_otp(&data, otp).await {
+            Ok(_) => HttpResponse::Ok().body("SURCESS"),
+            Err(err) => HttpResponse::InternalServerError().body(err.to_string()),
         }
     }
 }
 
-async fn check_user(state: web::Data<UserState>, data: web::Json<Username>) -> impl Responder {
+async fn signin_auth(
+    data: web::Json<NewUserOtp>,
+    state: web::Data<UserState>,
+    otp_state: web::Data<OTPState>,
+) -> impl Responder {
+    let username = &data.user;
+
+    if state.verify(username) {
+        return HttpResponse::Unauthorized().body("Failure: Username already exists");
+    } else {
+        match otp_state.check_otp(&data) {
+            Ok(_) => {
+                let password = gen_password();
+                if let Err(err) = UserCred::new(username.clone(), password).write() {
+                    eprintln!("Failure: failed to write credentials\n{}", err);
+                    return HttpResponse::InternalServerError()
+                        .body("Error: Failed to write credentials");
+                }
+
+                let file_path = Path::new(CRED_PATH).join(username).join("user.json");
+                match fs::read_to_string(&file_path) {
+                    Ok(content) => {
+                        if state.entry_and_verify_user(username) {
+                            return HttpResponse::Unauthorized()
+                                .body("Failure: Username already exists");
+                        };
+                        HttpResponse::Ok()
+                            .content_type("application/json")
+                            .body(content)
+                    }
+                    Err(err) => {
+                        eprintln!("Error reading user file: {}", err);
+                        HttpResponse::NotFound().body("Error: JSON file not found")
+                    }
+                }
+            }
+            Err(err) => return HttpResponse::Unauthorized().body(err),
+        }
+    }
+}
+
+async fn check_user(state: web::Data<UserState>, data: web::Json<NewUser>) -> impl Responder {
     let username = &data.user;
 
     if state.verify(username) {
@@ -69,7 +107,7 @@ async fn get_key(cred: web::Json<UserCred>, state: web::Data<UserState>) -> impl
             }
         };
         if user_cred_db == *cred {
-            let key = match get_auth(&cred.username) {
+            let key = match get_auth(&cred.username, 1) {
                 Ok(val) => val,
                 Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
             };
@@ -160,15 +198,18 @@ async fn main() -> std::io::Result<()> {
     Builder::from_env(Env::default().filter_or("LOG", "info")).init();
 
     let user_state = web::Data::new(UserState::new());
+    let otp_state = web::Data::new(OTPState::new());
 
     debug!("User state: {:?}", user_state);
 
     HttpServer::new(move || {
         App::new()
             .app_data(user_state.clone())
+            .app_data(otp_state.clone())
             .route("/state/{user}", web::get().to(state))
             .route("/update", web::post().to(update))
             .route("/signin", web::post().to(signin))
+            .route("/authotp", web::post().to(signin_auth))
             .route("/get", web::get().to(get))
             .route("/getkey", web::get().to(get_key))
             .route("/usercheck", web::get().to(check_user))

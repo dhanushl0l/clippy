@@ -1,6 +1,6 @@
 use clipboard_img_widget::item_card_image;
 use clipboard_widget::item_card;
-use clippy::{Data, SystemTheam, UserCred, UserSettings, get_path};
+use clippy::{get_path, Data, NewUser, NewUserOtp, SystemTheam, UserCred, UserSettings};
 use clippy_gui::{Thumbnail, Waiting, str_formate};
 use custom_egui_widget::toggle;
 use eframe::{
@@ -12,7 +12,7 @@ use egui::{
     Align, Button, Frame, Layout, Margin, RichText, Stroke, TextEdit, TextStyle, Theme,
     TopBottomPanel, Vec2,
 };
-use http::{check_user, login, signin};
+use http::{check_user, login, signin, signin_otp_auth};
 use std::{
     cmp::Reverse,
     collections::HashMap,
@@ -35,11 +35,13 @@ struct Clipboard {
     settings: UserSettings,
     show_settings: bool,
     show_signin_window: bool,
-    username: String,
+    newuser: NewUser,
     key: String,
+    otp: String,
     waiting: Arc<Mutex<Waiting>>,
     show_login_window: bool,
     show_createuser_window: bool,
+    show_createuser_auth_window: bool,
     show_error: (bool, String),
     show_data_popup: (bool, String, PathBuf),
 }
@@ -105,9 +107,11 @@ impl Clipboard {
             show_signin_window: false,
             show_login_window: false,
             show_createuser_window: false,
+            show_createuser_auth_window: false,
             show_error: (false, String::from("")),
-            username: "".to_string(),
+            newuser: NewUser::new_signin(String::new(), String::new()),
             key: "".to_string(),
+            otp: String::new(),
             waiting: Arc::new(Mutex::new(Waiting::None)),
             show_data_popup: (false, String::new(), PathBuf::new()),
         }
@@ -226,19 +230,20 @@ impl App for Clipboard {
                                             RichText::new("Enter your details").size(20.0).strong(),
                                         );
 
+                                        ui.label(RichText::new("Username must be 3–20 characters long and contain only letters, numbers, or underscores (no spaces or special symbols)."));
                                         ui.add_space(8.0);
-                                        ui.label(RichText::new("Username:").size(17.0).strong());
 
-                                        ui.add_space(8.0);
 
                                         ui.style_mut().override_text_style =
                                             Some(TextStyle::Heading);
 
                                         ui.add(
-                                            TextEdit::singleline(&mut self.username)
+                                            TextEdit::singleline(&mut self.newuser.user)
                                                 .vertical_align(Align::Center)
                                                 .hint_text("enter the username"),
                                         );
+
+                                        ui.add_space(8.0);
 
                                         ui.style_mut().override_text_style = None;
 
@@ -266,7 +271,7 @@ impl App for Clipboard {
                                                 .clicked()
                                             {
                                                 self.show_signin_window = false;
-                                                let username = self.username.clone();
+                                                let username = self.newuser.user.clone();
                                                 let wait = self.waiting.clone();
 
                                                 thread::spawn(move || {
@@ -301,16 +306,58 @@ impl App for Clipboard {
                                         ui.add_space(10.0);
                                     });
                                 } else if self.show_createuser_window {
-                                    let signin_button = ui.button("signin");
+
+                                    if let Some(email) = &mut self.newuser.email {
+                                        ui.add(
+                                            TextEdit::singleline(email)
+                                                .vertical_align(Align::Center)
+                                                .hint_text("enter the email"),
+                                        );
+                                    }
+
+
+                                    let signin_button = ui.button("signin1");
 
                                     if signin_button.clicked() {
                                         let wait = self.waiting.clone();
-                                        let username = self.username.clone();
+                                        let user = self.newuser.clone();
                                         thread::spawn(move || {
                                             let async_runtime = Runtime::new().unwrap();
 
                                             let signin = async_runtime
-                                                .block_on(async { signin(username).await });
+                                                .block_on(async { signin(user).await });
+                                            match signin {
+                                                Ok(val) => {
+                                                    let mut wait_lock = wait.lock().unwrap();
+                                                    *wait_lock = Waiting::SigninOTP(Some(val));
+                                                }
+                                                Err(err) => {
+                                                    eprintln!("{}", err);
+                                                    let mut wait_lock = wait.lock().unwrap();
+                                                    *wait_lock = Waiting::Signin(None);
+                                                }
+                                            }
+                                        });
+                                    }
+                                }else if self.show_createuser_auth_window {
+                                        ui.add(
+                                            TextEdit::singleline(&mut self.otp)
+                                                .vertical_align(Align::Center)
+                                                .hint_text("enter the OTP"),
+                                        );
+                                    
+
+
+                                    let signin_button = ui.button("signin2");
+
+                                    if signin_button.clicked() {
+                                        let wait = self.waiting.clone();
+                                        let user = NewUserOtp::new(self.newuser.user.clone(), self.otp.clone());
+                                        thread::spawn(move || {
+                                            let async_runtime = Runtime::new().unwrap();
+
+                                            let signin = async_runtime
+                                                .block_on(async { signin_otp_auth(user).await });
                                             match signin {
                                                 Ok(val) => {
                                                     let mut wait_lock = wait.lock().unwrap();
@@ -373,7 +420,7 @@ impl App for Clipboard {
                                                 .clicked()
                                             {
                                                 let user = UserCred::new(
-                                                    self.username.clone(),
+                                                    self.newuser.user.clone(),
                                                     self.key.clone(),
                                                 );
                                                 let wait = self.waiting.clone();
@@ -636,6 +683,22 @@ impl App for Clipboard {
                         }
                         Waiting::Signin(Some(usercred)) => {
                             self.settings.set_user(usercred.clone());
+                            *val = Waiting::None;
+                        }
+                        Waiting::SigninOTP(Some(true)) => {
+                            self.show_signin_window = false;
+                            self.show_createuser_window = false;
+                            self.show_createuser_auth_window = true;
+                            *val = Waiting::None;
+                        }
+                        Waiting::SigninOTP(Some(false)) => {
+                            self.show_error = (true, String::from("Invalid OTP or Network error"));
+                            self.show_signin_window = false;
+                            *val = Waiting::None;
+                        }
+                        Waiting::SigninOTP(None) => {
+                            self.show_error = (true, String::from("Network error"));
+                            self.show_signin_window = false;
                             *val = Waiting::None;
                         }
                     }

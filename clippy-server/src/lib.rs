@@ -1,6 +1,7 @@
 use actix_multipart::Multipart;
 use actix_web::HttpResponse;
 use chrono::{Duration, Utc};
+use clippy::NewUserOtp;
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use log::error;
 use rand::seq::IteratorRandom;
@@ -182,6 +183,21 @@ pub fn gen_password() -> String {
     password
 }
 
+pub fn gen_otp() -> String {
+    let mut rng = rand::rng();
+    let len = 6;
+    let possible_chars: Vec<char> = ('0'..='9').collect();
+    let mut otp = String::with_capacity(len);
+
+    for _ in 0..len {
+        if let Some(&random) = possible_chars.iter().choose(&mut rng) {
+            otp.push(random);
+        }
+    }
+
+    otp
+}
+
 use futures_util::StreamExt;
 
 pub async fn write_file(
@@ -275,10 +291,53 @@ pub fn auth(key: String) -> Result<String, jsonwebtoken::errors::Error> {
     Ok(token.claims.user.to_string())
 }
 
-pub fn get_auth(username: &str) -> Result<String, jsonwebtoken::errors::Error> {
+pub struct OTPState {
+    data: Arc<Mutex<HashMap<String, (String, i64, u32)>>>,
+}
+
+impl OTPState {
+    pub fn new() -> Self {
+        Self {
+            data: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+    pub fn add_otp(&self, user: String, otp: String) {
+        let now = Utc::now();
+        let expiry_time = now + Duration::minutes(5);
+
+        self.data
+            .lock()
+            .unwrap()
+            .insert(user, (otp, expiry_time.timestamp(), 0));
+    }
+
+    pub fn check_otp(&self, user_otp: &NewUserOtp) -> Result<(), String> {
+        if let Some((val, exp, attempt)) = self.data.lock().unwrap().get_mut(&user_otp.user) {
+            if *attempt > 4 {
+                return Err(String::from(
+                    "You have exceeded the maximum number of attempts.",
+                ));
+            }
+
+            if *val != user_otp.otp {
+                *attempt += 1;
+                return Err(String::from("Invalid otp"));
+            }
+
+            if is_token_expired(*exp) {
+                return Err(String::from(
+                    "This code has expired. Please request a new one.",
+                ));
+            }
+        };
+        Ok(())
+    }
+}
+
+pub fn get_auth(username: &str, exp: i64) -> Result<String, jsonwebtoken::errors::Error> {
     let now = Utc::now();
     let time = now.to_rfc3339();
-    let expiry_time = now + Duration::hours(1);
+    let expiry_time = now + Duration::hours(exp);
 
     let claims = json!({
         "iss": "https://dhanu.cloud", //plasholder
@@ -296,4 +355,9 @@ pub fn get_auth(username: &str) -> Result<String, jsonwebtoken::errors::Error> {
     )?;
 
     Ok(token)
+}
+
+fn is_token_expired(expiry_timestamp: i64) -> bool {
+    let now_timestamp = Utc::now().timestamp();
+    now_timestamp >= expiry_timestamp
 }
