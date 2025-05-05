@@ -222,6 +222,25 @@ impl App for Clipboard {
 
                                         ui.add_space(10.0);
                                     });
+                                     } else if self.show_error.0 {
+                                        ui.label(RichText::new("😢").size(150.0));
+
+                                    ui.label(RichText::new(&self.show_error.1).size(20.0).strong(),);
+                                    ui.add_space(10.0);
+                                    if ui
+                                    .add(
+                                        egui::Button::new(
+                                            egui::RichText::new("Cancel")
+                                                .size(16.0)
+                                                .strong(),
+                                        )
+                                        .min_size(button_size),
+                                    )
+                                    .clicked(){
+                                        self.show_error = (false, String::new())
+                                    }
+                                    ui.add_space(10.0);
+
                                 } else if self.show_signin_window {
                                     ui.vertical_centered(|ui| {
                                         ui.add_space(10.0);
@@ -270,7 +289,6 @@ impl App for Clipboard {
                                                 )
                                                 .clicked()
                                             {
-                                                self.show_signin_window = false;
                                                 let username = self.newuser.user.clone();
                                                 let wait = self.waiting.clone();
 
@@ -306,19 +324,57 @@ impl App for Clipboard {
                                         ui.add_space(10.0);
                                     });
                                 } else if self.show_createuser_window {
+                                    ui.label(RichText::new("😃").size(150.0));
+
+                                    ui.label(
+                                        RichText::new("Enter your details").size(20.0).strong(),
+                                    );
+                                    ui.add_space(8.0);
+
+
+                                    ui.label(RichText::new("Email:").size(15.0).strong());
+                                    
+                                    ui.add_space(8.0);
 
                                     if let Some(email) = &mut self.newuser.email {
-                                        ui.add(
-                                            TextEdit::singleline(email)
-                                                .vertical_align(Align::Center)
-                                                .hint_text("enter the email"),
-                                        );
-                                    }
 
+                                        ui.style_mut().override_text_style =
+                                        Some(TextStyle::Heading);
 
-                                    let signin_button = ui.button("signin1");
+                                    ui.add(
+                                        TextEdit::singleline(email)
+                                            .vertical_align(Align::Center)
+                                            .hint_text("Enter the Email"),
+                                    );
+                                }
 
-                                    if signin_button.clicked() {
+                                
+                                ui.style_mut().override_text_style = None;
+
+                                ui.add_space(10.0);
+
+                                ui.horizontal(|ui| {
+                                    let total_button_width =
+                                        button_size.x * 2.0 + 20.0 + 2.0 * 35.0;
+                                    let available_width = ui.available_width();
+                                    let horizontal_padding =
+                                        (available_width - total_button_width).max(0.0)
+                                            / 2.0;
+
+                                    ui.add_space(horizontal_padding);
+                                    ui.add_space(35.0);
+
+                                    if ui
+                                        .add(
+                                            egui::Button::new(
+                                                egui::RichText::new("Sign in")
+                                                    .size(16.0)
+                                                    .strong(),
+                                            )
+                                            .min_size(button_size),
+                                        )
+                                        .clicked()
+                                    {
                                         let wait = self.waiting.clone();
                                         let user = self.newuser.clone();
                                         thread::spawn(move || {
@@ -338,19 +394,77 @@ impl App for Clipboard {
                                                 }
                                             }
                                         });
-                                    }
+                                    } 
+
+                                    ui.add_space(20.0);
+                                            if ui
+                                                .add(
+                                                    egui::Button::new(
+                                                        egui::RichText::new("Cancel")
+                                                            .size(16.0)
+                                                            .strong(),
+                                                    )
+                                                    .min_size(button_size),
+                                                )
+                                                .clicked()
+                                            {
+                                                self.show_createuser_window = false;
+                                            }
+                                        });
+                                            ui.add_space(20.0);
+                                            
                                 }else if self.show_createuser_auth_window {
+                                    ui.label(RichText::new("😃").size(150.0));
+
+                                    ui.label(
+                                        RichText::new("Enter your details").size(20.0).strong(),
+                                    );
+                                    ui.add_space(8.0);
+
+
+                                    ui.label(RichText::new("OTP:").size(15.0).strong());
+                                    
+                                    ui.add_space(8.0);
+
+
+                                        ui.style_mut().override_text_style =
+                                        Some(TextStyle::Heading);
+
                                         ui.add(
                                             TextEdit::singleline(&mut self.otp)
                                                 .vertical_align(Align::Center)
-                                                .hint_text("enter the OTP"),
+                                                .hint_text("enter the OTP").min_size(button_size),
                                         );
+                                
+
+                                
+                                        ui.style_mut().override_text_style = None;
+
+                                        ui.add_space(10.0);
+        
+                                        ui.horizontal(|ui| {
+                                            let total_button_width =
+                                                button_size.x * 2.0 + 20.0 + 2.0 * 35.0;
+                                            let available_width = ui.available_width();
+                                            let horizontal_padding =
+                                                (available_width - total_button_width).max(0.0)
+                                                    / 2.0;
+        
+                                            ui.add_space(horizontal_padding);
+                                            ui.add_space(35.0);
+
+
                                     
-
-
-                                    let signin_button = ui.button("signin2");
-
-                                    if signin_button.clicked() {
+                                    if ui
+                                    .add(
+                                        egui::Button::new(
+                                            egui::RichText::new("Sign in")
+                                                .size(16.0)
+                                                .strong(),
+                                        )
+                                        .min_size(button_size),
+                                    )
+                                    .clicked() {
                                         let wait = self.waiting.clone();
                                         let user = NewUserOtp::new(self.newuser.user.clone(), self.otp.clone());
                                         thread::spawn(move || {
@@ -371,6 +485,22 @@ impl App for Clipboard {
                                             }
                                         });
                                     }
+                                    ui.add_space(20.0);
+                                    if ui
+                                        .add(
+                                            egui::Button::new(
+                                                egui::RichText::new("Cancel")
+                                                    .size(16.0)
+                                                    .strong(),
+                                            )
+                                            .min_size(button_size),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.show_createuser_auth_window = false;
+                                    }
+                                    ui.add_space(20.0);
+                                });
                                 } else if self.show_login_window {
                                     ui.vertical_centered(|ui| {
                                         ui.label(RichText::new("😃").size(150.0).strong());
@@ -432,7 +562,9 @@ impl App for Clipboard {
 
                                                     match login_result {
                                                         Err(err) => {
-                                                            eprintln!("error logging in {}", err)
+                                                            eprintln!("error logging in {}", err);
+                                                            let mut wait_lock = wait.lock().unwrap();
+                                                            *wait_lock = Waiting::Login(None);
                                                         }
                                                         Ok(val) => {
                                                             let mut wait_lock =
@@ -463,11 +595,6 @@ impl App for Clipboard {
                                         });
                                         ui.add_space(10.0);
                                     });
-                                } else if self.show_error.0 {
-                                    ui.label(&self.show_error.1);
-                                    if ui.button("close").clicked() {
-                                        self.show_error = (false, String::new())
-                                    }
                                 } else {
                                     ui.label(RichText::new("😃").size(150.0).strong());
                                     let signin_button = ui.add(
@@ -656,20 +783,22 @@ impl App for Clipboard {
                     match &*val {
                         Waiting::None => (),
                         Waiting::CheckUser(Some(true)) => {
+                            self.show_signin_window = false;
                             self.show_login_window = true;
                             *val = Waiting::None;
                         }
                         Waiting::CheckUser(Some(false)) => {
+                            self.show_signin_window = false;
                             self.show_createuser_window = true;
                             *val = Waiting::None;
                         }
                         Waiting::Login(Some(usercred)) => {
                             self.settings.set_user(usercred.clone());
+                            self.show_login_window = false;
                             *val = Waiting::None;
                         }
                         Waiting::Login(None) => {
                             self.show_error = (true, String::from("Authentication failed"));
-                            self.show_login_window = false;
                             *val = Waiting::None;
                         }
                         Waiting::CheckUser(None) => {
@@ -677,28 +806,26 @@ impl App for Clipboard {
                             *val = Waiting::None;
                         }
                         Waiting::Signin(None) => {
-                            self.show_error = (true, String::from("Authentication failed"));
-                            self.show_signin_window = false;
+                            self.show_error = (true, String::from("Invalid OTP or Network error"));
                             *val = Waiting::None;
                         }
                         Waiting::Signin(Some(usercred)) => {
+                            self.show_createuser_window = false;
+                            self.show_createuser_auth_window = false;
                             self.settings.set_user(usercred.clone());
                             *val = Waiting::None;
                         }
                         Waiting::SigninOTP(Some(true)) => {
-                            self.show_signin_window = false;
                             self.show_createuser_window = false;
                             self.show_createuser_auth_window = true;
                             *val = Waiting::None;
                         }
                         Waiting::SigninOTP(Some(false)) => {
-                            self.show_error = (true, String::from("Invalid OTP or Network error"));
-                            self.show_signin_window = false;
+                            self.show_error = (true, String::from("Invalid Email or Network error"));
                             *val = Waiting::None;
                         }
                         Waiting::SigninOTP(None) => {
                             self.show_error = (true, String::from("Network error"));
-                            self.show_signin_window = false;
                             *val = Waiting::None;
                         }
                     }
