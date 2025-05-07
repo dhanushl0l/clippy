@@ -1,5 +1,4 @@
 use std::cmp::Reverse;
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::{fs, process};
 
@@ -9,11 +8,10 @@ use libadwaita as adw;
 
 use adw::prelude::*;
 use adw::{ActionRow, ApplicationWindow, HeaderBar};
-use gtk::gdk::{self, Display};
+use gtk::Image;
+use gtk::gdk::{self};
 use gtk::{Application, Box, ListBox, Orientation, ScrolledWindow};
-use gtk::{Image, glib};
 use gtk4_layer_shell::{Edge, Layer, LayerShell};
-use relm4::RelmIterChildrenExt;
 
 pub fn run_clip() {
     let application = Application::builder()
@@ -108,7 +106,7 @@ pub fn run_clip() {
         content.append(&scrolled_window);
         content.append(&list);
 
-        let count = list.iter_children().count() as i32;
+        let count = list.observe_children().into_iter().count() as i32;
 
         let max_height = 600;
         let min_height = 100;
@@ -142,7 +140,7 @@ pub fn run_clip() {
 
         // Anchors are if the window is pinned to each edge of the output
         let anchors = [
-            (Edge::Left, true),
+            (Edge::Left, false),
             (Edge::Right, false),
             (Edge::Top, false),
             (Edge::Bottom, false),

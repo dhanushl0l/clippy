@@ -1,6 +1,9 @@
 use clipboard_img_widget::item_card_image;
 use clipboard_widget::item_card;
-use clippy::{Data, NewUser, NewUserOtp, SystemTheam, UserCred, UserSettings, get_path};
+use clippy::{
+    Data, NewUser, NewUserOtp, SystemTheam, UserCred, UserSettings, get_global_update_bool,
+    get_path, set_global_update_bool,
+};
 use clippy_gui::{Thumbnail, Waiting, str_formate};
 use custom_egui_widget::toggle;
 use eframe::{
@@ -51,6 +54,38 @@ struct Clipboard {
 
 impl Clipboard {
     fn new() -> Self {
+        let data = Self::get_data();
+
+        Self {
+            data,
+            page: 1,
+            changed: false,
+            settings: match UserSettings::build_user() {
+                Ok(val) => val,
+                Err(err) => {
+                    eprintln!("{}", err);
+                    UserSettings::new()
+                }
+            },
+            show_settings: false,
+            show_signin_window: false,
+            show_login_window: false,
+            show_createuser_window: false,
+            show_createuser_auth_window: false,
+            show_error: (false, String::from("")),
+            newuser: NewUser::new_signin(String::new(), String::new()),
+            key: "".to_string(),
+            otp: String::new(),
+            waiting: Arc::new(Mutex::new(Waiting::None)),
+            show_data_popup: (false, String::new(), PathBuf::new()),
+        }
+    }
+
+    fn refresh(&mut self) {
+        self.data = Self::get_data();
+    }
+
+    fn get_data() -> HashMap<u32, Vec<(Thumbnail, Data, PathBuf)>> {
         let mut data = HashMap::new();
         let mut temp = Vec::new();
         if let Ok(entries) = fs::read_dir(get_path()) {
@@ -95,36 +130,7 @@ impl Clipboard {
             }
         }
 
-        Self {
-            data,
-            page: 1,
-            changed: false,
-            settings: match UserSettings::build_user() {
-                Ok(val) => val,
-                Err(err) => {
-                    eprintln!("{}", err);
-                    UserSettings::new()
-                }
-            },
-            show_settings: false,
-            show_signin_window: false,
-            show_login_window: false,
-            show_createuser_window: false,
-            show_createuser_auth_window: false,
-            show_error: (false, String::from("")),
-            newuser: NewUser::new_signin(String::new(), String::new()),
-            key: "".to_string(),
-            otp: String::new(),
-            waiting: Arc::new(Mutex::new(Waiting::None)),
-            show_data_popup: (false, String::new(), PathBuf::new()),
-        }
-    }
-
-    fn refresh(&mut self) {
-        let page = self.page;
-        let mut new = Clipboard::new();
-        new.page = page;
-        *self = new;
+        data
     }
 }
 impl App for Clipboard {
@@ -853,62 +859,63 @@ impl App for Clipboard {
             }
         });
 
-        if self.changed {
+        if self.changed || get_global_update_bool() {
             self.refresh();
             self.changed = false;
+            set_global_update_bool(false);
         }
 
         CentralPanel::default().show(ctx, |ui| {
             ui.vertical_centered(|ui| {
                 ScrollArea::vertical().show(ui, |ui| {
-                    let data = self
-                        .data
-                        .get(&self.page)
-                        .or_else(|| {
-                            self.page = 1;
-                            self.data.get(&self.page)
-                        })
-                        .unwrap();
+                    let data = self.data.get(&self.page).or_else(|| {
+                        self.page = 1;
+                        self.data.get(&self.page)
+                    });
 
-                    for (thumbnail, i, path) in data {
-                        if let Some(dat) = i.get_data() {
-                            ui.add_enabled_ui(true, |ui| {
-                                item_card(
-                                    ui,
-                                    &dat,
-                                    thumbnail,
-                                    &mut i.get_pined(),
-                                    &mut i.get_pined(),
-                                    self.settings.click_on_quit,
-                                    &mut self.show_data_popup,
-                                    &mut self.changed,
-                                    path,
-                                    ctx,
-                                )
-                            });
-                        } else if let Thumbnail::Image((image_data, (width, height))) = thumbnail {
-                            let color_image = egui::ColorImage::from_rgba_unmultiplied(
-                                [*width as usize, *height as usize],
-                                &image_data,
-                            );
+                    if let Some(data) = data {
+                        for (thumbnail, i, path) in data {
+                            if let Some(dat) = i.get_data() {
+                                ui.add_enabled_ui(true, |ui| {
+                                    item_card(
+                                        ui,
+                                        &dat,
+                                        thumbnail,
+                                        &mut i.get_pined(),
+                                        &mut i.get_pined(),
+                                        self.settings.click_on_quit,
+                                        &mut self.show_data_popup,
+                                        &mut self.changed,
+                                        path,
+                                        ctx,
+                                    )
+                                });
+                            } else if let Thumbnail::Image((image_data, (width, height))) =
+                                thumbnail
+                            {
+                                let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                                    [*width as usize, *height as usize],
+                                    &image_data,
+                                );
 
-                            let texture: egui::TextureHandle = ctx.load_texture(
-                                "thumbnail",
-                                color_image,
-                                egui::TextureOptions::LINEAR,
-                            );
-                            ui.add_enabled_ui(true, |ui| {
-                                item_card_image(
-                                    ui,
-                                    &texture,
-                                    &mut i.get_pined(),
-                                    self.settings.click_on_quit,
-                                    i,
-                                    &mut self.changed,
-                                    path,
-                                    ctx,
-                                )
-                            });
+                                let texture: egui::TextureHandle = ctx.load_texture(
+                                    "thumbnail",
+                                    color_image,
+                                    egui::TextureOptions::LINEAR,
+                                );
+                                ui.add_enabled_ui(true, |ui| {
+                                    item_card_image(
+                                        ui,
+                                        &texture,
+                                        &mut i.get_pined(),
+                                        self.settings.click_on_quit,
+                                        i,
+                                        &mut self.changed,
+                                        path,
+                                        ctx,
+                                    )
+                                });
+                            }
                         }
                     }
                     ui.label("");

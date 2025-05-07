@@ -9,8 +9,7 @@ use base64::engine::general_purpose;
 use bytes::Bytes;
 use chrono::prelude::Utc;
 use encryption_decryption::{decrypt_file, encrept_file};
-use image::codecs::png::PngEncoder;
-use image::{ColorType, ImageReader};
+use image::ImageReader;
 use log::{debug, error, warn};
 use serde::{Deserialize, Serialize};
 use std::error::Error;
@@ -66,7 +65,9 @@ impl Data {
         file.write_all(json_data.as_bytes())?;
 
         match tx.try_send((file_path.to_str().unwrap().into(), time)) {
-            Ok(_) => (),
+            Ok(_) => {
+                set_global_update_bool(true);
+            }
             Err(err) => warn!(
                 "Failed to send file '{}' to channel: {}",
                 file_path.display(),
@@ -522,4 +523,32 @@ pub fn get_global_bool() -> bool {
     path.pop();
     let path = Path::new(&path).join("OK");
     !path.exists()
+}
+
+pub fn set_global_update_bool(value: bool) {
+    let mut path = get_path();
+    if let Err(e) = fs::create_dir_all(path.parent().unwrap()) {
+        error!("Failed to create directories: {}", e);
+        return;
+    }
+
+    path.pop();
+    let path = Path::new(&path).join("UPDATE");
+
+    if value {
+        if let Err(e) = fs::File::create(&path) {
+            error!("Failed to create state file: {}", e);
+        }
+    } else {
+        if let Err(e) = fs::remove_file(&path) {
+            error!("Failed to delete state file: {}", e);
+        }
+    }
+}
+
+pub fn get_global_update_bool() -> bool {
+    let mut path = get_path();
+    path.pop();
+    let path = Path::new(&path).join("UPDATE");
+    path.exists()
 }
