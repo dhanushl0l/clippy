@@ -9,7 +9,8 @@ use base64::engine::general_purpose;
 use bytes::Bytes;
 use chrono::prelude::Utc;
 use encryption_decryption::{decrypt_file, encrept_file};
-use image::ImageReader;
+use image::codecs::png::PngEncoder;
+use image::{ColorType, ImageReader};
 use log::{debug, error, warn};
 use serde::{Deserialize, Serialize};
 use std::error::Error;
@@ -85,11 +86,7 @@ impl Data {
     }
 
     pub fn get_image_thumbnail(&self, id: &DirEntry) -> Option<(Vec<u8>, (u32, u32))> {
-        let mut path = get_path_image();
-        let file_nema = format!("{}.png", id.file_name().to_str().unwrap());
-        path.push(file_nema);
-
-        let image = ImageReader::open(path).ok()?.decode().ok()?;
+        let image = ImageReader::open(get_image_path(id)).ok()?.decode().ok()?;
 
         let rgba = image.to_rgba8();
 
@@ -490,6 +487,13 @@ pub fn store_image(id: &[String], target_dir: PathBuf) -> Result<(), Box<dyn Err
         }
     }
     Ok(())
+}
+
+pub fn get_image_path(id: &DirEntry) -> PathBuf {
+    let mut path = get_path_image();
+    let file_nema = format!("{}.png", id.file_name().to_str().unwrap());
+    path.push(file_nema);
+    path
 }
 
 pub fn set_global_bool(value: bool) {

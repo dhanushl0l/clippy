@@ -12,3 +12,8 @@ reqwest = "0.12.15"
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
+gio = "0.20.9"
+gtk = { version = "0.9.6", package = "gtk4" }
+gtk4-layer-shell = "0.5.0"
+libadwaita = "0.7.2"
+relm4 = "0.9.1"
