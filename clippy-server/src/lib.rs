@@ -277,7 +277,7 @@ pub struct Claims {
     user: String,
 }
 
-pub fn auth(key: String) -> Result<String, jsonwebtoken::errors::Error> {
+pub fn auth(key: &str) -> Result<String, jsonwebtoken::errors::Error> {
     let mut validation = Validation::new(Algorithm::HS256);
     validation.set_audience(&["clippy"]);
     validation.set_issuer(&["https://dhanu.cloud"]);

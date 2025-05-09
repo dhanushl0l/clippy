@@ -560,6 +560,7 @@ impl App for Clipboard {
                                                 let user = UserCred::new(
                                                     self.newuser.user.clone(),
                                                     self.key.clone(),
+                                                    self.newuser.email.clone().unwrap(),
                                                 );
                                                 let wait = self.waiting.clone();
                                                 thread::spawn(move || {

@@ -1,8 +1,9 @@
 use actix_multipart::Multipart;
 use actix_web::{
-    App, HttpResponse, HttpServer, Responder,
+    App, HttpRequest, HttpResponse, HttpServer, Responder,
     web::{self},
 };
+use actix_web_httpauth::extractors::bearer::BearerAuth;
 use clippy::{NewUser, NewUserOtp};
 use clippy_server::{
     CRED_PATH, OTPState, UserCred, UserState, auth, gen_otp, gen_password, get_auth, get_param,
@@ -121,12 +122,12 @@ async fn get_key(cred: web::Json<UserCred>, state: web::Data<UserState>) -> impl
 }
 
 async fn update(
-    key: web::Query<HashMap<String, String>>,
     id: web::Query<HashMap<String, String>>,
     payload: Multipart,
+    auth_key: BearerAuth,
     state: web::Data<UserState>,
 ) -> impl Responder {
-    let key = param!(&key, "TEMP");
+    let key = auth_key.token();
     let id = param!(&id, "ID");
 
     let username = match auth(key) {
@@ -163,11 +164,11 @@ async fn state(
 }
 
 async fn get(
-    key: web::Query<HashMap<String, String>>,
+    auth_key: BearerAuth,
     current: web::Query<HashMap<String, String>>,
     state: web::Data<UserState>,
 ) -> impl Responder {
-    let key = param!(&key, "TEMP");
+    let key = auth_key.token();
     let current = param!(&current, "current");
 
     let username = match auth(key) {

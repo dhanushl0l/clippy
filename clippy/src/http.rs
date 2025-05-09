@@ -42,7 +42,7 @@ pub async fn send(
 
     let response = client
         .post(&format!("{}/update", SERVER))
-        .query(&[("TEMP", get_token())])
+        .bearer_auth(get_token())
         .query(&[("ID", id)])
         .multipart(form)
         .send()
@@ -126,7 +126,7 @@ pub async fn state(userdata: &UserData, client: &Client, user: &UserCred) -> Res
 pub async fn download(userdata: &UserData, client: &Client) -> Result<(), Box<dyn error::Error>> {
     let response = client
         .get(&format!("{}/get", SERVER))
-        .query(&[("TEMP", get_token())])
+        .bearer_auth(get_token())
         .query(&[("current", userdata.last_one())])
         .send()
         .await?;

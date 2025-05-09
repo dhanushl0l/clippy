@@ -228,12 +228,17 @@ impl UserData {
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub struct UserCred {
     pub username: String,
+    pub email: String,
     pub key: String,
 }
 
 impl UserCred {
-    pub fn new(username: String, key: String) -> Self {
-        Self { username, key }
+    pub fn new(username: String, key: String, email: String) -> Self {
+        Self {
+            username,
+            key,
+            email,
+        }
     }
 }
 
