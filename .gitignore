@@ -1,5 +1,6 @@
 target/
 .vs/
+.vscode/
 clippy-server/credentials/
 data-base/
 log.log

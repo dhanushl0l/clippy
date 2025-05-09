@@ -4,14 +4,14 @@ use std::{fs, process};
 
 use clippy::{Data, get_image_path, get_path};
 use clippy_gui::{copy_to_linux, str_formate};
-use libadwaita as adw;
 
 use adw::prelude::*;
 use adw::{ActionRow, ApplicationWindow, HeaderBar};
-use gtk::Image;
 use gtk::gdk::{self};
 use gtk::{Application, Box, ListBox, Orientation, ScrolledWindow};
+use gtk::{Image, Label};
 use gtk4_layer_shell::{Edge, Layer, LayerShell};
+use libadwaita as adw;
 
 pub fn run_clip() {
     let application = Application::builder()
@@ -32,13 +32,12 @@ pub fn run_clip() {
             .margin_end(10)
             .margin_bottom(10)
             .margin_start(10)
-            // the content class makes the list look nicer
             .css_classes(vec![String::from("content")])
             .build();
 
         for (thumbnail, data) in data.1 {
             match thumbnail {
-                Thumbnail::Text(_text) => {
+                Thumbnail::Text(_path) => {
                     let label = str_formate(&data.get_data().unwrap());
                     let row = ActionRow::builder()
                         .activatable(true)
@@ -64,15 +63,21 @@ pub fn run_clip() {
                     let file = gio::File::for_path(path.as_path());
                     let texture = gdk::Texture::from_file(&file).unwrap();
 
-                    // Create a GTK image from the texture
                     let image = Image::from_paintable(Some(&texture));
-                    image.set_pixel_size(64); // optional: set a desired size
+                    image.set_pixel_size(64);
+
+                    let label = Label::new(Some("Image"));
+                    label.set_xalign(0.0);
+
+                    let hbox = Box::new(Orientation::Horizontal, 12);
+                    hbox.append(&image);
+                    hbox.append(&label);
 
                     let row = ActionRow::builder()
                         .activatable(true)
                         .selectable(false)
                         .build();
-                    row.set_child(Some(&image));
+                    row.set_child(Some(&hbox));
 
                     row.connect_activated(move |_| {
                         copy_to_linux(
@@ -94,9 +99,7 @@ pub fn run_clip() {
             .vscrollbar_policy(gtk::PolicyType::Automatic)
             .build();
 
-        // Combine the content in a box
         let content = Box::new(Orientation::Vertical, 0);
-        // Adwaitas' ApplicationWindow does not include a HeaderBar
         content.append(
             &HeaderBar::builder()
                 .title_widget(&adw::WindowTitle::new("Clippy", ""))
@@ -116,7 +119,6 @@ pub fn run_clip() {
 
         let raw_height = min_height + step * (count.saturating_sub(1));
 
-        // Increase by 50, but cap at max_height
         let height = std::cmp::min(raw_height + 50, max_height);
 
         let window = ApplicationWindow::builder()

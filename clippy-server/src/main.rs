@@ -1,17 +1,16 @@
 use actix_multipart::Multipart;
 use actix_web::{
-    App, HttpRequest, HttpResponse, HttpServer, Responder,
+    App, HttpResponse, HttpServer, Responder,
     web::{self},
 };
 use actix_web_httpauth::extractors::bearer::BearerAuth;
 use clippy::{NewUser, NewUserOtp};
 use clippy_server::{
-    CRED_PATH, OTPState, UserCred, UserState, auth, gen_otp, gen_password, get_auth, get_param,
-    to_zip, write_file,
+    CRED_PATH, EmailState, OTPState, UserCred, UserState, auth, gen_otp, gen_password, get_auth,
+    get_param, to_zip, write_file,
 };
 use email::send_otp;
 use env_logger::{Builder, Env};
-use log::debug;
 use std::{
     collections::HashMap,
     fs::{self},
@@ -31,12 +30,15 @@ macro_rules! param {
 async fn signin(
     data: web::Json<NewUser>,
     state: web::Data<UserState>,
+    emailstate: web::Data<EmailState>,
     otp_state: web::Data<OTPState>,
 ) -> impl Responder {
     let username = &data.user;
 
     if state.verify(username) {
         return HttpResponse::Unauthorized().body("Failure: Username already exists");
+    } else if emailstate.check_email(data.email.clone().unwrap()) {
+        return HttpResponse::Unauthorized().body("Failure: Email already exists");
     } else {
         let otp = gen_otp();
         otp_state.add_otp(username.to_string(), otp.clone());
@@ -50,6 +52,7 @@ async fn signin(
 async fn signin_auth(
     data: web::Json<NewUserOtp>,
     state: web::Data<UserState>,
+    email_state: web::Data<EmailState>,
     otp_state: web::Data<OTPState>,
 ) -> impl Responder {
     let username = &data.user;
@@ -60,11 +63,15 @@ async fn signin_auth(
         match otp_state.check_otp(&data) {
             Ok(_) => {
                 let password = gen_password();
-                if let Err(err) = UserCred::new(username.clone(), password).write() {
+                if let Err(err) =
+                    UserCred::new(username.clone(), data.email.clone(), password).write()
+                {
                     eprintln!("Failure: failed to write credentials\n{}", err);
                     return HttpResponse::InternalServerError()
                         .body("Error: Failed to write credentials");
                 }
+
+                email_state.add(data.email.clone());
 
                 let file_path = Path::new(CRED_PATH).join(username).join("user.json");
                 match fs::read_to_string(&file_path) {
@@ -198,15 +205,17 @@ async fn health() -> impl Responder {
 async fn main() -> std::io::Result<()> {
     Builder::from_env(Env::default().filter_or("LOG", "info")).init();
 
-    let user_state = web::Data::new(UserState::new());
+    // Instead of reading the email and user separately,implemented a single method where userstate::build creates and builds both the UserState and EmailState
+    let temp = UserState::build();
+    let user_state = web::Data::new(temp.0);
+    let email_state = web::Data::new(temp.1);
     let otp_state = web::Data::new(OTPState::new());
-
-    debug!("User state: {:?}", user_state);
 
     HttpServer::new(move || {
         App::new()
             .app_data(user_state.clone())
             .app_data(otp_state.clone())
+            .app_data(email_state.clone())
             .route("/state/{user}", web::get().to(state))
             .route("/update", web::post().to(update))
             .route("/signin", web::post().to(signin))

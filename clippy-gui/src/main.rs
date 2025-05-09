@@ -472,6 +472,7 @@ impl App for Clipboard {
                                             let wait = self.waiting.clone();
                                             let user = NewUserOtp::new(
                                                 self.newuser.user.clone(),
+                                                self.newuser.email.clone().unwrap(),
                                                 self.otp.clone(),
                                             );
                                             thread::spawn(move || {
@@ -522,6 +523,16 @@ impl App for Clipboard {
 
                                         ui.style_mut().override_text_style =
                                             Some(TextStyle::Heading);
+
+                                        ui.add_space(8.0);
+
+                                        if let Some(email) = &mut self.newuser.email {
+                                            ui.add(
+                                                TextEdit::singleline(email)
+                                                    .vertical_align(Align::Center)
+                                                    .hint_text("Enter the Email"),
+                                            );
+                                        }
 
                                         ui.add_space(8.0);
 

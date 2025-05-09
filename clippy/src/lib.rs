@@ -389,12 +389,13 @@ impl NewUser {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct NewUserOtp {
     pub user: String,
+    pub email: String,
     pub otp: String,
 }
 
 impl NewUserOtp {
-    pub fn new(user: String, otp: String) -> Self {
-        Self { user, otp }
+    pub fn new(user: String, email: String, otp: String) -> Self {
+        Self { user, email, otp }
     }
 }
 

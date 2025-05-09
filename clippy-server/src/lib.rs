@@ -6,7 +6,7 @@ use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, deco
 use log::error;
 use rand::seq::IteratorRandom;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::json;
 use std::{
     collections::{BTreeSet, HashMap},
     fs::{self, File},
@@ -20,19 +20,14 @@ pub const CRED_PATH: &str = "credentials/users";
 const DATABASE_PATH: &str = "data-base/users";
 const MAX_SIZE: usize = 100 * 1024 * 1024;
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
-pub struct UserCred {
-    pub username: String,
-    pub key: String,
-}
-
 #[derive(Debug, Clone)]
 pub struct UserState {
     data: Arc<Mutex<HashMap<String, BTreeSet<String>>>>,
 }
 
 impl UserState {
-    pub fn new() -> Self {
+    pub fn build() -> (Self, EmailState) {
+        let email = EmailState::new();
         let op = Self {
             data: Arc::new(Mutex::new(HashMap::new())),
         };
@@ -42,6 +37,14 @@ impl UserState {
         if let Ok(users) = fs::read_dir(base_path) {
             for user in users.flatten() {
                 let path = user.path();
+
+                {
+                    let mut path = path.clone();
+                    path.push("user.json");
+                    let file = fs::read_to_string(path).unwrap();
+                    let user: UserCred = serde_json::from_str(&file).unwrap();
+                    email.data.lock().as_mut().unwrap().push(user.email);
+                }
 
                 if path.is_dir() && path.parent() == Some(base_path) {
                     if let Some(folder_name) = user.file_name().to_str() {
@@ -68,7 +71,7 @@ impl UserState {
                 }
             }
         }
-        op
+        (op, email)
     }
 
     pub fn entry_and_verify_user(&self, username: &str) -> bool {
@@ -124,9 +127,41 @@ impl UserState {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct EmailState {
+    data: Arc<Mutex<Vec<String>>>,
+}
+
+impl EmailState {
+    pub fn new() -> Self {
+        Self {
+            data: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    pub fn check_email(&self, email: String) -> bool {
+        self.data.lock().unwrap().contains(&email)
+    }
+
+    pub fn add(&self, email: String) {
+        self.data.lock().unwrap().push(email);
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
+pub struct UserCred {
+    pub username: String,
+    pub email: String,
+    pub key: String,
+}
+
 impl UserCred {
-    pub fn new(username: String, key: String) -> Self {
-        UserCred { username, key }
+    pub fn new(username: String, email: String, key: String) -> Self {
+        Self {
+            username,
+            email,
+            key,
+        }
     }
 
     pub fn write(&self) -> Result<(), std::io::Error> {
