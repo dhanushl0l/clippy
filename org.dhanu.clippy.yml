@@ -1,0 +1,41 @@
+app-id: org.dhanu.clippy
+runtime: org.gnome.Platform
+runtime-version: "48"
+sdk: org.gnome.Sdk
+
+command: clippy
+finish-args:
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  - --filesystem=~/.local/share/clippy
+  - --talk-name=org.freedesktop.systemd1
+
+modules:
+  - name: libbz2
+    buildsystem: simple
+    build-commands:
+      - mkdir -p /app/lib
+      - make -f Makefile-libbz2_so -j $FLATPAK_BUILDER_N_JOBS
+      - install -D libbz2.so.1.0 /app/lib/
+    sources:
+      - type: archive
+        url: https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz
+        sha512: 083f5e675d73f3233c7930ebe20425a533feedeaaa9d8cc86831312a6581cefbe6ed0d08d2fa89be81082f2a5abdabca8b3c080bf97218a1bd59dc118a30b9f3
+
+  - name: clippy
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 clippy-gui /app/bin/clippy
+      - install -Dm644 clippy.desktop "${FLATPAK_DEST}/share/applications/${FLATPAK_ID}.desktop"
+      - install -Dm644 clippy-512-512.png  "${FLATPAK_DEST}/share/icons/hicolor/512x512/apps/${FLATPAK_ID}.png"
+      - install -Dm644 clippy-32-32.png "${FLATPAK_DEST}/share/icons/hicolor/32x32/apps/${FLATPAK_ID}-tray.png"
+    sources:
+      - type: file
+        path: target/release/clippy-gui
+      - type: file
+        path: assets/clippy-32-32.png
+      - type: file
+        path: assets/clippy-512-512.png
+      - type: file
+        path: clippy.desktop

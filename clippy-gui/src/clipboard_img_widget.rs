@@ -1,6 +1,6 @@
 use std::{fs, io::Write, path::PathBuf};
 
-use clippy::{Data, set_global_bool};
+use clippy::{Data, create_past_lock, set_global_bool};
 use egui::{self, *};
 
 pub fn item_card_image(
@@ -27,20 +27,20 @@ pub fn item_card_image(
                 if ui.add(egui::ImageButton::new(texture)).clicked() {
                     set_global_bool(true);
 
-                    #[cfg(target_os = "linux")]
-                    clippy_gui::copy_to_linux(
-                        "image/png".to_string(),
-                        data.get_image_as_string().unwrap().to_string(),
-                    );
+                    // #[cfg(target_os = "linux")]
+                    // clippy_gui::copy_to_linux(
+                    //     "image/png".to_string(),
+                    //     data.get_image_as_string().unwrap().to_string(),
+                    // );
 
-                    #[cfg(not(target_os = "linux"))]
-                    write_clipboard::push_to_clipboard(
-                        "image/png".to_string(),
-                        data.get_image_as_string().unwrap().to_string(),
-                    )
-                    .unwrap();
+                    // #[cfg(not(target_os = "linux"))]
+                    // write_clipboard::push_to_clipboard(
+                    //     "image/png".to_string(),
+                    //     data.get_image_as_string().unwrap().to_string(),
+                    // )
+                    // .unwrap();
 
-                    set_global_bool(false);
+                    create_past_lock(path);
 
                     if click_on_quit {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);

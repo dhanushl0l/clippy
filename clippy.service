@@ -1,0 +1,10 @@
+[Unit]
+Description=clippy
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/clippy
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

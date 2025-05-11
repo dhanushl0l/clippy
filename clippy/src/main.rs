@@ -1,11 +1,11 @@
 use clipboard_rs::{ClipboardWatcher, ClipboardWatcherContext};
 use clippy::user::start_cloud;
-use clippy::{UserSettings, read_clipboard};
+use clippy::{UserSettings, get_path, read_clipboard, watch_for_next_clip_write};
 use env_logger::{Builder, Env};
 use log::debug;
 use log::{error, info, warn};
 use std::error::Error;
-use std::{env, process};
+use std::{env, process, thread};
 use tokio::sync::mpsc::Sender;
 
 #[cfg(target_os = "linux")]
@@ -90,6 +90,15 @@ fn main() {
         Err(err) => {
             info!("user not logged in: {}", err);
         }
+    }
+
+    // this thread reads the gui clipboard entry
+    {
+        let mut path = get_path();
+        path.pop();
+        thread::spawn(|| {
+            watch_for_next_clip_write(path);
+        });
     }
 
     run(&tx)

@@ -15,12 +15,10 @@ use egui::{
     Align, Button, Frame, Layout, Margin, RichText, Stroke, TextEdit, TextStyle, Theme,
     TopBottomPanel, Vec2,
 };
-use gtk_shell::run_clip;
 use http::{check_user, login, signin, signin_otp_auth};
 use std::{
     cmp::Reverse,
     collections::HashMap,
-    env,
     fs::{self},
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -31,7 +29,6 @@ mod clipboard_img_widget;
 mod clipboard_widget;
 mod custom_egui_widget;
 mod edit_window;
-mod gtk_shell;
 mod http;
 
 struct Clipboard {
@@ -158,7 +155,7 @@ impl App for Clipboard {
                                     ));
 
                                 if ui.add(button_next).on_hover_text("Previous page").clicked() {
-                                    self.page += 1;
+                                    self.page -= 1;
                                 }
 
                                 ui.label(self.page.to_string());
@@ -894,7 +891,6 @@ impl App for Clipboard {
                                         &dat,
                                         thumbnail,
                                         &mut i.get_pined(),
-                                        &mut i.get_pined(),
                                         self.settings.click_on_quit,
                                         &mut self.show_data_popup,
                                         &mut self.changed,
@@ -938,13 +934,15 @@ impl App for Clipboard {
 }
 
 fn main() -> Result<(), eframe::Error> {
-    if env::var("CLIP").is_ok() {
-        run_clip();
-    }
     let ui = Clipboard::new();
-    let options = NativeOptions {
+    let mut options = NativeOptions {
         viewport: ViewportBuilder::default().with_inner_size(Vec2::new(800.0, 600.0)),
         ..Default::default()
     };
+
+    let icon = eframe::icon_data::from_png_bytes(include_bytes!("../../assets/clippy-32-32.png"))
+        .expect("The icon data must be valid");
+    options.viewport.icon = Some(Arc::new(icon));
+
     run_native("clippy", options, Box::new(|_cc| Ok(Box::new(ui))))
 }

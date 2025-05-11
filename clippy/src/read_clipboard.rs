@@ -9,7 +9,6 @@ use tokio::sync::mpsc::Sender;
 pub fn read_wayland_clipboard(
     tx: &Sender<(String, String)>,
 ) -> Result<(), wl_clipboard_rs::paste::Error> {
-    use crate::{get_global_bool, set_global_bool};
     use std::collections::HashSet;
     use std::io::Read;
     use wl_clipboard_rs::paste::{ClipboardType, MimeType, Seat, get_contents, get_mime_types};
@@ -52,7 +51,7 @@ pub fn read_wayland_clipboard(
 
         parse_wayland_clipboard(typ, vec, tx);
     } else {
-        set_global_bool(true);
+        set_global_bool(false);
     }
     Ok(())
 }
@@ -94,7 +93,7 @@ impl<'a> ClipboardHandler for Manager<'a> {
                 );
             }
         } else {
-            set_global_bool(true);
+            set_global_bool(false);
         }
     }
 }

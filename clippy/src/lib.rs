@@ -17,6 +17,8 @@ use std::fs::{DirEntry, create_dir, create_dir_all};
 use std::io::{Cursor, Write};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 use std::{
     collections::BTreeSet,
     env,
@@ -26,6 +28,7 @@ use std::{
     path::PathBuf,
 };
 use tokio::sync::mpsc::Sender;
+use write_clipboard::push_to_clipboard;
 use zip::ZipArchive;
 
 const API_KEY: Option<&str> = option_env!("KEY");
@@ -514,12 +517,12 @@ pub fn set_global_bool(value: bool) {
     let path = Path::new(&path).join("OK");
 
     if value {
-        if let Err(e) = fs::remove_file(&path) {
-            error!("Failed to delete state file: {}", e);
-        }
-    } else {
         if let Err(e) = fs::File::create(&path) {
             error!("Failed to create state file: {}", e);
+        }
+    } else {
+        if let Err(e) = fs::remove_file(&path) {
+            error!("Failed to delete state file: {}", e);
         }
     }
 }
@@ -557,4 +560,58 @@ pub fn get_global_update_bool() -> bool {
     path.pop();
     let path = Path::new(&path).join("UPDATE");
     path.exists()
+}
+
+pub fn create_past_lock(path: &PathBuf) -> Result<(), io::Error> {
+    let mut dir = get_path();
+    dir.pop();
+    dir.push("user");
+    fs::create_dir_all(&dir)?;
+    dir.push(".next");
+    let mut file = File::create(&dir)?;
+
+    file.write_all(path.to_str().unwrap().as_bytes())?;
+    Ok(())
+}
+
+pub fn watch_for_next_clip_write(dir: PathBuf) {
+    let target = dir.join("user/.next");
+    println!("{:?}", target);
+
+    loop {
+        if fs::metadata(&target).is_ok() {
+            match read_parse(&target) {
+                Ok(_) => (),
+                Err(err) => error!("{}", err),
+            }
+        }
+        thread::sleep(Duration::from_secs(1));
+    }
+
+    fn read_parse(target: &PathBuf) -> Result<(), String> {
+        let contents = fs::read_to_string(&target)
+            .map_err(|e| format!("Failed to read file {:?}: {}", target, e))?;
+
+        let data = serde_json::from_str(&fs::read_to_string(&contents).unwrap()).unwrap();
+
+        #[cfg(target_os = "linux")]
+        copy_to_linux(data);
+
+        #[cfg(not(target_os = "linux"))]
+        push_to_clipboard(data).unwrap();
+
+        fs::remove_file(&target).map_err(|e| format!("Failed to remove {:?}: {}", target, e))?;
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub fn copy_to_linux(data: Data) {
+    use write_clipboard::{push_to_clipboard, push_to_clipboard_wl};
+
+    if std::env::var("WAYLAND_DISPLAY").is_ok() {
+        push_to_clipboard_wl(data, false);
+    } else if std::env::var("DISPLAY").is_ok() {
+        push_to_clipboard(data);
+    }
 }

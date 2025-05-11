@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Clippy
+Comment=A simple clipboard manager with a clean anime-style icon
+Exec=clippy
+Icon=org.dhanu.clippy
+Terminal=false
+Type=Application
+Categories=Utility;
+StartupNotify=true

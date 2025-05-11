@@ -1,4 +1,4 @@
-use crate::{Data, UserData, get_path};
+use crate::{Data, UserData, get_path, set_global_bool};
 use base64::{Engine, engine::general_purpose};
 use clipboard_rs::{Clipboard, ClipboardContext, RustImageData, common::RustImage};
 use std::{
@@ -21,17 +21,13 @@ pub fn copy_to_linux(userdata: &UserData) -> Result<(), String> {
 
 #[cfg(target_os = "linux")]
 fn copy_to_clipboard_wl(userdata: &UserData) -> Result<(), String> {
-    use crate::set_global_bool;
-
     let data = read_data(userdata.last_one());
-    set_global_bool(false);
-
-    push_to_clipboard_wl(data.typ, data.data, false)
+    set_global_bool(true);
+    push_to_clipboard_wl(data, false)
 }
 
 #[cfg(target_os = "linux")]
-
-pub fn push_to_clipboard_wl(typ: String, data: String, forground: bool) -> Result<(), String> {
+pub fn push_to_clipboard_wl(data: Data, forground: bool) -> Result<(), String> {
     use base64::{Engine, engine::general_purpose};
     use wl_clipboard_rs::copy::{ClipboardType, MimeType, Options, Source};
 
@@ -39,8 +35,8 @@ pub fn push_to_clipboard_wl(typ: String, data: String, forground: bool) -> Resul
     opts.clipboard(ClipboardType::Regular);
     opts.foreground(forground);
 
-    Ok(if typ.starts_with("image/") {
-        let data = general_purpose::STANDARD.decode(data).unwrap();
+    Ok(if data.typ.starts_with("image/") {
+        let data = general_purpose::STANDARD.decode(data.data).unwrap();
         opts.copy(
             Source::Bytes(data.into_boxed_slice()),
             MimeType::Specific("image/png".to_string()),
@@ -48,7 +44,7 @@ pub fn push_to_clipboard_wl(typ: String, data: String, forground: bool) -> Resul
         .map_err(|err| format!("{}", err))?
     } else {
         opts.copy(
-            Source::Bytes(data.into_bytes().into_boxed_slice()),
+            Source::Bytes(data.data.into_bytes().into_boxed_slice()),
             MimeType::Text,
         )
         .map_err(|err| format!("{}", err))?
@@ -56,25 +52,25 @@ pub fn push_to_clipboard_wl(typ: String, data: String, forground: bool) -> Resul
 }
 
 #[cfg(target_os = "linux")]
-pub fn push_to_clipboard_wl_command(typ: String, data: String) -> Result<(), String> {
+pub fn push_to_clipboard_wl_command(data: Data) -> Result<(), String> {
     use base64::{Engine, engine::general_purpose};
-    let data = if typ.starts_with("image/") {
-        general_purpose::STANDARD.decode(data).unwrap()
+    let data_u8 = if data.typ.starts_with("image/") {
+        general_purpose::STANDARD.decode(&data.data).unwrap()
     } else {
-        println!("{}", typ);
-        data.into_bytes()
+        println!("{}", data.typ);
+        data.data.into_bytes()
     };
 
     let mut cmd = Command::new("wl-copy")
         .arg("--type")
-        .arg(typ)
+        .arg(data.typ)
         .stdin(Stdio::piped())
         .spawn()
         .map_err(|e| format!("Failed to start wl-copy: {}", e))?;
 
     if let Some(stdin) = cmd.stdin.as_mut() {
         stdin
-            .write_all(&data)
+            .write_all(&data_u8)
             .map_err(|e| format!("Failed to write to wl-copy: {}", e))?;
     }
 
@@ -83,24 +79,18 @@ pub fn push_to_clipboard_wl_command(typ: String, data: String) -> Result<(), Str
 }
 
 pub fn copy_to_clipboard(userdata: &UserData) -> Result<(), Box<dyn Error + Send + Sync>> {
-    use crate::set_global_bool;
     let data = read_data(userdata.last_one());
-
-    set_global_bool(false);
-
-    let typ = data.typ;
-    let data = data.data;
-
-    push_to_clipboard(typ, data)
+    set_global_bool(true);
+    push_to_clipboard(data)
 }
 
-pub fn push_to_clipboard(typ: String, data: String) -> Result<(), Box<dyn Error + Send + Sync>> {
+pub fn push_to_clipboard(data: Data) -> Result<(), Box<dyn Error + Send + Sync>> {
     let ctx = ClipboardContext::new()?;
 
-    if typ.starts_with("image/") {
-        ctx.set_image(RustImageData::from_bytes(&string_to_vecu8(data))?)?;
+    if data.typ.starts_with("image/") {
+        ctx.set_image(RustImageData::from_bytes(&string_to_vecu8(data.data))?)?;
     } else {
-        ctx.set_text(data)?;
+        ctx.set_text(data.data)?;
     }
 
     Ok(())

@@ -1,6 +1,6 @@
 use std::{fs, io::Write, path::PathBuf};
 
-use clippy::{Data, set_global_bool};
+use clippy::{Data, create_past_lock, set_global_bool};
 use clippy_gui::Thumbnail;
 use egui::{self, *};
 
@@ -9,7 +9,6 @@ pub fn item_card(
     text: &str,
     text_label: &Thumbnail,
     pinned: &mut bool,
-    deleted: &mut bool,
     click_on_quit: bool,
     show_data_popup: &mut (bool, String, PathBuf),
     changed: &mut bool,
@@ -43,17 +42,10 @@ pub fn item_card(
                 {
                     set_global_bool(true);
 
-                    #[cfg(not(target_os = "linux"))]
-                    write_clipboard::push_to_clipboard("String".to_string(), text.to_string())
-                        .unwrap();
-
-                    #[cfg(target_os = "linux")]
-                    clippy_gui::copy_to_linux(
-                        "text/plain;charset=utf-8".to_string(),
-                        text.to_string(),
-                    );
-
-                    set_global_bool(false);
+                    match create_past_lock(path) {
+                        Ok(_) => (),
+                        Err(err) => eprintln!("{err}"),
+                    };
 
                     if click_on_quit {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
