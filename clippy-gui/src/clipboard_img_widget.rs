@@ -8,7 +8,6 @@ pub fn item_card_image(
     texture: &egui::TextureHandle,
     pinned: &mut bool,
     click_on_quit: bool,
-    data: &Data,
     changed: &mut bool,
     path: &PathBuf,
     ctx: &Context,
@@ -27,20 +26,10 @@ pub fn item_card_image(
                 if ui.add(egui::ImageButton::new(texture)).clicked() {
                     set_global_bool(true);
 
-                    // #[cfg(target_os = "linux")]
-                    // clippy_gui::copy_to_linux(
-                    //     "image/png".to_string(),
-                    //     data.get_image_as_string().unwrap().to_string(),
-                    // );
-
-                    // #[cfg(not(target_os = "linux"))]
-                    // write_clipboard::push_to_clipboard(
-                    //     "image/png".to_string(),
-                    //     data.get_image_as_string().unwrap().to_string(),
-                    // )
-                    // .unwrap();
-
-                    create_past_lock(path);
+                    match create_past_lock(path) {
+                        Ok(_) => (),
+                        Err(err) => eprintln!("{err}"),
+                    };
 
                     if click_on_quit {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);

@@ -9,19 +9,18 @@ use std::{
 };
 
 #[cfg(target_os = "linux")]
-pub fn copy_to_linux(userdata: &UserData) -> Result<(), String> {
+pub fn copy_to_linux(data: Data) -> Result<(), String> {
     if std::env::var("WAYLAND_DISPLAY").is_ok() {
-        copy_to_clipboard_wl(userdata)
+        copy_to_clipboard_wl(data)
     } else if std::env::var("DISPLAY").is_ok() {
-        copy_to_clipboard(userdata).map_err(|err| format!("{}", err))
+        copy_to_clipboard(data).map_err(|err| format!("{}", err))
     } else {
         Err(format!("No display server detected"))
     }
 }
 
 #[cfg(target_os = "linux")]
-fn copy_to_clipboard_wl(userdata: &UserData) -> Result<(), String> {
-    let data = read_data(userdata.last_one());
+fn copy_to_clipboard_wl(data: Data) -> Result<(), String> {
     set_global_bool(true);
     push_to_clipboard_wl(data, false)
 }
@@ -78,8 +77,7 @@ pub fn push_to_clipboard_wl_command(data: Data) -> Result<(), String> {
     Ok(())
 }
 
-pub fn copy_to_clipboard(userdata: &UserData) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let data = read_data(userdata.last_one());
+pub fn copy_to_clipboard(data: Data) -> Result<(), Box<dyn Error + Send + Sync>> {
     set_global_bool(true);
     push_to_clipboard(data)
 }
@@ -96,22 +94,22 @@ pub fn push_to_clipboard(data: Data) -> Result<(), Box<dyn Error + Send + Sync>>
     Ok(())
 }
 
-fn read_data(file: String) -> Data {
-    let target = get_path().join(file);
-    let mut file = File::open(target).unwrap();
+// fn read_data(file: String) -> Data {
+//     let target = get_path().join(file);
+//     let mut file = File::open(target).unwrap();
 
-    let mut contents = String::new();
-    file.read_to_string(&mut contents).unwrap_or(0);
+//     let mut contents = String::new();
+//     file.read_to_string(&mut contents).unwrap_or(0);
 
-    let data: Data = serde_json::from_str(&contents).unwrap_or(Data::new(
-        String::new(),
-        "empty".to_string(),
-        "os".to_string(),
-        true,
-    ));
+//     let data: Data = serde_json::from_str(&contents).unwrap_or(Data::new(
+//         String::new(),
+//         "empty".to_string(),
+//         "os".to_string(),
+//         true,
+//     ));
 
-    data
-}
+//     data
+// }
 
 pub fn string_to_vecu8(data: String) -> Vec<u8> {
     general_purpose::STANDARD.decode(data).unwrap()

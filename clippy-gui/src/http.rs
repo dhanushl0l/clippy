@@ -1,4 +1,4 @@
-use clippy::{NewUser, NewUserOtp, UserCred, http::SERVER};
+use clippy::{LoginUserCred, NewUser, NewUserOtp, UserCred, http::SERVER};
 use reqwest::{Client, Error};
 
 pub async fn check_user(user: String) -> Option<bool> {
@@ -45,19 +45,20 @@ pub async fn signin_otp_auth(data: NewUserOtp) -> Result<UserCred, Error> {
     Ok(response.json().await?)
 }
 
-pub async fn login(user: UserCred) -> Result<Option<UserCred>, Error> {
+pub async fn login(user: &LoginUserCred) -> Result<UserCred, String> {
     let connection = Client::new();
     let response = connection
-        .get(format!("{}/getkey", SERVER))
+        .get(format!("{}/login", SERVER))
         .json(&user)
         .send()
-        .await?;
+        .await
+        .map_err(|err| format!("{err}"))?;
 
     if response.status().is_success() {
-        let text = response.text().await?;
-        println!("{:?}", text);
-        Ok(Some(user))
+        let user: UserCred = response.json().await.map_err(|err| format!("{err}"))?;
+        Ok(user)
     } else {
-        Ok(None)
+        let err_msg = response.text().await.map_err(|err| format!("{err}"))?;
+        Err(format!("Login failed: {}", err_msg).into())
     }
 }

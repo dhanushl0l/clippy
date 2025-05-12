@@ -1,9 +1,9 @@
 use actix_multipart::Multipart;
 use actix_web::HttpResponse;
 use chrono::{Duration, Utc};
-use clippy::NewUserOtp;
+use clippy::{LoginUserCred, NewUserOtp};
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
-use log::error;
+use log::{debug, error};
 use rand::seq::IteratorRandom;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -91,6 +91,20 @@ impl UserState {
     pub fn update(&self, username: &str, id: &str) {
         let mut map = self.data.lock().unwrap();
         if let Some(set) = map.get_mut(username) {
+            let len = set.len();
+            if len > 30 {
+                let remove_count = len - 30;
+                let to_remove: Vec<_> = set.iter().take(remove_count).cloned().collect();
+                for val in to_remove {
+                    debug!("removing {:?}", val);
+                    match remove_db_file(username, &val) {
+                        Ok(_) => (),
+                        Err(err) => error!("{}", err),
+                    };
+                    set.remove(&val);
+                }
+            }
+
             set.insert(id.to_string());
         } else {
             error!("Unabe to update user state: {}", id);
@@ -98,14 +112,18 @@ impl UserState {
     }
 
     pub fn is_updated(&self, username: &str, id: &str) -> bool {
-        !self
-            .data
-            .lock()
-            .unwrap()
-            .get(username)
-            .and_then(|set| set.iter().last())
-            .map(|val| val == id)
-            .unwrap_or(true) // Return true if the vec is empty or current id is not available
+        let guard = self.data.lock().unwrap();
+        let data = guard.get(username);
+        if let Some(val) = data {
+            let last = val.last().unwrap();
+            if last == id {
+                return true;
+            } else {
+                return false;
+            }
+        } else {
+            true
+        }
     }
 
     pub fn next(&self, username: &str, id: &str) -> Result<Vec<String>, HttpResponse> {
@@ -187,6 +205,10 @@ impl UserCred {
 
     pub fn authentication(&self, key: String) -> bool {
         if key == self.key { true } else { false }
+    }
+
+    pub fn verify(&self, logincred: &LoginUserCred) -> bool {
+        self.username == logincred.username && self.key == logincred.key
     }
 }
 
@@ -395,4 +417,12 @@ pub fn get_auth(username: &str, exp: i64) -> Result<String, jsonwebtoken::errors
 fn is_token_expired(expiry_timestamp: i64) -> bool {
     let now_timestamp = Utc::now().timestamp();
     now_timestamp >= expiry_timestamp
+}
+
+fn remove_db_file(username: &str, id: &str) -> Result<(), Error> {
+    let mut path = PathBuf::from(DATABASE_PATH);
+    path.push(username);
+    path.push(id);
+    fs::remove_file(path)?;
+    Ok(())
 }

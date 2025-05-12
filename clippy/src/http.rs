@@ -1,9 +1,9 @@
 use crate::{
-    UserCred, UserData, extract_zip,
+    UserCred, UserData, extract_zip, read_data_by_id, set_global_update_bool,
     write_clipboard::{self},
 };
 use core::time;
-use log::{debug, info, warn};
+use log::{debug, warn};
 use once_cell::sync::Lazy;
 use reqwest::{self, Client, multipart};
 use std::{
@@ -17,7 +17,7 @@ use tokio::{fs::File, io::AsyncReadExt};
 pub const SERVER: &str = "http://127.0.0.1:7777";
 static TOKEN: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new(String::new()));
 
-fn update_token(new_data: String) {
+pub fn update_token(new_data: String) {
     let mut key = TOKEN.lock().unwrap();
     *key = new_data;
 }
@@ -63,24 +63,6 @@ pub async fn send(
         Err(response.text().await.unwrap().into())
     } else {
         Err(response.text().await.unwrap().into())
-    }
-}
-
-pub async fn login(user: &UserCred) -> Result<(), Box<dyn Error>> {
-    let connection = Client::new();
-    let response = connection
-        .get(format!("{}/getkey", SERVER))
-        .json(&user)
-        .send()
-        .await?;
-
-    if response.status().is_success() {
-        let text = response.text().await?;
-        update_token(text);
-        Ok(())
-    } else {
-        let err_msg = response.text().await?;
-        Err(format!("Login failed: {}", err_msg).into())
     }
 }
 
@@ -146,20 +128,27 @@ pub async fn download(userdata: &UserData, client: &Client) -> Result<(), Box<dy
         )));
     };
 
-    match extract_zip(body) {
+    set_global_update_bool(true);
+
+    let val = extract_zip(body)?;
+    let last = val.last().unwrap();
+
+    let data = read_data_by_id(last);
+    userdata.add_vec(val);
+
+    match data {
         Ok(val) => {
-            info!("Successfully fetched data from server.");
-            debug!("{:?}", &val);
-            userdata.add_vec(val)
+            #[cfg(not(target_os = "linux"))]
+            write_clipboard::copy_to_clipboard(val)?;
+
+            #[cfg(target_os = "linux")]
+            write_clipboard::copy_to_linux(val)?;
         }
-        Err(err) => warn!("{}", err),
+        Err(err) => {
+            warn!("{}", err)
+        }
     }
 
-    #[cfg(not(target_os = "linux"))]
-    write_clipboard::copy_to_clipboard(userdata)?;
-
-    #[cfg(target_os = "linux")]
-    write_clipboard::copy_to_linux(userdata)?;
     Ok(())
 }
 

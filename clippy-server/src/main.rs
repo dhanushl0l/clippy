@@ -4,13 +4,14 @@ use actix_web::{
     web::{self},
 };
 use actix_web_httpauth::extractors::bearer::BearerAuth;
-use clippy::{NewUser, NewUserOtp};
+use clippy::{LoginUserCred, NewUser, NewUserOtp};
 use clippy_server::{
     CRED_PATH, EmailState, OTPState, UserCred, UserState, auth, gen_otp, gen_password, get_auth,
     get_param, to_zip, write_file,
 };
 use email::send_otp;
 use env_logger::{Builder, Env};
+use log::debug;
 use std::{
     collections::HashMap,
     fs::{self},
@@ -128,6 +129,25 @@ async fn get_key(cred: web::Json<UserCred>, state: web::Data<UserState>) -> impl
     }
 }
 
+async fn login(cred: web::Json<LoginUserCred>, state: web::Data<UserState>) -> impl Responder {
+    if state.verify(&cred.username) {
+        let user_cred_db = match UserCred::read(&cred.username) {
+            Ok(val) => val,
+            Err(err) => {
+                return HttpResponse::Unauthorized()
+                    .body(format!("User not found: {}", err.to_string()));
+            }
+        };
+        if user_cred_db.verify(&cred) {
+            HttpResponse::Ok().json(user_cred_db)
+        } else {
+            HttpResponse::Unauthorized().body("User credentials do not match")
+        }
+    } else {
+        HttpResponse::Unauthorized().body("User credentials do not match")
+    }
+}
+
 async fn update(
     id: web::Query<HashMap<String, String>>,
     payload: Multipart,
@@ -143,14 +163,14 @@ async fn update(
     };
 
     match write_file(payload, &username, &id).await {
-        Ok(_) => (),
+        Ok(_) => {
+            debug!("writing {}/{}", username, id)
+        }
         Err(err) => {
             return err.error_response();
         }
     }
-    println!("{:?}", state);
     state.update(&username, &id);
-    println!("{:?}", state);
 
     HttpResponse::Ok().body("SURCESS")
 }
@@ -187,11 +207,10 @@ async fn get(
         Ok(val) => val,
         Err(err) => return err,
     };
-    println!("{:?}", files);
     match to_zip(files) {
         Ok(data) => data,
         Err(err) => {
-            println!("{:?}", err);
+            eprintln!("{:?}", err);
             HttpResponse::Unauthorized().body(err.to_string())
         }
     }
@@ -219,6 +238,7 @@ async fn main() -> std::io::Result<()> {
             .route("/state/{user}", web::get().to(state))
             .route("/update", web::post().to(update))
             .route("/signin", web::post().to(signin))
+            .route("/login", web::get().to(login))
             .route("/authotp", web::post().to(signin_auth))
             .route("/get", web::get().to(get))
             .route("/getkey", web::get().to(get_key))

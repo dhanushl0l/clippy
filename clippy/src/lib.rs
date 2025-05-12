@@ -28,7 +28,6 @@ use std::{
     path::PathBuf,
 };
 use tokio::sync::mpsc::Sender;
-use write_clipboard::push_to_clipboard;
 use zip::ZipArchive;
 
 const API_KEY: Option<&str> = option_env!("KEY");
@@ -242,6 +241,18 @@ impl UserCred {
             key,
             email,
         }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
+pub struct LoginUserCred {
+    pub username: String,
+    pub key: String,
+}
+
+impl LoginUserCred {
+    pub fn new(username: String, key: String) -> Self {
+        Self { username, key }
     }
 }
 
@@ -536,21 +547,20 @@ pub fn get_global_bool() -> bool {
 
 pub fn set_global_update_bool(value: bool) {
     let mut path = get_path();
+    path.pop();
     if let Err(e) = fs::create_dir_all(path.parent().unwrap()) {
         error!("Failed to create directories: {}", e);
         return;
     }
-
-    path.pop();
-    let path = Path::new(&path).join("UPDATE");
+    path.push("UPDATE");
 
     if value {
         if let Err(e) = fs::File::create(&path) {
-            error!("Failed to create state file: {}", e);
+            error!("Failed to create updated state file: {}", e);
         }
     } else {
         if let Err(e) = fs::remove_file(&path) {
-            error!("Failed to delete state file: {}", e);
+            error!("Failed to updated delete state file: {}", e);
         }
     }
 }
@@ -558,7 +568,7 @@ pub fn set_global_update_bool(value: bool) {
 pub fn get_global_update_bool() -> bool {
     let mut path = get_path();
     path.pop();
-    let path = Path::new(&path).join("UPDATE");
+    path.push("UPDATE");
     path.exists()
 }
 
@@ -614,4 +624,37 @@ pub fn copy_to_linux(data: Data) {
     } else if std::env::var("DISPLAY").is_ok() {
         push_to_clipboard(data);
     }
+}
+
+pub fn read_data_by_id(id: &str) -> Result<Data, io::Error> {
+    let mut path = get_path();
+    path.push(id);
+
+    let data_str = fs::read_to_string(path)?;
+
+    let data: Data = serde_json::from_str(&data_str)?;
+
+    Ok(data)
+}
+
+pub fn is_valid_username(username: &str) -> bool {
+    let len_ok = username.len() >= 3 && username.len() <= 20;
+    let chars_ok = username
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_');
+    len_ok && chars_ok
+}
+
+pub fn is_valid_email(email: &str) -> bool {
+    let parts: Vec<&str> = email.split('@').collect();
+    if parts.len() != 2 {
+        return false;
+    }
+
+    let (local, domain) = (parts[0], parts[1]);
+    if local.is_empty() || domain.is_empty() || !domain.contains('.') {
+        return false;
+    }
+
+    true
 }

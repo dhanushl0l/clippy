@@ -1,5 +1,5 @@
 use crate::{
-    Pending, UserCred, UserData, get_path,
+    Pending, UserCred, UserData,
     http::{self, download, get_token_serv, health, state},
 };
 use log::{debug, error, info, warn};

@@ -1,8 +1,8 @@
 use clipboard_img_widget::item_card_image;
 use clipboard_widget::item_card;
 use clippy::{
-    Data, NewUser, NewUserOtp, SystemTheam, UserCred, UserSettings, get_global_update_bool,
-    get_path, set_global_update_bool,
+    Data, LoginUserCred, NewUser, NewUserOtp, SystemTheam, UserSettings, get_global_update_bool,
+    get_path, is_valid_email, is_valid_username, set_global_update_bool,
 };
 use clippy_gui::{Thumbnail, Waiting, str_formate};
 use custom_egui_widget::toggle;
@@ -46,6 +46,7 @@ struct Clipboard {
     show_createuser_window: bool,
     show_createuser_auth_window: bool,
     show_error: (bool, String),
+    warn: Option<String>,
     show_data_popup: (bool, String, PathBuf),
 }
 
@@ -70,6 +71,7 @@ impl Clipboard {
             show_createuser_window: false,
             show_createuser_auth_window: false,
             show_error: (false, String::from("")),
+            warn: None,
             newuser: NewUser::new_signin(String::new(), String::new()),
             key: "".to_string(),
             otp: String::new(),
@@ -274,7 +276,9 @@ impl App for Clipboard {
                                                 .hint_text("enter the username"),
                                         );
 
-                                        ui.add_space(8.0);
+                                        if let Some(val) = &self.warn {
+                                            ui.colored_label(egui::Color32::RED, val);
+                                        }
 
                                         ui.style_mut().override_text_style = None;
 
@@ -302,19 +306,25 @@ impl App for Clipboard {
                                                 .clicked()
                                             {
                                                 let username = self.newuser.user.clone();
-                                                let wait = self.waiting.clone();
+                                                if is_valid_username(&username) {
+                                                    self.warn = None;
+                                                    let wait = self.waiting.clone();
 
-                                                thread::spawn(move || {
-                                                    println!("started");
-                                                    let async_runtime = Runtime::new().unwrap();
-                                                    let status = async_runtime.block_on(async {
-                                                        check_user(username).await
+                                                    thread::spawn(move || {
+                                                        println!("started");
+                                                        let async_runtime = Runtime::new().unwrap();
+                                                        let status =
+                                                            async_runtime.block_on(async {
+                                                                check_user(username).await
+                                                            });
+                                                        let mut wait_lock = wait.lock().unwrap();
+                                                        *wait_lock = Waiting::CheckUser(status);
                                                     });
-                                                    let mut wait_lock = wait.lock().unwrap();
-                                                    *wait_lock = Waiting::CheckUser(status);
-                                                });
+                                                } else {
+                                                    self.warn =
+                                                        Some(String::from("Invalid username"));
+                                                }
                                             }
-
                                             ui.add_space(20.0);
 
                                             if ui
@@ -331,7 +341,7 @@ impl App for Clipboard {
                                                 self.show_signin_window = false;
                                             }
 
-                                            ui.add_space(35.0);
+                                            // ui.add_space(35.0);
                                         });
                                         ui.add_space(10.0);
                                     });
@@ -341,10 +351,6 @@ impl App for Clipboard {
                                     ui.label(
                                         RichText::new("Enter your details").size(20.0).strong(),
                                     );
-                                    ui.add_space(8.0);
-
-                                    ui.label(RichText::new("Email:").size(15.0).strong());
-
                                     ui.add_space(8.0);
 
                                     if let Some(email) = &mut self.newuser.email {
@@ -357,7 +363,9 @@ impl App for Clipboard {
                                                 .hint_text("Enter the Email"),
                                         );
                                     }
-
+                                    if let Some(val) = &self.warn {
+                                        ui.colored_label(egui::Color32::RED, val);
+                                    }
                                     ui.style_mut().override_text_style = None;
 
                                     ui.add_space(10.0);
@@ -383,28 +391,37 @@ impl App for Clipboard {
                                             )
                                             .clicked()
                                         {
-                                            let wait = self.waiting.clone();
                                             let user = self.newuser.clone();
-                                            thread::spawn(move || {
-                                                let async_runtime = Runtime::new().unwrap();
+                                            if is_valid_email(&self.newuser.email.as_ref().unwrap())
+                                            {
+                                                let wait = self.waiting.clone();
 
-                                                let signin = async_runtime
-                                                    .block_on(async { signin(user).await });
-                                                match signin {
-                                                    Ok(val) => {
-                                                        let mut wait_lock = wait.lock().unwrap();
-                                                        *wait_lock = Waiting::SigninOTP(Some(val));
+                                                thread::spawn(move || {
+                                                    let async_runtime = Runtime::new().unwrap();
+
+                                                    let signin = async_runtime
+                                                        .block_on(async { signin(user).await });
+                                                    match signin {
+                                                        Ok(val) => {
+                                                            let mut wait_lock =
+                                                                wait.lock().unwrap();
+                                                            *wait_lock =
+                                                                Waiting::SigninOTP(Some(val));
+                                                        }
+                                                        Err(err) => {
+                                                            eprintln!("{}", err);
+                                                            let mut wait_lock =
+                                                                wait.lock().unwrap();
+                                                            *wait_lock = Waiting::Signin(None);
+                                                        }
                                                     }
-                                                    Err(err) => {
-                                                        eprintln!("{}", err);
-                                                        let mut wait_lock = wait.lock().unwrap();
-                                                        *wait_lock = Waiting::Signin(None);
-                                                    }
-                                                }
-                                            });
+                                                });
+                                            } else {
+                                                self.warn = Some(String::from("Invalid Email"))
+                                            }
                                         }
 
-                                        ui.add_space(20.0);
+                                        ui.add_space(10.0);
                                         if ui
                                             .add(
                                                 egui::Button::new(
@@ -523,16 +540,6 @@ impl App for Clipboard {
 
                                         ui.add_space(8.0);
 
-                                        if let Some(email) = &mut self.newuser.email {
-                                            ui.add(
-                                                TextEdit::singleline(email)
-                                                    .vertical_align(Align::Center)
-                                                    .hint_text("Enter the Email"),
-                                            );
-                                        }
-
-                                        ui.add_space(8.0);
-
                                         ui.add(
                                             TextEdit::singleline(&mut self.key)
                                                 .vertical_align(Align::Center)
@@ -565,17 +572,16 @@ impl App for Clipboard {
                                                 )
                                                 .clicked()
                                             {
-                                                let user = UserCred::new(
+                                                let user = LoginUserCred::new(
                                                     self.newuser.user.clone(),
                                                     self.key.clone(),
-                                                    self.newuser.email.clone().unwrap(),
                                                 );
                                                 let wait = self.waiting.clone();
                                                 thread::spawn(move || {
                                                     let async_runtime = Runtime::new().unwrap();
 
                                                     let login_result = async_runtime
-                                                        .block_on(async { login(user).await });
+                                                        .block_on(async { login(&user).await });
 
                                                     match login_result {
                                                         Err(err) => {
@@ -587,7 +593,7 @@ impl App for Clipboard {
                                                         Ok(val) => {
                                                             let mut wait_lock =
                                                                 wait.lock().unwrap();
-                                                            *wait_lock = Waiting::Login(val);
+                                                            *wait_lock = Waiting::Login(Some(val));
                                                         }
                                                     }
                                                 });
@@ -685,24 +691,11 @@ impl App for Clipboard {
                                 self.settings.write();
                             });
 
-                            ui.horizontal(|ui| {
-                                ui.label("Interval");
-                                ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
-                                    if ui
-                                        .add(
-                                            egui::Slider::new(&mut self.settings.intrevel, 3..=30)
-                                                .text(""),
-                                        )
-                                        .changed()
-                                    {
-                                        self.settings.write();
-                                    }
-                                });
-                            });
-
+                            let label = "Limits the number of clipboards stored on your device. \
+                            It is recommended to limit this because it can grow over time.";
                             if let Some(mut val) = self.settings.max_clipboard {
                                 ui.horizontal(|ui| {
-                                    ui.label("Limite clipboard cache");
+                                    ui.label("Limite clipboard cache").on_hover_text(label);
                                     ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
                                         if ui.add(toggle(&mut true)).changed() {
                                             self.settings.max_clipboard = None;
@@ -734,9 +727,10 @@ impl App for Clipboard {
                                     });
                                 });
                             }
-
+                            let note = "If enabled, copied images are also stored as thumbnails. \
+                            If disabled, image previews won’t be shown in the app.";
                             ui.horizontal(|ui| {
-                                ui.label("Store Image");
+                                ui.label("Store Image Thumbnails").on_hover_text(note);
                                 ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
                                     if ui.add(toggle(&mut self.settings.store_image)).changed() {
                                         self.settings.write();
@@ -744,8 +738,10 @@ impl App for Clipboard {
                                 });
                             });
 
+                            let note = "Clicking any clipboard item will copy \
+                     its content and close the app.";
                             ui.horizontal(|ui| {
-                                ui.label("Select to Quit");
+                                ui.label("Click to Copy and Quit").on_hover_text(note);
                                 ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
                                     if ui.add(toggle(&mut self.settings.click_on_quit)).changed() {
                                         self.settings.write();
@@ -763,8 +759,10 @@ impl App for Clipboard {
                             });
 
                             if self.settings.is_login() {
+                                let note = "Prevents your clipboard from \
+                                syncing to your cloud account.";
                                 ui.horizontal(|ui| {
-                                    ui.label("Disable sync");
+                                    ui.label("Disable Sync").on_hover_text(note);
                                     ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
                                         if ui.add(toggle(&mut self.settings.disable_sync)).changed()
                                         {
@@ -917,7 +915,6 @@ impl App for Clipboard {
                                         &texture,
                                         &mut i.get_pined(),
                                         self.settings.click_on_quit,
-                                        i,
                                         &mut self.changed,
                                         path,
                                         ctx,
@@ -935,14 +932,17 @@ impl App for Clipboard {
 
 fn main() -> Result<(), eframe::Error> {
     let ui = Clipboard::new();
-    let mut options = NativeOptions {
-        viewport: ViewportBuilder::default().with_inner_size(Vec2::new(800.0, 600.0)),
-        ..Default::default()
-    };
 
     let icon = eframe::icon_data::from_png_bytes(include_bytes!("../../assets/clippy-32-32.png"))
         .expect("The icon data must be valid");
-    options.viewport.icon = Some(Arc::new(icon));
+
+    let options = NativeOptions {
+        viewport: ViewportBuilder::default()
+            .with_inner_size(Vec2::new(600.0, 800.0))
+            .with_app_id("org.dhanu.clippy")
+            .with_icon(icon),
+        ..Default::default()
+    };
 
     run_native("clippy", options, Box::new(|_cc| Ok(Box::new(ui))))
 }
