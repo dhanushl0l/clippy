@@ -12,15 +12,19 @@ pub fn item_card_image(
     path: &PathBuf,
     ctx: &Context,
 ) -> Response {
-    let max_size = vec2(500.0, 100.0);
-
     let frame = Frame::group(ui.style())
         .corner_radius(9)
         .outer_margin(Margin::same(4));
 
+    let width = ctx.screen_rect().width();
+
     frame
         .show(ui, |ui| {
-            ui.set_max_size(max_size);
+            ui.set_max_height(100.0);
+
+            if width >= 650.0 {
+                ui.set_width(600.0);
+            }
 
             ui.vertical(|ui| {
                 if ui.add(egui::ImageButton::new(texture)).clicked() {

@@ -30,9 +30,12 @@ pub fn start_cloud(mut rx: Receiver<(String, String)>, usercred: UserCred) {
                 let pending = pending.clone();
                 let client = client.clone();
                 let usercred = usercred.clone();
+                let user_data = user_data.clone();
+
                 async move {
                     while let Some((path, id)) = rx.recv().await {
                         debug!("New clipboard data: path = {}, id = {}", path, id);
+                        user_data.add(id.clone());
                         match http::send(&path, &id, &usercred, &client).await {
                             Ok(_) => (),
                             Err(err) => {
@@ -88,7 +91,7 @@ pub fn start_cloud(mut rx: Receiver<(String, String)>, usercred: UserCred) {
                                 } else {
                                     match download(&user_data, &client).await {
                                         Ok(_) => debug!("Downloade updated files"),
-                                        Err(err) => warn!("{}", err),
+                                        Err(err) => warn!("Downloade updated files error: {}", err),
                                     };
                                     sleep(time::Duration::from_secs(5)).await;
                                 }

@@ -7,7 +7,7 @@ use actix_web_httpauth::extractors::bearer::BearerAuth;
 use clippy::{LoginUserCred, NewUser, NewUserOtp};
 use clippy_server::{
     CRED_PATH, EmailState, OTPState, UserCred, UserState, auth, gen_otp, gen_password, get_auth,
-    get_param, to_zip, write_file,
+    get_param, hash_key, to_zip, write_file,
 };
 use email::send_otp;
 use env_logger::{Builder, Env};
@@ -63,7 +63,7 @@ async fn signin_auth(
     } else {
         match otp_state.check_otp(&data) {
             Ok(_) => {
-                let password = gen_password();
+                let password = hash_key(&data.key, &data.user);
                 if let Err(err) =
                     UserCred::new(username.clone(), data.email.clone(), password).write()
                 {
@@ -77,13 +77,14 @@ async fn signin_auth(
                 let file_path = Path::new(CRED_PATH).join(username).join("user.json");
                 match fs::read_to_string(&file_path) {
                     Ok(content) => {
-                        if state.entry_and_verify_user(username) {
-                            return HttpResponse::Unauthorized()
-                                .body("Failure: Username already exists");
-                        };
-                        HttpResponse::Ok()
-                            .content_type("application/json")
-                            .body(content)
+                        if let Some(_) = state.entry_and_verify_user(username) {
+                            println!("{:?}", state);
+                            HttpResponse::Ok()
+                                .content_type("application/json")
+                                .body(content)
+                        } else {
+                            HttpResponse::Unauthorized().body("Failure: Username already exists")
+                        }
                     }
                     Err(err) => {
                         eprintln!("Error reading user file: {}", err);
@@ -132,7 +133,10 @@ async fn get_key(cred: web::Json<UserCred>, state: web::Data<UserState>) -> impl
 async fn login(cred: web::Json<LoginUserCred>, state: web::Data<UserState>) -> impl Responder {
     if state.verify(&cred.username) {
         let user_cred_db = match UserCred::read(&cred.username) {
-            Ok(val) => val,
+            Ok(val) => {
+                println!("{:?}", state);
+                val
+            }
             Err(err) => {
                 return HttpResponse::Unauthorized()
                     .body(format!("User not found: {}", err.to_string()));
@@ -238,8 +242,8 @@ async fn main() -> std::io::Result<()> {
             .route("/state/{user}", web::get().to(state))
             .route("/update", web::post().to(update))
             .route("/signin", web::post().to(signin))
-            .route("/login", web::get().to(login))
             .route("/authotp", web::post().to(signin_auth))
+            .route("/login", web::get().to(login))
             .route("/get", web::get().to(get))
             .route("/getkey", web::get().to(get_key))
             .route("/usercheck", web::get().to(check_user))

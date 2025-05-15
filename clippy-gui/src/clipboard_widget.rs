@@ -15,9 +15,8 @@ pub fn item_card(
     path: &PathBuf,
     ctx: &Context,
 ) -> Response {
-    let max_size = vec2(500.0, 100.0);
-
     let background_color = ui.style().visuals.window_fill;
+    let width = ctx.screen_rect().width();
 
     let frame = Frame::group(ui.style())
         .corner_radius(9)
@@ -25,7 +24,11 @@ pub fn item_card(
 
     frame
         .show(ui, |ui| {
-            ui.set_max_size(max_size);
+            ui.set_max_height(100.0);
+
+            if width >= 650.0 {
+                ui.set_width(600.0);
+            }
 
             ui.vertical_centered(|ui| {
                 if ui

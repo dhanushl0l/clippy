@@ -12,7 +12,7 @@ use eframe::{
     run_native,
 };
 use egui::{
-    Align, Button, Frame, Layout, Margin, RichText, Stroke, TextEdit, TextStyle, Theme,
+    Align, Button, Frame, InputState, Layout, Margin, RichText, Stroke, TextEdit, TextStyle, Theme,
     TopBottomPanel, Vec2,
 };
 use http::{check_user, login, signin, signin_otp_auth};
@@ -21,6 +21,7 @@ use std::{
     collections::HashMap,
     fs::{self},
     path::PathBuf,
+    process,
     sync::{Arc, Mutex},
     thread,
 };
@@ -136,7 +137,7 @@ impl App for Clipboard {
     fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
         let button_size = Vec2::new(100.0, 35.0);
 
-        TopBottomPanel::top("footer").show(ctx, |ui| {
+        TopBottomPanel::top("header").show(ctx, |ui| {
             let available_width = ui.available_width();
 
             ui.allocate_ui(Vec2::new(available_width, 0.0), |ui| {
@@ -340,8 +341,6 @@ impl App for Clipboard {
                                             {
                                                 self.show_signin_window = false;
                                             }
-
-                                            // ui.add_space(35.0);
                                         });
                                         ui.add_space(10.0);
                                     });
@@ -443,9 +442,6 @@ impl App for Clipboard {
                                     ui.label(
                                         RichText::new("Enter your details").size(20.0).strong(),
                                     );
-                                    ui.add_space(8.0);
-
-                                    ui.label(RichText::new("OTP:").size(15.0).strong());
 
                                     ui.add_space(8.0);
 
@@ -455,6 +451,15 @@ impl App for Clipboard {
                                         TextEdit::singleline(&mut self.otp)
                                             .vertical_align(Align::Center)
                                             .hint_text("enter the OTP")
+                                            .min_size(button_size),
+                                    );
+
+                                    ui.add_space(8.0);
+
+                                    ui.add(
+                                        TextEdit::singleline(&mut self.key)
+                                            .vertical_align(Align::Center)
+                                            .hint_text("enter the Password")
                                             .min_size(button_size),
                                     );
 
@@ -488,6 +493,7 @@ impl App for Clipboard {
                                                 self.newuser.user.clone(),
                                                 self.newuser.email.clone().unwrap(),
                                                 self.otp.clone(),
+                                                self.key.clone(),
                                             );
                                             thread::spawn(move || {
                                                 let async_runtime = Runtime::new().unwrap();
@@ -927,6 +933,13 @@ impl App for Clipboard {
                 });
             });
         });
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            if self.show_settings == true {
+                self.show_settings = false;
+            } else {
+                process::exit(0)
+            };
+        }
     }
 }
 

@@ -405,11 +405,17 @@ pub struct NewUserOtp {
     pub user: String,
     pub email: String,
     pub otp: String,
+    pub key: String,
 }
 
 impl NewUserOtp {
-    pub fn new(user: String, email: String, otp: String) -> Self {
-        Self { user, email, otp }
+    pub fn new(user: String, email: String, otp: String, key: String) -> Self {
+        Self {
+            user,
+            email,
+            otp,
+            key,
+        }
     }
 }
 

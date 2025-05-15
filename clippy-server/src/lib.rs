@@ -1,5 +1,6 @@
 use actix_multipart::Multipart;
 use actix_web::HttpResponse;
+use base64::{Engine, engine::general_purpose};
 use chrono::{Duration, Utc};
 use clippy::{LoginUserCred, NewUserOtp};
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
@@ -7,6 +8,7 @@ use log::{debug, error};
 use rand::seq::IteratorRandom;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeSet, HashMap},
     fs::{self, File},
@@ -74,13 +76,15 @@ impl UserState {
         (op, email)
     }
 
-    pub fn entry_and_verify_user(&self, username: &str) -> bool {
+    pub fn entry_and_verify_user(&self, username: &str) -> Option<()> {
         let mut map = self.data.lock().unwrap();
+        fs::create_dir_all(format!("{}/{}", DATABASE_PATH, username)).unwrap();
         if map.contains_key(username) {
-            true
+            None
         } else {
             map.insert(username.to_string(), BTreeSet::new());
-            false
+            println!("{:?}", self);
+            Some(())
         }
     }
 
@@ -112,14 +116,22 @@ impl UserState {
     }
 
     pub fn is_updated(&self, username: &str, id: &str) -> bool {
-        let guard = self.data.lock().unwrap();
+        let guard = match self.data.lock() {
+            Ok(g) => g,
+            Err(e) => {
+                error!("Mutex lock failed: {}", e);
+                panic!("Mutex lock failed")
+            }
+        };
+
         let data = guard.get(username);
         if let Some(val) = data {
-            let last = val.last().unwrap();
-            if last == id {
-                return true;
-            } else {
-                return false;
+            match val.last() {
+                Some(last) => last == id,
+                None => {
+                    error!("User '{}' has empty BTreeSet", username);
+                    false
+                }
             }
         } else {
             true
@@ -208,7 +220,8 @@ impl UserCred {
     }
 
     pub fn verify(&self, logincred: &LoginUserCred) -> bool {
-        self.username == logincred.username && self.key == logincred.key
+        self.username == logincred.username
+            && self.key == hash_key(&logincred.key, &logincred.username)
     }
 }
 
@@ -425,4 +438,12 @@ fn remove_db_file(username: &str, id: &str) -> Result<(), Error> {
     path.push(id);
     fs::remove_file(path)?;
     Ok(())
+}
+
+pub fn hash_key(key: &str, user: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(key);
+    hasher.update(user);
+    let result = hasher.finalize();
+    general_purpose::STANDARD.encode(result)
 }
