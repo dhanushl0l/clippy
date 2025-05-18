@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # Define the URLs for the files :: this is a test scr
-URL="https://dhanu.cloud/clippy/clippy-release.tar.gz"
-ARCHIVE_NAME="archive.tar.gz"
+URL="https://repo.dhanu.cloud/clippy/clippy-release.tar.xz"
+ARCHIVE_NAME="clippy-release.tar.xz"
 TARGET_DIR="clippy"
 
 echo "Downloading file..."
 curl -L -o "$ARCHIVE_NAME" "$URL"
 mkdir -p "$TARGET_DIR"
-tar -xzf "$ARCHIVE_NAME" -C "$TARGET_DIR"
+tar -xJf "$ARCHIVE_NAME" -C "$TARGET_DIR"
 cd "$TARGET_DIR" || { echo "Failed to cd into $TARGET_DIR"; exit 1; }
 
 # Define the target locations

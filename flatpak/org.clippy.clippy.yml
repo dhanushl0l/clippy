@@ -32,10 +32,10 @@ modules:
       - install -Dm644 clippy-32-32.png "${FLATPAK_DEST}/share/icons/hicolor/32x32/apps/${FLATPAK_ID}-tray.png"
     sources:
       - type: file
-        path: target/release/clippy-gui
+        path: ../target/release/clippy-gui
       - type: file
-        path: assets/clippy-32-32.png
+        path: ../assets/clippy-32-32.png
       - type: file
-        path: assets/clippy-512-512.png
+        path: ../assets/clippy-512-512.png
       - type: file
         path: clippy.desktop
