@@ -139,7 +139,7 @@ pub async fn download(userdata: &UserData, client: &Client) -> Result<(), Box<dy
     match data {
         Ok(val) => {
             #[cfg(not(target_os = "linux"))]
-            write_clipboard::copy_to_clipboard(val)?;
+            write_clipboard::copy_to_clipboard(val).unwrap();
 
             #[cfg(target_os = "linux")]
             write_clipboard::copy_to_linux(val)?;

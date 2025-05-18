@@ -10,7 +10,7 @@ use bytes::Bytes;
 use chrono::prelude::Utc;
 use encryption_decryption::{decrypt_file, encrept_file};
 use image::ImageReader;
-use log::{debug, error, warn};
+use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fs::{DirEntry, create_dir, create_dir_all};
@@ -591,13 +591,15 @@ pub fn create_past_lock(path: &PathBuf) -> Result<(), io::Error> {
 }
 
 pub fn watch_for_next_clip_write(dir: PathBuf) {
-    let target = dir.join("user/.next");
-    println!("{:?}", target);
+    let mut target = dir.join("user");
+    target.push(".next");
 
     loop {
         if fs::metadata(&target).is_ok() {
             match read_parse(&target) {
-                Ok(_) => (),
+                Ok(_) => {
+                    info!("New item copied")
+                }
                 Err(err) => error!("{}", err),
             }
         }
@@ -614,7 +616,7 @@ pub fn watch_for_next_clip_write(dir: PathBuf) {
         copy_to_linux(data);
 
         #[cfg(not(target_os = "linux"))]
-        push_to_clipboard(data).unwrap();
+        write_clipboard::push_to_clipboard(data).unwrap();
 
         fs::remove_file(&target).map_err(|e| format!("Failed to remove {:?}: {}", target, e))?;
         Ok(())

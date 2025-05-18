@@ -84,7 +84,9 @@ fn main() {
             if !usersettings.disable_sync {
                 if let Some(sync) = usersettings.get_sync() {
                     start_cloud(rx, sync.clone());
+                } else {
                 }
+            } else {
             }
         }
         Err(err) => {

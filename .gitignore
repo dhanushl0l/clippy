@@ -1,8 +1,6 @@
 target/
 .vs/
 .vscode/
-.flatpak-builder/
-repo/
 clippy-server/credentials/
 data-base/
 log.log

@@ -1,0 +1,10 @@
+﻿<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Id="clippy.clippy" Name="clippy" Manufacturer="clippy" Version="1.0.0.0">
+  <MediaTemplate EmbedCab="yes" />
+    <MajorUpgrade DowngradeErrorMessage="!(loc.DowngradeError)" />
+
+    <Feature Id="Main">
+      <ComponentGroupRef Id="clippy" />
+    </Feature>
+  </Package>
+</Wix>

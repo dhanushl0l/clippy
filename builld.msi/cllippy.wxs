@@ -1,0 +1,25 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+	<Fragment>
+		<ComponentGroup Id="clippy">
+			<Component Directory="INSTALLFOLDER" Guid="92fb25fc-5801-45ba-907b-92bdb5f1ce9a">
+				<File Source="../target/release/clippy.exe" />
+				<File Source="../target/release/clippy-gui.exe" />
+			</Component>
+			<Component Directory="ApplicationProgramsFolder">
+				<Shortcut Id="ApplicationDesktopShortcut"
+					Name="clippy"
+					Description="Clipboard manager"
+					Target="[INSTALLFOLDER]clippy-gui.exe"
+					WorkingDirectory="INSTALLFOLDER"/>
+				<RemoveFolder Id="ApplicationProgramsFolder" On="uninstall"/>
+				<RegistryValue
+					Root="HKCU"
+					Key="Software\clippy\clippy"
+					Name="installed"
+					Type="integer"
+					Value="1"
+					KeyPath="yes"/>
+			</Component>
+		</ComponentGroup>
+	</Fragment>
+</Wix>

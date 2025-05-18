@@ -1,26 +1,34 @@
 #!/bin/bash
 
 # Define the URLs for the files :: this is a test scr
-BIN_URL="target/release/clippy"
-SERVICE_URL="clippy.service"
+URL="https://dhanu.cloud/clippy/clippy-release.tar.gz"
+ARCHIVE_NAME="archive.tar.gz"
+TARGET_DIR="clippy"
+
+echo "Downloading file..."
+curl -L -o "$ARCHIVE_NAME" "$URL"
+mkdir -p "$TARGET_DIR"
+tar -xzf "$ARCHIVE_NAME" -C "$TARGET_DIR"
+cd "$TARGET_DIR" || { echo "Failed to cd into $TARGET_DIR"; exit 1; }
 
 # Define the target locations
 BIN_DIR="/usr/local/bin"  
 SERVICE_DIR="/etc/systemd/user"   
 SERVICE_NAME="clippy.service"
 
+echo "Copying file..."
 # Create the service directory if it doesn't exist
 mkdir -p "$SERVICE_DIR"
+sudo cp  "clippy"  "$BIN_DIR/clippy"
+sudo cp  "clippy-gui"  "$BIN_DIR/clippy-gui"
+sudo cp "clippy.service" "$SERVICE_DIR/$SERVICE_NAME"
+sudo cp assets/clippy-32-32.png /usr/share/icons/hicolor/32x32/apps/clippy.png
+sudo cp assets/clippy-512-512.png /usr/share/icons/hicolor/512x512/apps/clippy.png
+sudo cp clippy.desktop /usr/share/applications/clippy.desktop
 
-# Download the binary file and the service file
-echo "Downloading binary file..."
-sudo cp  "$BIN_URL"  "$BIN_DIR/clippy"
-
-echo "Downloading service file..."
-sudo cp "$SERVICE_URL" "$SERVICE_DIR/$SERVICE_NAME"
-
-# Make the binary file executable
-chmod +x "$BIN_DIR/clippy"
+cd ..
+rm -r "&TARGET_DIR"
+rm "&ARCHIVE_NAME"
 
 # Reload systemd, enable, and start the service
 echo "Enabling and starting the service..."
