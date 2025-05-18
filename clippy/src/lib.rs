@@ -207,8 +207,35 @@ impl UserData {
         }
     }
 
-    pub fn add(&self, id: String) {
-        self.data.lock().unwrap().insert(id);
+    pub fn add(&self, id: String, total: Option<u32>) {
+        let mut data = self.data.lock().unwrap();
+        data.insert(id);
+        debug!("User clipboard count: {}", data.len());
+
+        if let Some(val) = total {
+            let len = data.len() as u32;
+            if val < len {
+                let count = len - val;
+                let to_remove: Vec<String> = data.iter().take(count as usize).cloned().collect();
+                let mut path = get_path();
+                let mut pined_path = get_path_pined();
+                for i in to_remove {
+                    path.push(&i);
+                    let file = File::open(&path).unwrap();
+                    let clipboard: Data = serde_json::from_reader(file).unwrap();
+                    if clipboard.pined {
+                        pined_path.push(&i);
+                        fs::rename(&path, &pined_path).unwrap();
+                        pined_path.pop();
+                    } else {
+                        fs::remove_file(&path);
+                    }
+                    path.pop();
+                    data.remove(&i);
+                }
+                debug!("User clipboard count: {}", data.len());
+            }
+        }
     }
 
     pub fn add_vec(&self, id: Vec<String>) {
@@ -423,19 +450,25 @@ pub fn get_path() -> PathBuf {
     #[cfg(target_os = "linux")]
     {
         let home = env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-        return [home.as_str(), ".local/share/clippy/data"].iter().collect();
+        let path: PathBuf = [home.as_str(), ".local/share/clippy/data"].iter().collect();
+        fs::create_dir_all(&path).unwrap();
+        return path;
     }
 
     #[cfg(target_os = "macos")]
     {
         let home = env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-        return [home.as_str(), ".local/share/clippy/data"].iter().collect();
+        let path: PathBuf = [home.as_str(), ".local/share/clippy/data"].iter().collect();
+        fs::create_dir_all(&path).unwrap();
+        return path;
     }
 
     #[cfg(target_os = "windows")]
     {
         let home = env::var("APPDATA").unwrap_or_else(|_| "C:\\Users\\Public\\AppData".to_string());
-        return [home.as_str(), "clippy\\data"].iter().collect();
+        let path: PathBuf = [home.as_str(), "clippy\\data"].iter().collect();
+        fs::create_dir_all(&path).unwrap();
+        return path;
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
@@ -445,32 +478,102 @@ pub fn get_path() -> PathBuf {
 }
 
 pub fn get_path_image() -> PathBuf {
-    #[cfg(target_os = "linux")]
-    {
-        let home = env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-        return [home.as_str(), ".local/share/clippy/image"]
-            .iter()
-            .collect();
-    }
+    let path: PathBuf = {
+        #[cfg(target_os = "linux")]
+        {
+            let home = env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+            [home.as_str(), ".local/share/clippy/image"]
+                .iter()
+                .collect()
+        }
 
-    #[cfg(target_os = "macos")]
-    {
-        let home = env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-        return [home.as_str(), ".local/share/clippy/image"]
-            .iter()
-            .collect();
-    }
+        #[cfg(target_os = "macos")]
+        {
+            let home = env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+            [home.as_str(), ".local/share/clippy/image"]
+                .iter()
+                .collect()
+        }
 
-    #[cfg(target_os = "windows")]
-    {
-        let home = env::var("APPDATA").unwrap_or_else(|_| "C:\\Users\\Public\\AppData".to_string());
-        return [home.as_str(), "clippy\\image"].iter().collect();
-    }
+        #[cfg(target_os = "windows")]
+        {
+            let home =
+                env::var("APPDATA").unwrap_or_else(|_| "C:\\Users\\Public\\AppData".to_string());
+            [home.as_str(), "clippy\\image"].iter().collect()
+        }
 
-    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-    {
-        compile_error!("Unsupported operating system");
-    }
+        #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+        {
+            compile_error!("Unsupported operating system");
+        }
+    };
+    fs::create_dir_all(&path).unwrap();
+    path
+}
+
+pub fn get_path_pined() -> PathBuf {
+    let path: PathBuf = {
+        #[cfg(target_os = "linux")]
+        {
+            let home = env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+            [home.as_str(), ".local/share/clippy/pined"]
+                .iter()
+                .collect()
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            let home = env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+            [home.as_str(), ".local/share/clippy/pined"]
+                .iter()
+                .collect()
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            let home =
+                env::var("APPDATA").unwrap_or_else(|_| "C:\\Users\\Public\\AppData".to_string());
+            [home.as_str(), "clippy\\pined"].iter().collect()
+        }
+
+        #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+        {
+            compile_error!("Unsupported operating system");
+        }
+    };
+    fs::create_dir_all(&path).unwrap();
+    path
+}
+
+pub fn cache_path() -> PathBuf {
+    let base: PathBuf = {
+        #[cfg(target_os = "linux")]
+        {
+            PathBuf::from(
+                env::var("XDG_CACHE_HOME")
+                    .unwrap_or_else(|_| format!("{}/.cache", env::var("HOME").unwrap())),
+            )
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            PathBuf::from(env::var("LOCALAPPDATA").expect("LOCALAPPDATA not set"))
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            PathBuf::from(format!("{}/Library/Caches", env::var("HOME").unwrap()))
+        }
+
+        #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
+        {
+            panic!("Unsupported platform");
+        }
+    };
+
+    let path = base.join("clippy");
+    fs::create_dir_all(&path).unwrap();
+    path
 }
 
 pub fn extract_zip(data: Bytes) -> Result<Vec<String>, zip::result::ZipError> {

@@ -83,7 +83,7 @@ fn main() {
         Ok(usersettings) => {
             if !usersettings.disable_sync {
                 if let Some(sync) = usersettings.get_sync() {
-                    start_cloud(rx, sync.clone());
+                    start_cloud(rx, sync.clone(), usersettings);
                 } else {
                 }
             } else {

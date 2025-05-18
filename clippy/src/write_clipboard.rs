@@ -73,7 +73,6 @@ pub fn push_to_clipboard_wl_command(data: Data) -> Result<(), String> {
             .map_err(|e| format!("Failed to write to wl-copy: {}", e))?;
     }
 
-    // Detach — we don’t wait on the process
     Ok(())
 }
 

@@ -91,8 +91,6 @@ pub async fn state(userdata: &UserData, client: &Client, user: &UserCred) -> Res
         .await
         .map_err(|e| format!("Request error: {}", e))?;
 
-    println!("{}", userdata.last_one());
-
     let body = match response.text().await {
         Ok(text) => text,
         Err(e) => format!("Failed to read body: {}", e),

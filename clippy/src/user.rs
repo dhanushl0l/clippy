@@ -1,5 +1,5 @@
 use crate::{
-    Pending, UserCred, UserData,
+    Pending, UserCred, UserData, UserSettings,
     http::{self, download, get_token_serv, health, state},
 };
 use log::{debug, error, info, warn};
@@ -7,7 +7,11 @@ use reqwest::{self, Client};
 use std::{sync::Arc, thread, time};
 use tokio::{join, runtime::Runtime, sync::mpsc::Receiver, time::sleep};
 
-pub fn start_cloud(mut rx: Receiver<(String, String)>, usercred: UserCred) {
+pub fn start_cloud(
+    mut rx: Receiver<(String, String)>,
+    usercred: UserCred,
+    usersettings: UserSettings,
+) {
     thread::spawn(move || {
         debug!("Start thread 3");
         let user_data = Arc::new(UserData::build());
@@ -35,7 +39,7 @@ pub fn start_cloud(mut rx: Receiver<(String, String)>, usercred: UserCred) {
                 async move {
                     while let Some((path, id)) = rx.recv().await {
                         debug!("New clipboard data: path = {}, id = {}", path, id);
-                        user_data.add(id.clone());
+                        user_data.add(id.clone(), usersettings.max_clipboard);
                         match http::send(&path, &id, &usercred, &client).await {
                             Ok(_) => (),
                             Err(err) => {
@@ -80,6 +84,8 @@ pub fn start_cloud(mut rx: Receiver<(String, String)>, usercred: UserCred) {
                 let client = client.clone();
                 let usercred = usercred.clone();
                 async move {
+                    let mut log = true;
+
                     loop {
                         let mut api_health = false;
 
@@ -87,16 +93,21 @@ pub fn start_cloud(mut rx: Receiver<(String, String)>, usercred: UserCred) {
                             Ok(val) => {
                                 if val {
                                     sleep(time::Duration::from_secs(5)).await;
-                                    info!("Database uptodate");
+                                    if log {
+                                        info!("Database uptodate");
+                                        log = false;
+                                    }
                                 } else {
                                     match download(&user_data, &client).await {
                                         Ok(_) => debug!("Downloade updated files"),
                                         Err(err) => warn!("Downloade updated files error: {}", err),
                                     };
+                                    log = true;
                                     sleep(time::Duration::from_secs(5)).await;
                                 }
                             }
                             Err(err) => {
+                                log = false;
                                 api_health = true;
                                 warn!("unable to reach the server: {}", err);
                             }
