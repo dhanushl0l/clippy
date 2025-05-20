@@ -4,6 +4,7 @@ use actix_web::{
     web::{self},
 };
 use actix_web_httpauth::extractors::bearer::BearerAuth;
+use chrono::Utc;
 use clippy::{LoginUserCred, NewUser, NewUserOtp};
 use clippy_server::{
     CRED_PATH, EmailState, OTPState, UserCred, UserState, auth, gen_otp, gen_password, get_auth,
@@ -153,20 +154,19 @@ async fn login(cred: web::Json<LoginUserCred>, state: web::Data<UserState>) -> i
 }
 
 async fn update(
-    id: web::Query<HashMap<String, String>>,
     payload: Multipart,
     auth_key: BearerAuth,
     state: web::Data<UserState>,
 ) -> impl Responder {
     let key = auth_key.token();
-    let id = param!(&id, "ID");
+    let id = Utc::now().timestamp();
 
     let username = match auth(key) {
         Ok(val) => val,
         Err(err) => return HttpResponse::Unauthorized().body(err.to_string()),
     };
 
-    match write_file(payload, &username, &id).await {
+    match write_file(payload, &username, id.to_string()).await {
         Ok(_) => {
             debug!("writing {}/{}", username, id)
         }
@@ -174,9 +174,9 @@ async fn update(
             return err.error_response();
         }
     }
-    state.update(&username, &id);
+    state.update(&username, id);
 
-    HttpResponse::Ok().body("SURCESS")
+    HttpResponse::Ok().body(id.to_string())
 }
 
 async fn state(

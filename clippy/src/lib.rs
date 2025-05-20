@@ -27,8 +27,8 @@ use std::{
     io::{self},
     path::PathBuf,
 };
+use tar::Archive;
 use tokio::sync::mpsc::Sender;
-use zip::ZipArchive;
 
 const API_KEY: Option<&str> = option_env!("KEY");
 
@@ -52,10 +52,9 @@ impl Data {
 
     pub fn write_to_json(&self, tx: &Sender<(String, String)>) -> Result<(), io::Error> {
         let time = Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
-
-        fs::create_dir_all(&get_path())?;
-
-        let file_path = &get_path().join(&time);
+        let path = get_path_pending();
+        fs::create_dir_all(&path)?;
+        let file_path = &path.join(&time);
 
         if self.typ.starts_with("image/") {
             self.save_image(&time)?;
@@ -381,7 +380,7 @@ impl UserSettings {
 
 #[derive(Debug, Clone)]
 pub struct Pending {
-    data: Arc<Mutex<Vec<(String, String)>>>,
+    data: Arc<Mutex<Vec<String>>>,
 }
 
 impl Pending {
@@ -391,7 +390,7 @@ impl Pending {
         }
     }
 
-    pub fn add(&self, id: (String, String)) {
+    pub fn add(&self, id: String) {
         self.data.lock().unwrap().push(id);
     }
 
@@ -399,12 +398,18 @@ impl Pending {
         self.data.lock().unwrap().is_empty()
     }
 
-    pub fn get(&self) -> Option<(String, String)> {
+    pub fn get(&self) -> Option<String> {
         self.data.lock().unwrap().last().cloned()
     }
 
     pub fn remove(&self) {
-        self.data.lock().unwrap().pop();
+        let data = self.data.lock().unwrap().pop();
+        if let Some(path) = data {
+            match fs::remove_file(&path) {
+                Ok(_) => println!("deleted"),
+                Err(err) => println!("{:?}", err),
+            };
+        }
     }
 }
 
@@ -467,6 +472,41 @@ pub fn get_path() -> PathBuf {
     {
         let home = env::var("APPDATA").unwrap_or_else(|_| "C:\\Users\\Public\\AppData".to_string());
         let path: PathBuf = [home.as_str(), "clippy\\data"].iter().collect();
+        fs::create_dir_all(&path).unwrap();
+        return path;
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    {
+        compile_error!("Unsupported operating system");
+    }
+}
+
+pub fn get_path_pending() -> PathBuf {
+    #[cfg(target_os = "linux")]
+    {
+        let home = env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+        let path: PathBuf = [home.as_str(), ".local/share/clippy/local_data"]
+            .iter()
+            .collect();
+        fs::create_dir_all(&path).unwrap();
+        return path;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let home = env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+        let path: PathBuf = [home.as_str(), ".local/share/clippy/local_data"]
+            .iter()
+            .collect();
+        fs::create_dir_all(&path).unwrap();
+        return path;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let home = env::var("APPDATA").unwrap_or_else(|_| "C:\\Users\\Public\\AppData".to_string());
+        let path: PathBuf = [home.as_str(), "clippy\\local_data"].iter().collect();
         fs::create_dir_all(&path).unwrap();
         return path;
     }
@@ -576,18 +616,24 @@ pub fn cache_path() -> PathBuf {
     path
 }
 
-pub fn extract_zip(data: Bytes) -> Result<Vec<String>, zip::result::ZipError> {
+pub fn extract_zip(data: Bytes) -> Result<Vec<String>, Box<dyn Error>> {
+    println!("zip");
     let target_dir = get_path();
     let mut id = Vec::new();
-    let cursor = Cursor::new(data);
-    let mut archive = ZipArchive::new(cursor)?;
+    let mut archive = Archive::new(&*data);
 
-    for i in 0..archive.len() {
-        let mut file = archive.by_index(i)?;
-        let file_name = file.name();
-        id.push(file_name.to_string());
+    for entry in archive.entries()? {
+        let mut file = entry?;
+        let path = file.path()?;
         let mut out_path = target_dir.clone();
-        out_path.push(file_name);
+
+        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+            id.push(name.to_string());
+            out_path.push(name);
+        } else {
+            error!("Invalid file");
+            continue;
+        }
 
         if let Some(parent) = out_path.parent() {
             fs::create_dir_all(parent)?;

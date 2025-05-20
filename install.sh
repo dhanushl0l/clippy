@@ -16,6 +16,8 @@ BIN_DIR="/usr/local/bin"
 SERVICE_DIR="/etc/systemd/user"   
 SERVICE_NAME="clippy.service"
 
+systemctl --user stop "$SERVICE_NAME"
+
 echo "Copying file..."
 # Create the service directory if it doesn't exist
 mkdir -p "$SERVICE_DIR"

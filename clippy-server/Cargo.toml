@@ -7,18 +7,21 @@ edition = "2024"
 actix-multipart = "0.7.2"
 actix-web = "4"
 env_logger = "0.11.7"
-flate2 = "1.1.1"
 futures-util = "0.3.31"
 log = "0.4.27"
 rand = "0.9.0"
 uuid = { version = "1.16.0", features = ["serde", "v4"] }
-zip = "2.5.0"
 serde = { workspace = true }
 serde_json = { workspace = true }
 clippy = { path = "../clippy" }
 chrono = "0.4.40"
 jsonwebtoken = "9.3.1"
-lettre = { version = "0.11", default-features = false, features = ["tokio1-native-tls", "smtp-transport", "builder"] }
+lettre = { version = "0.11", default-features = false, features = [
+    "tokio1-native-tls",
+    "smtp-transport",
+    "builder",
+] }
 actix-web-httpauth = "0.8.2"
 base64 = "0.22.1"
 sha2 = "0.10.9"
+tar = "0.4.44"

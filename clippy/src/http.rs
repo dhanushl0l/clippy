@@ -3,7 +3,7 @@ use crate::{
     write_clipboard::{self},
 };
 use core::time;
-use log::{debug, warn};
+use log::{debug, error, warn};
 use once_cell::sync::Lazy;
 use reqwest::{self, Client, multipart};
 use std::{
@@ -15,6 +15,7 @@ use std::{
 use tokio::{fs::File, io::AsyncReadExt};
 
 pub const SERVER: &str = "http://127.0.0.1:7777";
+
 static TOKEN: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new(String::new()));
 
 pub fn update_token(new_data: String) {
@@ -29,10 +30,9 @@ fn get_token() -> String {
 
 pub async fn send(
     file_path: &str,
-    id: &str,
     usercred: &UserCred,
     client: &Client,
-) -> Result<(), Box<dyn error::Error>> {
+) -> Result<String, Box<dyn error::Error>> {
     let mut file = File::open(file_path).await?;
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer).await?;
@@ -43,13 +43,12 @@ pub async fn send(
     let response = client
         .post(&format!("{}/update", SERVER))
         .bearer_auth(get_token())
-        .query(&[("ID", id)])
         .multipart(form)
         .send()
         .await?;
 
     if response.status().is_success() {
-        Ok(())
+        Ok(response.text().await.unwrap())
     } else if response.status() == reqwest::StatusCode::UNAUTHORIZED {
         warn!("Token expired");
         match get_token_serv(usercred, client).await {
@@ -114,38 +113,36 @@ pub async fn download(userdata: &UserData, client: &Client) -> Result<(), Box<dy
     let body = if response.status().is_success() {
         response.bytes().await?
     } else {
-        let status = response.status();
-        let err_msg = match response.text().await {
-            Ok(text) => text,
-            Err(_) => "failed to read error body".to_string(),
-        };
-
-        return Err(Box::new(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!("Error getting data from server ({}): {}", status, err_msg),
-        )));
+        if response.status() == 401 {
+            get_token();
+            return Err(format!("Auth token expired").into());
+        }
+        return Err(format!("{}", response.status()).into());
     };
 
     set_global_update_bool(true);
 
     let val = extract_zip(body)?;
-    let last = val.last().unwrap();
+    if let Some(last) = val.last() {
+        let data = read_data_by_id(last);
 
-    let data = read_data_by_id(last);
-    userdata.add_vec(val);
+        match data {
+            Ok(val) => {
+                #[cfg(not(target_os = "linux"))]
+                write_clipboard::copy_to_clipboard(val).unwrap();
 
-    match data {
-        Ok(val) => {
-            #[cfg(not(target_os = "linux"))]
-            write_clipboard::copy_to_clipboard(val).unwrap();
-
-            #[cfg(target_os = "linux")]
-            write_clipboard::copy_to_linux(val)?;
+                #[cfg(target_os = "linux")]
+                write_clipboard::copy_to_linux(val)?;
+            }
+            Err(err) => {
+                warn!("{}", err)
+            }
         }
-        Err(err) => {
-            warn!("{}", err)
-        }
+    } else {
+        error!("Unable to read last value in tar")
     }
+
+    userdata.add_vec(val);
 
     Ok(())
 }

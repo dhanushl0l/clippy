@@ -1,10 +1,11 @@
 use crate::{
-    Pending, UserCred, UserData, UserSettings,
+    Pending, UserCred, UserData, UserSettings, get_path,
     http::{self, download, get_token_serv, health, state},
+    set_global_update_bool,
 };
 use log::{debug, error, info, warn};
 use reqwest::{self, Client};
-use std::{sync::Arc, thread, time};
+use std::{fs, sync::Arc, thread, time};
 use tokio::{join, runtime::Runtime, sync::mpsc::Receiver, time::sleep};
 
 pub fn start_cloud(
@@ -39,11 +40,18 @@ pub fn start_cloud(
                 async move {
                     while let Some((path, id)) = rx.recv().await {
                         debug!("New clipboard data: path = {}, id = {}", path, id);
-                        user_data.add(id.clone(), usersettings.max_clipboard);
-                        match http::send(&path, &id, &usercred, &client).await {
-                            Ok(_) => (),
+                        match http::send(&path, &usercred, &client).await {
+                            Ok(data) => {
+                                match fs::rename(&path, get_path().join(&data)) {
+                                    Ok(_) => println!("deleted"),
+                                    Err(err) => println!("{:?}", err),
+                                };
+                                user_data.add(data, usersettings.max_clipboard);
+                                info!("Surcess sending new data");
+                                set_global_update_bool(true);
+                            }
                             Err(err) => {
-                                pending.add((id, path));
+                                pending.add(path);
                                 warn!("Failed to send recent clipboard: {}", err);
                             }
                         };
@@ -55,14 +63,17 @@ pub fn start_cloud(
                 let pending = pending.clone();
                 let client = client.clone();
                 let usercred = usercred.clone();
+                let userdata = user_data.clone();
                 async move {
                     loop {
                         let mut api_health = false;
-                        if let Some((id, path)) = pending.get() {
-                            match http::send(&path, &id, &usercred, &client).await {
-                                Ok(_) => {
+                        if let Some(path) = pending.get() {
+                            match http::send(&path, &usercred, &client).await {
+                                Ok(data) => {
                                     pending.remove();
+                                    userdata.add(data, usersettings.max_clipboard);
                                     info!("Surcess sending pending data");
+                                    set_global_update_bool(true);
                                 }
                                 Err(err) => {
                                     warn!("Failed to send pending clipboard: {}", err);
@@ -98,9 +109,12 @@ pub fn start_cloud(
                                         log = false;
                                     }
                                 } else {
+                                    println!("{:?},{:?}", &user_data, &client);
                                     match download(&user_data, &client).await {
                                         Ok(_) => debug!("Downloade updated files"),
-                                        Err(err) => warn!("Downloade updated files error: {}", err),
+                                        Err(err) => {
+                                            warn!("Downloade updated files error: {}", err)
+                                        }
                                     };
                                     log = true;
                                     sleep(time::Duration::from_secs(5)).await;

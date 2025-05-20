@@ -91,7 +91,11 @@ impl Clipboard {
         if let Ok(entries) = fs::read_dir(get_path()) {
             let mut entries: Vec<_> = entries.flatten().collect();
             entries.sort_unstable_by_key(|entry| Reverse(entry.path()));
-            let max = entries.len() - 1;
+            let max = if entries.len() != 0 {
+                entries.len() - 1
+            } else {
+                0
+            };
             let mut count = 0;
             let mut page = 1;
             for (i, entry) in entries.iter().enumerate() {

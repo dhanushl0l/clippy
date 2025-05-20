@@ -12,11 +12,11 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeSet, HashMap},
     fs::{self, File},
-    io::{Error, Read, Write},
+    io::{Error, Write},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
-use zip::{result::ZipError, write::FileOptions};
+use tar::Builder;
 
 pub const CRED_PATH: &str = "credentials/users";
 const DATABASE_PATH: &str = "data-base/users";
@@ -92,7 +92,7 @@ impl UserState {
         self.data.lock().unwrap().contains_key(username)
     }
 
-    pub fn update(&self, username: &str, id: &str) {
+    pub fn update(&self, username: &str, id: i64) {
         let mut map = self.data.lock().unwrap();
         if let Some(set) = map.get_mut(username) {
             let len = set.len();
@@ -127,7 +127,10 @@ impl UserState {
         let data = guard.get(username);
         if let Some(val) = data {
             match val.last() {
-                Some(last) => last == id,
+                Some(last) => {
+                    println!("{},{}", id, last);
+                    last == id
+                }
                 None => {
                     error!("User '{}' has empty BTreeSet", username);
                     false
@@ -152,7 +155,14 @@ impl UserState {
                 .map(|x| format!("{}/{}/{}", DATABASE_PATH, username, x))
                 .collect())
         } else {
-            Err(HttpResponse::InternalServerError().body("Error: failed to get data position"))
+            if !map.is_empty() {
+                Ok(tree
+                    .iter()
+                    .map(|x| format!("{}/{}/{}", DATABASE_PATH, username, x))
+                    .collect())
+            } else {
+                Err(HttpResponse::InternalServerError().body("Error: failed to get data position"))
+            }
         }
     }
 }
@@ -273,7 +283,7 @@ use futures_util::StreamExt;
 pub async fn write_file(
     mut data: Multipart,
     username: &str,
-    id: &str,
+    id: String,
 ) -> Result<(), actix_web::Error> {
     let path: PathBuf = Path::new(DATABASE_PATH).join(username).join(id);
 
@@ -304,39 +314,19 @@ pub async fn write_file(
     Ok(())
 }
 
-pub fn to_zip(files: Vec<String>) -> Result<HttpResponse, ZipError> {
-    let zip_options: FileOptions<'_, ()> =
-        FileOptions::default().compression_method(zip::CompressionMethod::Stored);
-
+pub fn to_zip(files: Vec<String>) -> Result<HttpResponse, Error> {
+    println!("{:?}", &files);
     let mut buffer = Vec::new();
-    let mut zip = zip::ZipWriter::new(std::io::Cursor::new(&mut buffer));
+    {
+        let mut tar = Builder::new(&mut buffer);
 
-    for file in &files {
-        let path = Path::new(file);
-        let filename = match path.file_name() {
-            Some(name) => name.to_string_lossy(),
-            None => {
-                eprintln!("Invalid file path: {}", file);
-                continue;
-            }
-        };
+        for file in &files {
+            let path = Path::new(file);
+            tar.append_path(path)?;
+        }
 
-        let mut f = match File::open(file) {
-            Ok(file) => file,
-            Err(err) => {
-                eprintln!("{:?}", err);
-                continue;
-            }
-        };
-
-        zip.start_file(filename, zip_options)?;
-        let mut buf = Vec::new();
-        f.read_to_end(&mut buf).unwrap();
-        zip.write_all(&buf).unwrap();
+        tar.finish()?;
     }
-
-    zip.finish()?;
-
     Ok(HttpResponse::Ok().body(buffer))
 }
 
@@ -350,7 +340,7 @@ pub struct Claims {
 pub fn auth(key: &str) -> Result<String, jsonwebtoken::errors::Error> {
     let mut validation = Validation::new(Algorithm::HS256);
     validation.set_audience(&["clippy"]);
-    validation.set_issuer(&["https://dhanu.cloud"]);
+    validation.set_issuer(&["https://clippy.dhanu.cloud"]);
 
     let token = decode::<Claims>(
         &key,
@@ -410,7 +400,7 @@ pub fn get_auth(username: &str, exp: i64) -> Result<String, jsonwebtoken::errors
     let expiry_time = now + Duration::hours(exp);
 
     let claims = json!({
-        "iss": "https://dhanu.cloud", //plasholder
+        "iss": "https://clippy.dhanu.cloud", //plasholder
         "aud": "clippy",
         "user": username,
         "iat": now.timestamp(),
