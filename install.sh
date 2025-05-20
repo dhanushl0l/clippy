@@ -21,11 +21,22 @@ systemctl --user stop "$SERVICE_NAME"
 echo "Copying file..."
 # Create the service directory if it doesn't exist
 mkdir -p "$SERVICE_DIR"
+
 sudo cp  "clippy"  "$BIN_DIR/clippy"
 sudo cp  "clippy-gui"  "$BIN_DIR/clippy-gui"
+
 sudo cp "clippy.service" "$SERVICE_DIR/$SERVICE_NAME"
-sudo cp assets/clippy-32-32.png /usr/share/icons/hicolor/32x32/apps/clippy.png
-sudo cp assets/clippy-512-512.png /usr/share/icons/hicolor/512x512/apps/clippy.png
+
+for f in assets/icons/clippy-*.png; do
+  base=$(basename "$f")
+  size=$(echo "$base" | sed -E 's/clippy-([0-9]+)-([0-9]+)(@2)?\.png/\1x\2\3/')
+  folder=$(echo "$size" | sed 's/@2//')
+  target="/usr/share/icons/hicolor/${folder}/apps"
+  sudo mkdir -p "$target"
+  sudo cp "$f" "$target/clippy.png"
+  echo "Copied $f -> $target/clippy.png"
+done
+
 sudo cp clippy.desktop /usr/share/applications/clippy.desktop
 
 cd ..

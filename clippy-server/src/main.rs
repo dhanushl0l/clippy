@@ -12,7 +12,7 @@ use clippy_server::{
 };
 use email::send_otp;
 use env_logger::{Builder, Env};
-use log::debug;
+use log::{debug, error};
 use std::{
     collections::HashMap,
     fs::{self},
@@ -68,7 +68,7 @@ async fn signin_auth(
                 if let Err(err) =
                     UserCred::new(username.clone(), data.email.clone(), password).write()
                 {
-                    eprintln!("Failure: failed to write credentials\n{}", err);
+                    error!("Failure: failed to write credentials\n{}", err);
                     return HttpResponse::InternalServerError()
                         .body("Error: Failed to write credentials");
                 }
@@ -79,7 +79,7 @@ async fn signin_auth(
                 match fs::read_to_string(&file_path) {
                     Ok(content) => {
                         if let Some(_) = state.entry_and_verify_user(username) {
-                            println!("{:?}", state);
+                            debug!("{:?}", state);
                             HttpResponse::Ok()
                                 .content_type("application/json")
                                 .body(content)
@@ -88,7 +88,7 @@ async fn signin_auth(
                         }
                     }
                     Err(err) => {
-                        eprintln!("Error reading user file: {}", err);
+                        error!("Error reading user file: {}", err);
                         HttpResponse::NotFound().body("Error: JSON file not found")
                     }
                 }
@@ -135,7 +135,7 @@ async fn login(cred: web::Json<LoginUserCred>, state: web::Data<UserState>) -> i
     if state.verify(&cred.username) {
         let user_cred_db = match UserCred::read(&cred.username) {
             Ok(val) => {
-                println!("{:?}", state);
+                debug!("{:?}", state);
                 val
             }
             Err(err) => {
@@ -214,7 +214,7 @@ async fn get(
     match to_zip(files) {
         Ok(data) => data,
         Err(err) => {
-            eprintln!("{:?}", err);
+            error!("{:?}", err);
             HttpResponse::Unauthorized().body(err.to_string())
         }
     }

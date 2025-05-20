@@ -83,7 +83,7 @@ impl UserState {
             None
         } else {
             map.insert(username.to_string(), BTreeSet::new());
-            println!("{:?}", self);
+            debug!("{:?}", self);
             Some(())
         }
     }
@@ -128,7 +128,7 @@ impl UserState {
         if let Some(val) = data {
             match val.last() {
                 Some(last) => {
-                    println!("{},{}", id, last);
+                    debug!("{},{}", id, last);
                     last == id
                 }
                 None => {
@@ -315,7 +315,6 @@ pub async fn write_file(
 }
 
 pub fn to_zip(files: Vec<String>) -> Result<HttpResponse, Error> {
-    println!("{:?}", &files);
     let mut buffer = Vec::new();
     {
         let mut tar = Builder::new(&mut buffer);

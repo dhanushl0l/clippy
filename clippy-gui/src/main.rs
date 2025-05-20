@@ -12,8 +12,8 @@ use eframe::{
     run_native,
 };
 use egui::{
-    Align, Button, Frame, InputState, Layout, Margin, RichText, Stroke, TextEdit, TextStyle, Theme,
-    TopBottomPanel, Vec2,
+    Align, Button, Frame, InputState, LayerId, Layout, Margin, Rect, RichText, Sense, Stroke,
+    TextEdit, TextStyle, Theme, TopBottomPanel, Vec2,
 };
 use http::{check_user, login, signin, signin_otp_auth};
 use std::{
@@ -49,6 +49,7 @@ struct Clipboard {
     show_error: (bool, String),
     warn: Option<String>,
     show_data_popup: (bool, String, PathBuf),
+    scrool_to_top: bool,
 }
 
 impl Clipboard {
@@ -78,6 +79,7 @@ impl Clipboard {
             otp: String::new(),
             waiting: Arc::new(Mutex::new(Waiting::None)),
             show_data_popup: (false, String::new(), PathBuf::new()),
+            scrool_to_top: false,
         }
     }
 
@@ -139,6 +141,8 @@ impl Clipboard {
 }
 impl App for Clipboard {
     fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
+        ctx.request_repaint_after(std::time::Duration::from_secs(1));
+
         let button_size = Vec2::new(100.0, 35.0);
 
         TopBottomPanel::top("header").show(ctx, |ui| {
@@ -163,6 +167,7 @@ impl App for Clipboard {
 
                                 if ui.add(button_next).on_hover_text("Previous page").clicked() {
                                     self.page -= 1;
+                                    self.scrool_to_top = true;
                                 }
 
                                 ui.label(self.page.to_string());
@@ -177,6 +182,7 @@ impl App for Clipboard {
 
                                 if ui.add(button_prev).on_hover_text("Next page").clicked() {
                                     self.page += 1;
+                                    self.scrool_to_top = true;
                                 }
                             });
                     });
@@ -885,6 +891,12 @@ impl App for Clipboard {
         CentralPanel::default().show(ctx, |ui| {
             ui.vertical_centered(|ui| {
                 ScrollArea::vertical().show(ui, |ui| {
+                    if self.scrool_to_top {
+                        let top_rect = ui.allocate_response(Vec2::ZERO, Sense::hover()).rect;
+                        ui.scroll_to_rect(top_rect, Some(Align::TOP));
+                        self.scrool_to_top = false;
+                    }
+
                     let data = self.data.get(&self.page).or_else(|| {
                         self.page = 1;
                         self.data.get(&self.page)
@@ -950,8 +962,9 @@ impl App for Clipboard {
 fn main() -> Result<(), eframe::Error> {
     let ui = Clipboard::new();
 
-    let icon = eframe::icon_data::from_png_bytes(include_bytes!("../../assets/clippy-32-32.png"))
-        .expect("The icon data must be valid");
+    let icon =
+        eframe::icon_data::from_png_bytes(include_bytes!("../../assets/icons/clippy-32-32.png"))
+            .expect("The icon data must be valid");
 
     let options = NativeOptions {
         viewport: ViewportBuilder::default()

@@ -7,7 +7,7 @@ use tokio::sync::mpsc::Sender;
 
 #[cfg(target_os = "linux")]
 pub fn read_wayland_clipboard(
-    tx: &Sender<(String, String)>,
+    tx: &Sender<(String, String, String)>,
 ) -> Result<(), wl_clipboard_rs::paste::Error> {
     use std::collections::HashSet;
     use std::io::Read;
@@ -58,11 +58,11 @@ pub fn read_wayland_clipboard(
 
 pub struct Manager<'a> {
     ctx: ClipboardContext,
-    tx: &'a Sender<(String, String)>,
+    tx: &'a Sender<(String, String, String)>,
 }
 
 impl<'a> Manager<'a> {
-    pub fn new(tx: &'a Sender<(String, String)>) -> Self {
+    pub fn new(tx: &'a Sender<(String, String, String)>) -> Self {
         let ctx = ClipboardContext::new().unwrap();
         Manager { ctx, tx }
     }
@@ -98,7 +98,12 @@ impl<'a> ClipboardHandler for Manager<'a> {
     }
 }
 
-pub fn write_to_json(data: Vec<u8>, typ: String, device: String, tx: &Sender<(String, String)>) {
+pub fn write_to_json(
+    data: Vec<u8>,
+    typ: String,
+    device: String,
+    tx: &Sender<(String, String, String)>,
+) {
     let data = if typ.starts_with("image/") {
         compress_str(data).unwrap()
     } else {
@@ -112,7 +117,7 @@ pub fn write_to_json(data: Vec<u8>, typ: String, device: String, tx: &Sender<(St
     }
 }
 
-pub fn parse_wayland_clipboard(typ: String, data: Vec<u8>, tx: &Sender<(String, String)>) {
+pub fn parse_wayland_clipboard(typ: String, data: Vec<u8>, tx: &Sender<(String, String, String)>) {
     info!("Clipboard data stored: {}", typ);
 
     let json_data;

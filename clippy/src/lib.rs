@@ -16,6 +16,7 @@ use std::error::Error;
 use std::fs::{DirEntry, create_dir, create_dir_all};
 use std::io::{Cursor, Write};
 use std::path::Path;
+use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -50,7 +51,7 @@ impl Data {
         }
     }
 
-    pub fn write_to_json(&self, tx: &Sender<(String, String)>) -> Result<(), io::Error> {
+    pub fn write_to_json(&self, tx: &Sender<(String, String, String)>) -> Result<(), io::Error> {
         let time = Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
         let path = get_path_pending();
         fs::create_dir_all(&path)?;
@@ -65,7 +66,7 @@ impl Data {
         let mut file = File::create(file_path)?;
         file.write_all(json_data.as_bytes())?;
 
-        match tx.try_send((file_path.to_str().unwrap().into(), time)) {
+        match tx.try_send((file_path.to_str().unwrap().into(), time, self.typ.clone())) {
             Ok(_) => {
                 set_global_update_bool(true);
             }
@@ -380,7 +381,7 @@ impl UserSettings {
 
 #[derive(Debug, Clone)]
 pub struct Pending {
-    data: Arc<Mutex<Vec<String>>>,
+    data: Arc<Mutex<Vec<(String, String)>>>,
 }
 
 impl Pending {
@@ -390,26 +391,39 @@ impl Pending {
         }
     }
 
-    pub fn add(&self, id: String) {
-        self.data.lock().unwrap().push(id);
+    pub fn build() -> Result<Self, io::Error> {
+        let mut temp = Vec::new();
+        for entry in fs::read_dir(get_path_pending())? {
+            let path: PathBuf = entry?.path();
+
+            if path.extension().and_then(|s| s.to_str()) != Some("json") {
+                continue;
+            }
+
+            let file_content = fs::read_to_string(&path)?;
+            let data: Data = serde_json::from_str(&file_content)?;
+
+            temp.push((path.to_string_lossy().into_owned(), data.typ));
+        }
+        Ok(Self {
+            data: Arc::new(Mutex::new(temp)),
+        })
+    }
+
+    pub fn add(&self, id: String, typ: String) {
+        self.data.lock().unwrap().push((id, typ));
     }
 
     pub fn is_empty(&self) -> bool {
         self.data.lock().unwrap().is_empty()
     }
 
-    pub fn get(&self) -> Option<String> {
+    pub fn get(&self) -> Option<(String, String)> {
         self.data.lock().unwrap().last().cloned()
     }
 
-    pub fn remove(&self) {
-        let data = self.data.lock().unwrap().pop();
-        if let Some(path) = data {
-            match fs::remove_file(&path) {
-                Ok(_) => println!("deleted"),
-                Err(err) => println!("{:?}", err),
-            };
-        }
+    pub fn pop(&self) {
+        self.data.lock().unwrap().pop();
     }
 }
 
@@ -814,4 +828,30 @@ pub fn is_valid_email(email: &str) -> bool {
     }
 
     true
+}
+
+pub fn remove(path: String, typ: String, time: &str, thumbnail: bool) {
+    match fs::rename(&path, get_path().join(&time)) {
+        Ok(_) => (),
+        Err(err) => error!("{:?}", err),
+    };
+
+    if thumbnail {
+        if typ.starts_with("image/") {
+            let mut path = PathBuf::from_str(&path).unwrap();
+            let file_name = format!(
+                "{}.png",
+                path.file_name()
+                    .unwrap()
+                    .to_os_string()
+                    .into_string()
+                    .unwrap()
+            );
+            path.pop();
+            path.pop();
+            path.push("image");
+            path.push(format!("{}", file_name));
+            fs::rename(path, get_path_image().join(format!("{}.png", time))).unwrap();
+        }
+    }
 }

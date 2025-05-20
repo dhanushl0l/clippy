@@ -15,7 +15,7 @@ use clippy::read_clipboard::read_wayland_clipboard;
 use wayland_clipboard_listener::{WlClipboardPasteStream, WlListenType};
 
 #[cfg(target_os = "linux")]
-fn run(tx: &Sender<(String, String)>) {
+fn run(tx: &Sender<(String, String, String)>) {
     if env::var("WAYLAND_DISPLAY").is_ok() {
         read_clipboard_wayland(tx)
     } else if env::var("DISPLAY").is_ok() {
@@ -34,7 +34,7 @@ fn run(tx: &Sender<(String, String)>) {
 
 // need to find a way to monitor clipboard changes in wayland the current way is not optimal
 #[cfg(target_os = "linux")]
-fn read_clipboard_wayland(tx: &Sender<(String, String)>) {
+fn read_clipboard_wayland(tx: &Sender<(String, String, String)>) {
     let mut stream = WlClipboardPasteStream::init(WlListenType::ListenOnCopy).unwrap();
 
     for _ in stream.paste_stream().flatten().flatten() {
@@ -62,7 +62,9 @@ fn run(tx: Sender<(String, String)>) {
     process::exit(1);
 }
 
-fn read_clipboard(tx: &Sender<(String, String)>) -> Result<(), Box<dyn Error + Send + Sync>> {
+fn read_clipboard(
+    tx: &Sender<(String, String, String)>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     let manager = read_clipboard::Manager::new(tx);
 
     let mut watcher = ClipboardWatcherContext::new()?;
@@ -77,7 +79,7 @@ fn read_clipboard(tx: &Sender<(String, String)>) -> Result<(), Box<dyn Error + S
 fn main() {
     Builder::from_env(Env::default().filter_or("LOG", "info")).init();
 
-    let (tx, rx) = tokio::sync::mpsc::channel::<(String, String)>(30);
+    let (tx, rx) = tokio::sync::mpsc::channel::<(String, String, String)>(30);
 
     match UserSettings::build_user() {
         Ok(usersettings) => {
