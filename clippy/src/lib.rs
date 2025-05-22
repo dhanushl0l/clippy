@@ -18,7 +18,6 @@ use std::io::{Cursor, Write};
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
-use std::thread;
 use std::time::Duration;
 use std::{
     collections::BTreeSet,
@@ -28,6 +27,7 @@ use std::{
     io::{self},
     path::PathBuf,
 };
+use std::{process, thread};
 use tar::Archive;
 use tokio::sync::mpsc::Sender;
 
@@ -744,7 +744,6 @@ pub fn get_global_update_bool() -> bool {
 pub fn create_past_lock(path: &PathBuf) -> Result<(), io::Error> {
     let mut dir = get_path();
     dir.pop();
-    dir.push("user");
     fs::create_dir_all(&dir)?;
     dir.push(".next");
     let mut file = File::create(&dir)?;
@@ -754,8 +753,15 @@ pub fn create_past_lock(path: &PathBuf) -> Result<(), io::Error> {
 }
 
 pub fn watch_for_next_clip_write(dir: PathBuf) {
-    let mut target = dir.join("user");
+    let mut target = dir.clone();
     target.push(".next");
+
+    let mut settings = dir;
+    settings.push("user");
+    settings.push(".user");
+    let last_modified = fs::metadata(&settings)
+        .and_then(|meta| meta.modified())
+        .unwrap();
 
     loop {
         if fs::metadata(&target).is_ok() {
@@ -766,6 +772,13 @@ pub fn watch_for_next_clip_write(dir: PathBuf) {
                 Err(err) => error!("{}", err),
             }
         }
+        if let Ok(modified) = fs::metadata(&settings).and_then(|m| m.modified()) {
+            if modified > last_modified {
+                warn!("Settings updated");
+                process::exit(0);
+            }
+        }
+
         thread::sleep(Duration::from_secs(1));
     }
 

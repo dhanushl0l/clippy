@@ -96,7 +96,7 @@ fn main() {
         }
     }
 
-    // this thread reads the gui clipboard entry
+    // this thread reads the gui clipboard entry && settings change
     {
         let mut path = get_path();
         path.pop();

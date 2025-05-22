@@ -703,8 +703,6 @@ impl App for Clipboard {
                                             };
                                         });
                                 });
-
-                                self.settings.write();
                             });
 
                             let label = "Limits the number of clipboards stored on your device. \
