@@ -14,6 +14,7 @@ pub fn item_card(
     changed: &mut bool,
     path: &PathBuf,
     ctx: &Context,
+    sync: &bool,
 ) -> Response {
     let background_color = ui.style().visuals.window_fill;
     let width = ctx.screen_rect().width();
@@ -84,6 +85,12 @@ pub fn item_card(
 
                         if view_all.clicked() {
                             *show_data_popup = (true, text.to_string(), path.clone());
+                        }
+
+                        if *sync {
+                            println!("{:?}", sync);
+                            let sync = ui.selectable_label(false, "🔄");
+                            sync.on_hover_text("update in progress");
                         }
                     });
                 });

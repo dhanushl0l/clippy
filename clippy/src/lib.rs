@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fs::{DirEntry, create_dir, create_dir_all};
 use std::io::{Cursor, Write};
+use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
@@ -126,9 +127,7 @@ impl Data {
     }
 
     pub fn save_image(&self, time: &str) -> Result<(), io::Error> {
-        let mut path: PathBuf = crate::get_path();
-        path.pop();
-        let path = path.join("image");
+        let path: PathBuf = crate::get_path_image();
 
         fs::create_dir_all(&path)?;
 
@@ -333,8 +332,7 @@ impl UserSettings {
     }
 
     pub fn build_user() -> Result<Self, Box<dyn Error>> {
-        let mut user_config = get_path();
-        user_config.pop();
+        let mut user_config = get_path_local();
         user_config.push("user");
         if !user_config.is_dir() {
             create_dir(&user_config)?;
@@ -355,8 +353,7 @@ impl UserSettings {
     }
 
     pub fn write(&self) -> Result<(), Box<dyn Error>> {
-        let mut user_config = get_path();
-        user_config.pop();
+        let mut user_config = get_path_local();
         user_config.push("user");
 
         // Ensure directory exists
@@ -462,6 +459,37 @@ impl NewUserOtp {
             otp,
             key,
         }
+    }
+}
+
+pub fn get_path_local() -> PathBuf {
+    #[cfg(target_os = "linux")]
+    {
+        let home = env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+        let path: PathBuf = [home.as_str(), ".local/share/clippy/"].iter().collect();
+        fs::create_dir_all(&path).unwrap();
+        return path;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let home = env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+        let path: PathBuf = [home.as_str(), ".local/share/clippy/"].iter().collect();
+        fs::create_dir_all(&path).unwrap();
+        return path;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let home = env::var("APPDATA").unwrap_or_else(|_| "C:\\Users\\Public".to_string());
+        let path: PathBuf = [home.as_str(), "clippy"].iter().collect();
+        fs::create_dir_all(&path).unwrap();
+        return path;
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    {
+        compile_error!("Unsupported operating system");
     }
 }
 
@@ -687,13 +715,12 @@ pub fn get_image_path(id: &DirEntry) -> PathBuf {
 }
 
 pub fn set_global_bool(value: bool) {
-    let mut path = get_path();
+    let path = get_path_local();
     if let Err(e) = fs::create_dir_all(path.parent().unwrap()) {
         error!("Failed to create directories: {}", e);
         return;
     }
 
-    path.pop();
     let path = Path::new(&path).join("OK");
 
     if value {
@@ -707,16 +734,15 @@ pub fn set_global_bool(value: bool) {
     }
 }
 
+// This tell the gui to refresh the db
 pub fn get_global_bool() -> bool {
-    let mut path = get_path();
-    path.pop();
+    let path = get_path_local();
     let path = Path::new(&path).join("OK");
     !path.exists()
 }
 
 pub fn set_global_update_bool(value: bool) {
-    let mut path = get_path();
-    path.pop();
+    let mut path = get_path_local();
     if let Err(e) = fs::create_dir_all(path.parent().unwrap()) {
         error!("Failed to create directories: {}", e);
         return;
@@ -735,15 +761,13 @@ pub fn set_global_update_bool(value: bool) {
 }
 
 pub fn get_global_update_bool() -> bool {
-    let mut path = get_path();
-    path.pop();
+    let mut path = get_path_local();
     path.push("UPDATE");
     path.exists()
 }
 
 pub fn create_past_lock(path: &PathBuf) -> Result<(), io::Error> {
-    let mut dir = get_path();
-    dir.pop();
+    let mut dir = get_path_local();
     fs::create_dir_all(&dir)?;
     dir.push(".next");
     let mut file = File::create(&dir)?;
@@ -866,5 +890,14 @@ pub fn remove(path: String, typ: String, time: &str, thumbnail: bool) {
             path.push(format!("{}", file_name));
             fs::rename(path, get_path_image().join(format!("{}.png", time))).unwrap();
         }
+    }
+}
+
+pub fn flock(file: &File, flag: libc::c_int) -> Result<(), io::Error> {
+    let ret = unsafe { libc::flock(file.as_raw_fd(), flag) };
+    if ret < 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
     }
 }

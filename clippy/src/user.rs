@@ -1,12 +1,12 @@
 use crate::{
     Pending, UserCred, UserData, UserSettings,
-    http::{self, download, get_token_serv, health, state},
+    http::{self, download, health, state},
     remove, set_global_update_bool,
 };
 use log::{debug, error, info, warn};
 use reqwest::{self, Client};
 use std::{process, sync::Arc, thread, time};
-use tokio::{join, runtime::Runtime, sync::mpsc::Receiver, time::sleep};
+use tokio::{runtime::Runtime, select, sync::mpsc::Receiver, time::sleep};
 
 pub fn start_cloud(
     mut rx: Receiver<(String, String, String)>,
@@ -26,13 +26,13 @@ pub fn start_cloud(
         let async_runtime = Runtime::new().unwrap();
 
         async_runtime.block_on(async {
-            match get_token_serv(&usercred, &client).await {
-                Ok(_) => debug!("Fetched a new authentication token on start"),
-                Err(err) => {
-                    warn!("Unable to fetch authentication token on start");
-                    debug!("{}", err);
-                }
-            };
+            // match get_token_serv(&usercred, &client).await {
+            //     Ok(_) => debug!("Fetched a new authentication token on start"),
+            //     Err(err) => {
+            //         warn!("Unable to fetch authentication token on start");
+            //         debug!("{}", err);
+            //     }
+            // };
 
             let task1 = tokio::spawn({
                 let pending = pending.clone();
@@ -140,10 +140,19 @@ pub fn start_cloud(
                 }
             });
 
-            let results = join!(task1, task2, task3);
-            for (i, result) in [results.0, results.1, results.2].into_iter().enumerate() {
-                if let Err(e) = result {
-                    error!("Task {} panicked: {}", i + 1, e);
+            let result = select! {
+                res = task1 => ("task1", res),
+                res = task2 => ("task2", res),
+                res = task3 => ("task3", res),
+            };
+
+            match result {
+                (name, Ok(val)) => {
+                    error!("{} failed: {:?}", name, val);
+                    std::process::exit(0);
+                }
+                (name, Err(e)) => {
+                    error!("{} failed: {}", name, e);
                     std::process::exit(1);
                 }
             }

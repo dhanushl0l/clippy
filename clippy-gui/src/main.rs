@@ -2,7 +2,7 @@ use clipboard_img_widget::item_card_image;
 use clipboard_widget::item_card;
 use clippy::{
     Data, LoginUserCred, NewUser, NewUserOtp, SystemTheam, UserSettings, get_global_update_bool,
-    get_path, is_valid_email, is_valid_username, set_global_update_bool,
+    get_path, get_path_pending, is_valid_email, is_valid_username, set_global_update_bool,
 };
 use clippy_gui::{Thumbnail, Waiting, str_formate};
 use custom_egui_widget::toggle;
@@ -12,8 +12,8 @@ use eframe::{
     run_native,
 };
 use egui::{
-    Align, Button, Frame, InputState, LayerId, Layout, Margin, Rect, RichText, Sense, Stroke,
-    TextEdit, TextStyle, Theme, TopBottomPanel, Vec2,
+    Align, Button, Frame, Layout, Margin, RichText, Sense, Stroke, TextEdit, TextStyle, Theme,
+    TopBottomPanel, Vec2,
 };
 use http::{check_user, login, signin, signin_otp_auth};
 use std::{
@@ -33,7 +33,7 @@ mod edit_window;
 mod http;
 
 struct Clipboard {
-    data: HashMap<u32, Vec<(Thumbnail, Data, PathBuf)>>,
+    data: HashMap<u32, Vec<(Thumbnail, Data, PathBuf, bool)>>,
     page: u32,
     changed: bool,
     settings: UserSettings,
@@ -87,10 +87,14 @@ impl Clipboard {
         self.data = Self::get_data();
     }
 
-    fn get_data() -> HashMap<u32, Vec<(Thumbnail, Data, PathBuf)>> {
+    fn get_data() -> HashMap<u32, Vec<(Thumbnail, Data, PathBuf, bool)>> {
         let mut data = HashMap::new();
         let mut temp = Vec::new();
-        if let Ok(entries) = fs::read_dir(get_path()) {
+
+        let mut count = 0;
+        let mut page = 1;
+
+        if let Ok(entries) = fs::read_dir(get_path_pending()) {
             let mut entries: Vec<_> = entries.flatten().collect();
             entries.sort_unstable_by_key(|entry| Reverse(entry.path()));
             let max = if entries.len() != 0 {
@@ -98,8 +102,7 @@ impl Clipboard {
             } else {
                 0
             };
-            let mut count = 0;
-            let mut page = 1;
+
             for (i, entry) in entries.iter().enumerate() {
                 let path = entry.path();
                 if path.is_file() {
@@ -109,11 +112,16 @@ impl Clipboard {
                             Ok(file) => {
                                 if file.typ.starts_with("image/") {
                                     if let Some(val) = file.get_image_thumbnail(&entry) {
-                                        temp.push((Thumbnail::Image(val), file, path));
+                                        temp.push((Thumbnail::Image(val), file, path, true));
                                     }
                                 } else {
                                     if let Some(val) = file.get_data() {
-                                        temp.push((Thumbnail::Text(str_formate(&val)), file, path));
+                                        temp.push((
+                                            Thumbnail::Text(str_formate(&val)),
+                                            file,
+                                            path,
+                                            true,
+                                        ));
                                     }
                                 }
                             }
@@ -123,14 +131,69 @@ impl Clipboard {
                         }
                     }
 
-                    if count >= 20 || i == max {
+                    if count >= 20 {
                         data.insert(page, temp);
                         temp = vec![];
                         page += 1;
-                        if page > 10 {
+                        if page > 100 {
                             break;
                         }
                         count = 0;
+                    } else if i == max {
+                        break;
+                    }
+                }
+            }
+        }
+
+        if let Ok(entries) = fs::read_dir(get_path()) {
+            let mut entries: Vec<_> = entries.flatten().collect();
+            entries.sort_unstable_by_key(|entry| Reverse(entry.path()));
+            let max = if entries.len() != 0 {
+                entries.len() - 1
+            } else {
+                0
+            };
+
+            for (i, entry) in entries.iter().enumerate() {
+                let path = entry.path();
+                if path.is_file() {
+                    if let Ok(content) = fs::read_to_string(&path) {
+                        count += 1;
+                        match serde_json::from_str::<Data>(&content) {
+                            Ok(file) => {
+                                if file.typ.starts_with("image/") {
+                                    if let Some(val) = file.get_image_thumbnail(&entry) {
+                                        temp.push((Thumbnail::Image(val), file, path, false));
+                                    }
+                                } else {
+                                    if let Some(val) = file.get_data() {
+                                        temp.push((
+                                            Thumbnail::Text(str_formate(&val)),
+                                            file,
+                                            path,
+                                            false,
+                                        ));
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to parse {}: {}", path.display(), e)
+                            }
+                        }
+                    }
+
+                    if count >= 20 {
+                        data.insert(page, temp);
+                        temp = vec![];
+                        page += 1;
+                        if page > 100 {
+                            break;
+                        }
+                        count = 0;
+                    } else if i == max {
+                        data.insert(page, temp);
+                        break;
                     }
                 }
             }
@@ -671,6 +734,7 @@ impl App for Clipboard {
                                                 )
                                                 .clicked()
                                             {
+                                                self.settings.write();
                                                 if let Some(theam) = ctx.system_theme() {
                                                     if theam == Theme::Dark {
                                                         ctx.set_visuals(egui::Visuals::dark());
@@ -689,6 +753,7 @@ impl App for Clipboard {
                                                 )
                                                 .changed()
                                             {
+                                                self.settings.write();
                                                 ctx.set_visuals(egui::Visuals::light());
                                             };
                                             if ui
@@ -699,6 +764,7 @@ impl App for Clipboard {
                                                 )
                                                 .clicked()
                                             {
+                                                self.settings.write();
                                                 ctx.set_visuals(egui::Visuals::dark());
                                             };
                                         });
@@ -825,6 +891,7 @@ impl App for Clipboard {
                         Waiting::Login(Some(usercred)) => {
                             self.settings.set_user(usercred.clone());
                             self.show_login_window = false;
+                            self.settings.write();
                             *val = Waiting::None;
                         }
                         Waiting::Login(None) => {
@@ -843,6 +910,7 @@ impl App for Clipboard {
                             self.show_createuser_window = false;
                             self.show_createuser_auth_window = false;
                             self.settings.set_user(usercred.clone());
+                            self.settings.write();
                             *val = Waiting::None;
                         }
                         Waiting::SigninOTP(Some(true)) => {
@@ -901,7 +969,7 @@ impl App for Clipboard {
                     });
 
                     if let Some(data) = data {
-                        for (thumbnail, i, path) in data {
+                        for (thumbnail, i, path, sync) in data {
                             if let Some(dat) = i.get_data() {
                                 ui.add_enabled_ui(true, |ui| {
                                     item_card(
@@ -914,6 +982,7 @@ impl App for Clipboard {
                                         &mut self.changed,
                                         path,
                                         ctx,
+                                        sync,
                                     )
                                 });
                             } else if let Thumbnail::Image((image_data, (width, height))) =
@@ -938,6 +1007,7 @@ impl App for Clipboard {
                                         &mut self.changed,
                                         path,
                                         ctx,
+                                        sync,
                                     )
                                 });
                             }
@@ -968,9 +1038,22 @@ fn main() -> Result<(), eframe::Error> {
         viewport: ViewportBuilder::default()
             .with_inner_size(Vec2::new(600.0, 800.0))
             .with_app_id("org.dhanu.clippy")
-            .with_icon(icon),
+            .with_icon(icon)
+            .with_always_on_top()
+            .with_active(true),
         ..Default::default()
     };
 
-    run_native("clippy", options, Box::new(|_cc| Ok(Box::new(ui))))
+    run_native(
+        "clippy",
+        options,
+        Box::new(|cc| {
+            match ui.settings.theme {
+                SystemTheam::Dark => cc.egui_ctx.set_theme(egui::Theme::Dark),
+                SystemTheam::Light => cc.egui_ctx.set_theme(egui::Theme::Light),
+                SystemTheam::System => (),
+            }
+            Ok(Box::new(ui))
+        }),
+    )
 }

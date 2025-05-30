@@ -1,10 +1,15 @@
 use clipboard_rs::{ClipboardWatcher, ClipboardWatcherContext};
 use clippy::user::start_cloud;
-use clippy::{UserSettings, get_path, read_clipboard, watch_for_next_clip_write};
+use clippy::{
+    UserSettings, flock, get_path, get_path_local, read_clipboard, watch_for_next_clip_write,
+};
 use env_logger::{Builder, Env};
+use fs4::fs_std::FileExt;
 use log::debug;
 use log::{error, info, warn};
 use std::error::Error;
+use std::fs::File;
+use std::io::ErrorKind;
 use std::{env, process, thread};
 use tokio::sync::mpsc::Sender;
 
@@ -76,8 +81,45 @@ fn read_clipboard(
     Ok(())
 }
 
-fn main() {
+fn setup(file: &File) -> Result<(), Box<dyn Error>> {
     Builder::from_env(Env::default().filter_or("LOG", "info")).init();
+
+    if std::env::var("IGNORE_STARTUP_LOCK").is_ok() {
+        warn!("Startup lock ignored due to IGNORE_STARTUP_LOCK=1");
+        return Ok(());
+    }
+
+    match file.try_lock_exclusive()? {
+        true => {
+            debug!("Lock acquired!");
+        }
+        false => {
+            error!(
+                "Another instance of the app is already running. If you're facing issues and the process is not actually running, set the environment variable IGNORE_STARTUP_LOCK=1 to override the lock."
+            );
+            process::exit(1);
+        }
+    }
+    Ok(())
+}
+
+fn main() {
+    let mut path = get_path_local();
+    path.push("CLIPPY.LOCK");
+
+    if !path.exists() {
+        File::create(&path).unwrap();
+    }
+    let file = File::open(path).unwrap();
+    match setup(&file) {
+        Ok(_) => {
+            debug!("Process startup success");
+        }
+        Err(err) => {
+            error!("Unable to start the app: {}", err);
+            process::exit(1);
+        }
+    }
 
     let (tx, rx) = tokio::sync::mpsc::channel::<(String, String, String)>(30);
 
@@ -98,8 +140,7 @@ fn main() {
 
     // this thread reads the gui clipboard entry && settings change
     {
-        let mut path = get_path();
-        path.pop();
+        let path = get_path_local();
         thread::spawn(|| {
             watch_for_next_clip_write(path);
         });

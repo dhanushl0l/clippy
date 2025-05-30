@@ -11,6 +11,7 @@ pub fn item_card_image(
     changed: &mut bool,
     path: &PathBuf,
     ctx: &Context,
+    sync: &bool,
 ) -> Response {
     let frame = Frame::group(ui.style())
         .corner_radius(9)
@@ -63,6 +64,11 @@ pub fn item_card_image(
                         if delete_response.clicked() {
                             fs::remove_file(path);
                             *changed = true;
+                        }
+
+                        if *sync {
+                            let sync = ui.selectable_label(false, "🔄");
+                            sync.on_hover_text("update in progress");
                         }
                     });
                 });
