@@ -9,5 +9,9 @@
 		<StandardDirectory Id="ProgramMenuFolder">
 			<Directory Id="ApplicationProgramsFolder" Name="!(bind.Property.ProductName)" />
 		</StandardDirectory>
+
+		<StandardDirectory Id="StartupFolder">
+    		<Directory Id="AppStartupFolder" Name="!(bind.Property.ProductName)"/>
+		</StandardDirectory>
 	</Fragment>
 </Wix>

@@ -5,7 +5,7 @@
 				<File Source="../target/release/clippy.exe" />
 				<File Source="../target/release/clippy-gui.exe" />
 			</Component>
-			<Component Directory="ApplicationProgramsFolder">
+			<Component Directory="ApplicationProgramsFolder" Guid="0d4a6930-7838-4c32-845a-442f040dd729">
 				<Shortcut Id="ApplicationDesktopShortcut"
 					Name="clippy"
 					Description="Clipboard manager"
@@ -20,6 +20,22 @@
 					Value="1"
 					KeyPath="yes"/>
 			</Component>
+                  <Component Directory="AppStartupFolder" Guid="84fa0e93-cf31-4ae7-b007-9f8b25730506">
+                        <Shortcut Id="StartupShortcut"
+                              Directory="StartupFolder"
+                              Name="Clippy"
+                              Target="[INSTALLFOLDER]clippy.exe"
+                              WorkingDirectory="INSTALLFOLDER"
+                              Description="Start Clippy on login"/>
+                  <RemoveFolder Id="AppStartupFolder" On="uninstall"/>
+                        <RegistryValue
+					Root="HKCU"
+					Key="Software\clippy\clippy"
+					Name="installed"
+					Type="integer"
+					Value="1"
+					KeyPath="yes"/>
+            </Component>
 		</ComponentGroup>
 	</Fragment>
 </Wix>

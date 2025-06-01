@@ -1,3 +1,5 @@
+#![windows_subsystem = "windows"]
+
 use clipboard_img_widget::item_card_image;
 use clipboard_widget::item_card;
 use clippy::{

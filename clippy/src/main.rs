@@ -51,7 +51,7 @@ fn read_clipboard_wayland(tx: &Sender<(String, String, String)>) {
 }
 
 #[cfg(any(target_os = "windows", target_os = "macos"))]
-fn run(tx: &Sender<(String, String)>) {
+fn run(tx: &Sender<(String, String, String)>) {
     match read_clipboard(tx) {
         Ok(_) => (),
         Err(err) => {
