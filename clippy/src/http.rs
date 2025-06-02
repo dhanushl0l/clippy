@@ -15,7 +15,11 @@ use std::{
 };
 use tokio::{fs::File, io::AsyncReadExt};
 
+#[cfg(debug_assertions)]
 pub const SERVER: &str = "http://127.0.0.1:7777";
+
+#[cfg(not(debug_assertions))]
+pub const SERVER: &str = "https://clippy.dhanu.cloud";
 
 static TOKEN: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new(String::new()));
 
