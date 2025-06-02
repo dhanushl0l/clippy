@@ -1,12 +1,7 @@
-use crate::{Data, UserData, get_path, set_global_bool};
+use crate::{Data, set_global_bool};
 use base64::{Engine, engine::general_purpose};
 use clipboard_rs::{Clipboard, ClipboardContext, RustImageData, common::RustImage};
-use std::{
-    error::Error,
-    fs::File,
-    io::{Read, Write},
-    process::{Command, Stdio},
-};
+use std::error::Error;
 
 #[cfg(target_os = "linux")]
 pub fn copy_to_linux(data: Data) -> Result<(), String> {

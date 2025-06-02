@@ -17,21 +17,21 @@ pub fn str_formate(text: &str) -> String {
     let mut result = String::new();
     let mut count = 0;
 
-    for line in text.lines() {
+    let lines: Vec<_> = text.lines().collect();
+    let line_count = lines.len();
+
+    if line_count == 1 {
+        return text.trim().to_string();
+    }
+
+    for line in lines {
         if count >= 11 {
-            result = result.strip_suffix('\n').unwrap().to_string();
             break;
         }
 
-        if line.len() > 100 {
-            result.push_str(&line[..100]);
-            result.push_str("....\n");
-            count += 1;
-        } else {
-            result.push_str(line);
-            result.push('\n');
-            count += 1;
-        }
+        result.push_str(line);
+        result.push('\n');
+        count += 1;
     }
 
     result

@@ -1,7 +1,6 @@
-use std::{fs, io::Write, path::PathBuf};
-
-use clippy::{Data, create_past_lock, set_global_bool};
+use clippy::{Data, create_past_lock, log_eprintln, set_global_bool};
 use egui::{self, *};
+use std::{fs, io::Write, path::PathBuf};
 
 pub fn item_card_image(
     ui: &mut Ui,
@@ -62,7 +61,7 @@ pub fn item_card_image(
 
                         let delete_response = ui.selectable_label(false, "🗑");
                         if delete_response.clicked() {
-                            fs::remove_file(path);
+                            log_eprintln!(fs::remove_file(path));
                             *changed = true;
                         }
 

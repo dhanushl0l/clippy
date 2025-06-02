@@ -1,6 +1,6 @@
 use std::{fs, io::Write, path::PathBuf};
 
-use clippy::{Data, create_past_lock, set_global_bool};
+use clippy::{Data, create_past_lock, log_eprintln, set_global_bool};
 use clippy_gui::Thumbnail;
 use egui::{self, *};
 
@@ -77,7 +77,7 @@ pub fn item_card(
 
                         let delete_response = ui.selectable_label(false, "🗑");
                         if delete_response.clicked() {
-                            fs::remove_file(path);
+                            log_eprintln!(fs::remove_file(path));
                             *changed = true;
                         }
 
@@ -88,7 +88,6 @@ pub fn item_card(
                         }
 
                         if *sync {
-                            println!("{:?}", sync);
                             let sync = ui.selectable_label(false, "🔄");
                             sync.on_hover_text("update in progress");
                         }

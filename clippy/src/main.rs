@@ -1,16 +1,18 @@
+#![cfg_attr(
+    all(target_os = "windows", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
+
 use clipboard_rs::{ClipboardWatcher, ClipboardWatcherContext};
 use clippy::user::start_cloud;
-use clippy::{
-    UserSettings, flock, get_path, get_path_local, read_clipboard, watch_for_next_clip_write,
-};
+use clippy::{UserSettings, get_path_local, read_clipboard, watch_for_next_clip_write};
 use env_logger::{Builder, Env};
 use fs4::fs_std::FileExt;
 use log::debug;
 use log::{error, info, warn};
 use std::error::Error;
 use std::fs::File;
-use std::io::ErrorKind;
-use std::{env, process, thread};
+use std::{process, thread};
 use tokio::sync::mpsc::Sender;
 
 #[cfg(target_os = "linux")]

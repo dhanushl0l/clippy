@@ -1,10 +1,14 @@
-#![windows_subsystem = "windows"]
+#![cfg_attr(
+    all(target_os = "windows", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
 
 use clipboard_img_widget::item_card_image;
 use clipboard_widget::item_card;
 use clippy::{
     Data, LoginUserCred, NewUser, NewUserOtp, SystemTheam, UserSettings, get_global_update_bool,
-    get_path, get_path_pending, is_valid_email, is_valid_username, set_global_update_bool,
+    get_path, get_path_pending, is_valid_email, is_valid_username, log_eprintln,
+    set_global_update_bool,
 };
 use clippy_gui::{Thumbnail, Waiting, str_formate};
 use custom_egui_widget::toggle;
@@ -22,6 +26,7 @@ use std::{
     cmp::Reverse,
     collections::HashMap,
     fs::{self},
+    io::Error,
     path::PathBuf,
     process,
     sync::{Arc, Mutex},
@@ -195,10 +200,15 @@ impl Clipboard {
                         count = 0;
                     } else if i == max {
                         data.insert(page, temp);
+                        temp = vec![];
                         break;
                     }
                 }
             }
+        }
+
+        if !temp.is_empty() {
+            data.insert(page, temp);
         }
 
         data
@@ -301,7 +311,7 @@ impl App for Clipboard {
                                         );
                                         if button.clicked() {
                                             self.settings.remove_user();
-                                            self.settings.write();
+                                            log_eprintln!(self.settings.write());
                                         }
 
                                         ui.add_space(10.0);
@@ -736,7 +746,7 @@ impl App for Clipboard {
                                                 )
                                                 .clicked()
                                             {
-                                                self.settings.write();
+                                                log_eprintln!(self.settings.write());
                                                 if let Some(theam) = ctx.system_theme() {
                                                     if theam == Theme::Dark {
                                                         ctx.set_visuals(egui::Visuals::dark());
@@ -755,7 +765,7 @@ impl App for Clipboard {
                                                 )
                                                 .changed()
                                             {
-                                                self.settings.write();
+                                                log_eprintln!(self.settings.write());
                                                 ctx.set_visuals(egui::Visuals::light());
                                             };
                                             if ui
@@ -766,7 +776,7 @@ impl App for Clipboard {
                                                 )
                                                 .clicked()
                                             {
-                                                self.settings.write();
+                                                log_eprintln!(self.settings.write());
                                                 ctx.set_visuals(egui::Visuals::dark());
                                             };
                                         });
@@ -781,7 +791,7 @@ impl App for Clipboard {
                                     ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
                                         if ui.add(toggle(&mut true)).changed() {
                                             self.settings.max_clipboard = None;
-                                            self.settings.write();
+                                            log_eprintln!(self.settings.write());
                                         }
                                     });
                                 });
@@ -794,7 +804,7 @@ impl App for Clipboard {
                                             .changed()
                                         {
                                             self.settings.max_clipboard = Some(val);
-                                            self.settings.write();
+                                            log_eprintln!(self.settings.write());
                                         }
                                     });
                                 });
@@ -804,7 +814,7 @@ impl App for Clipboard {
                                     ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
                                         if ui.add(toggle(&mut false)).changed() {
                                             self.settings.max_clipboard = Some(100);
-                                            self.settings.write();
+                                            log_eprintln!(self.settings.write());
                                         }
                                     });
                                 });
@@ -815,7 +825,7 @@ impl App for Clipboard {
                                 ui.label("Store Image Thumbnails").on_hover_text(note);
                                 ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
                                     if ui.add(toggle(&mut self.settings.store_image)).changed() {
-                                        self.settings.write();
+                                        log_eprintln!(self.settings.write());
                                     }
                                 });
                             });
@@ -826,7 +836,7 @@ impl App for Clipboard {
                                 ui.label("Click to Copy and Quit").on_hover_text(note);
                                 ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
                                     if ui.add(toggle(&mut self.settings.click_on_quit)).changed() {
-                                        self.settings.write();
+                                        log_eprintln!(self.settings.write());
                                     }
                                 });
                             });
@@ -835,7 +845,7 @@ impl App for Clipboard {
                                 ui.label("Placeholder");
                                 ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
                                     if ui.add(toggle(&mut true)).changed() {
-                                        self.settings.write();
+                                        log_eprintln!(self.settings.write());
                                     }
                                 });
                             });
@@ -848,7 +858,7 @@ impl App for Clipboard {
                                     ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
                                         if ui.add(toggle(&mut self.settings.disable_sync)).changed()
                                         {
-                                            self.settings.write();
+                                            log_eprintln!(self.settings.write());
                                         }
                                     });
                                 });
@@ -857,7 +867,7 @@ impl App for Clipboard {
                                     ui.label("Placeholder");
                                     ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
                                         if ui.add(toggle(&mut true)).changed() {
-                                            self.settings.write();
+                                            log_eprintln!(self.settings.write());
                                         }
                                     });
                                 });
@@ -893,7 +903,7 @@ impl App for Clipboard {
                         Waiting::Login(Some(usercred)) => {
                             self.settings.set_user(usercred.clone());
                             self.show_login_window = false;
-                            self.settings.write();
+                            log_eprintln!(self.settings.write());
                             *val = Waiting::None;
                         }
                         Waiting::Login(None) => {
@@ -912,7 +922,7 @@ impl App for Clipboard {
                             self.show_createuser_window = false;
                             self.show_createuser_auth_window = false;
                             self.settings.set_user(usercred.clone());
-                            self.settings.write();
+                            log_eprintln!(self.settings.write());
                             *val = Waiting::None;
                         }
                         Waiting::SigninOTP(Some(true)) => {
@@ -1029,7 +1039,37 @@ impl App for Clipboard {
     }
 }
 
+fn setup() -> Result<(), Error> {
+    cfg!(target_os = "windows");
+    {
+        use std::{ffi::OsString, process::Command};
+        use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
+        let mut sys = System::new_all();
+        sys.refresh_processes_specifics(
+            ProcessesToUpdate::All,
+            true,
+            ProcessRefreshKind::everything(),
+        );
+        let clippy_running = sys
+            .processes_by_name(&OsString::from("clippy.exe"))
+            .next()
+            .is_some();
+        if !clippy_running {
+            println!("proce");
+            let _ = Command::new("cmd")
+                .args(["/C", "start", "", "C:\\Program Files\\clippy\\clippy.exe"])
+                .spawn()?;
+        } else {
+            println!("Clippy is running!")
+        }
+    }
+    Ok(())
+}
+
 fn main() -> Result<(), eframe::Error> {
+    // this fn make sure the clippy service is running
+    log_eprintln!(setup());
+
     let ui = Clipboard::new();
 
     let icon =
@@ -1040,9 +1080,7 @@ fn main() -> Result<(), eframe::Error> {
         viewport: ViewportBuilder::default()
             .with_inner_size(Vec2::new(600.0, 800.0))
             .with_app_id("org.dhanu.clippy")
-            .with_icon(icon)
-            .with_always_on_top()
-            .with_active(true),
+            .with_icon(icon),
         ..Default::default()
     };
 

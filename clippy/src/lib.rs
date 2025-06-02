@@ -1,5 +1,6 @@
 pub mod encryption_decryption;
 pub mod http;
+pub mod macros;
 pub mod read_clipboard;
 pub mod user;
 pub mod write_clipboard;
@@ -14,8 +15,7 @@ use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fs::{DirEntry, create_dir, create_dir_all};
-use std::io::{Cursor, Write};
-use std::os::fd::AsRawFd;
+use std::io::Write;
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
@@ -227,7 +227,7 @@ impl UserData {
                         fs::rename(&path, &pined_path).unwrap();
                         pined_path.pop();
                     } else {
-                        fs::remove_file(&path);
+                        log_error!(fs::remove_file(&path));
                     }
                     path.pop();
                     data.remove(&i);
@@ -890,14 +890,5 @@ pub fn remove(path: String, typ: String, time: &str, thumbnail: bool) {
             path.push(format!("{}", file_name));
             fs::rename(path, get_path_image().join(format!("{}.png", time))).unwrap();
         }
-    }
-}
-
-pub fn flock(file: &File, flag: libc::c_int) -> Result<(), io::Error> {
-    let ret = unsafe { libc::flock(file.as_raw_fd(), flag) };
-    if ret < 0 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(())
     }
 }

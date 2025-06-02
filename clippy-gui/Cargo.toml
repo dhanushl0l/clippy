@@ -1,6 +1,6 @@
 [package]
 name = "clippy-gui"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 
 
@@ -13,6 +13,9 @@ reqwest = "0.12.15"
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+sysinfo = "0.35.1"
 
 
 [build-dependencies]
