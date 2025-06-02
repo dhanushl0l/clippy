@@ -26,14 +26,6 @@ pub fn start_cloud(
         let async_runtime = Runtime::new().unwrap();
 
         async_runtime.block_on(async {
-            // match get_token_serv(&usercred, &client).await {
-            //     Ok(_) => debug!("Fetched a new authentication token on start"),
-            //     Err(err) => {
-            //         warn!("Unable to fetch authentication token on start");
-            //         debug!("{}", err);
-            //     }
-            // };
-
             let task1 = tokio::spawn({
                 let pending = pending.clone();
                 let client = client.clone();

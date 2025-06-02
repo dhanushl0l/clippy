@@ -1,5 +1,5 @@
 use crate::{
-    UserCred, UserData, extract_zip, read_data_by_id, set_global_update_bool,
+    UserCred, UserData, UserSettings, extract_zip, read_data_by_id, set_global_update_bool,
     write_clipboard::{self},
 };
 use core::time;
@@ -8,6 +8,7 @@ use once_cell::sync::Lazy;
 use reqwest::{self, Client, multipart};
 use std::{
     error::{self, Error},
+    process,
     sync::Mutex,
     thread,
     time::Duration,
@@ -77,6 +78,13 @@ pub async fn get_token_serv(user: &UserCred, client: &Client) -> Result<(), Box<
         update_token(token);
         Ok(())
     } else {
+        if response.status().as_u16() == 401 {
+            let mut user = UserSettings::build_user().unwrap();
+            user.remove_user();
+            user.write().unwrap();
+            error!("Unable to verify credentials, logging out.");
+            process::exit(1);
+        }
         let err_msg = response.text().await?;
         Err(format!("Login failed: {}", err_msg).into())
     }
