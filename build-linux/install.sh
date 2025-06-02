@@ -38,9 +38,9 @@ for f in assets/icons/clippy-*.png; do
 done
 
 sudo cp build-linux/clippy.desktop /usr/share/applications/clippy.desktop
-
-rm -r "&TARGET_DIR"
-rm "&ARCHIVE_NAME"
+cd ..
+rm -r "$TARGET_DIR"
+rm "$ARCHIVE_NAME"
 
 # Reload systemd, enable, and start the service
 echo "Enabling and starting the service..."
