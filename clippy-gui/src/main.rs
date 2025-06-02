@@ -1040,7 +1040,7 @@ impl App for Clipboard {
 }
 
 fn setup() -> Result<(), Error> {
-    cfg!(target_os = "windows");
+    #[cfg(target_os = "windows")]
     {
         use std::{ffi::OsString, process::Command};
         use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
@@ -1055,7 +1055,7 @@ fn setup() -> Result<(), Error> {
             .next()
             .is_some();
         if !clippy_running {
-            println!("proce");
+            println!("Starting clippy service");
             let _ = Command::new("cmd")
                 .args(["/C", "start", "", "C:\\Program Files\\clippy\\clippy.exe"])
                 .spawn()?;

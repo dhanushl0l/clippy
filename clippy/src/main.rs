@@ -23,6 +23,8 @@ use wayland_clipboard_listener::{WlClipboardPasteStream, WlListenType};
 
 #[cfg(target_os = "linux")]
 fn run(tx: &Sender<(String, String, String)>) {
+    use std::env;
+
     if env::var("WAYLAND_DISPLAY").is_ok() {
         read_clipboard_wayland(tx)
     } else if env::var("DISPLAY").is_ok() {

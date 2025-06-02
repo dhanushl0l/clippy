@@ -48,6 +48,9 @@ pub fn push_to_clipboard_wl(data: Data, forground: bool) -> Result<(), String> {
 #[cfg(target_os = "linux")]
 pub fn push_to_clipboard_wl_command(data: Data) -> Result<(), String> {
     use base64::{Engine, engine::general_purpose};
+    use std::io::Write;
+    use std::process::Command;
+
     let data_u8 = if data.typ.starts_with("image/") {
         general_purpose::STANDARD.decode(&data.data).unwrap()
     } else {
@@ -58,7 +61,7 @@ pub fn push_to_clipboard_wl_command(data: Data) -> Result<(), String> {
     let mut cmd = Command::new("wl-copy")
         .arg("--type")
         .arg(data.typ)
-        .stdin(Stdio::piped())
+        .stdin(std::process::Stdio::piped())
         .spawn()
         .map_err(|e| format!("Failed to start wl-copy: {}", e))?;
 

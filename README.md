@@ -1,11 +1,9 @@
 <img src="/assets/clippy.png" width="100px" align="left">
 
 ### `clippy`
-[![Downloads](https://img.shields.io/badge/View-Releases-orange
-)](https://github.com/dhanushl0l/clippy/releases)
-[![Repo](https://img.shields.io/github/stars/dhanushl0l/clippy
-)](https://github.com/dhanushl0l/clippy)
 
+[![Downloads](https://img.shields.io/badge/View-Releases-orange)](https://github.com/dhanushl0l/clippy/releases)
+[![Repo](https://img.shields.io/github/stars/dhanushl0l/clippy)](https://github.com/dhanushl0l/clippy)
 
 Clippy is a cross-platform clipboard and notes manager that syncs across your devices.
 
@@ -42,14 +40,18 @@ Below is our planned development roadmap. Features and priorities may change ove
 - [ ] Landing Page & Documentation
 - [ ] Start Mobile app Development
 
-## Installation *(Alpha – for testing only, not ready for production use)*
+## Installation _(Alpha – for testing only, not ready for production use)_
 
-### Linux  
+### Linux
+
 Run the following command in your terminal:
+
 ```bash
-curl -s https://raw.githubusercontent.com/dhanushl0l/clippy/main/install.sh | bash
+curl -s https://raw.githubusercontent.com/dhanushl0l/clippy/main/build-linux/install.sh | bash
 ```
-### Windows  
+
+### Windows
+
 Download and install the `.msi` installer from the [Releases page](https://github.com/dhanushl0l/clippy/releases).
 
 ## License

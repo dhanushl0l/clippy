@@ -828,9 +828,9 @@ pub fn copy_to_linux(data: Data) {
     use write_clipboard::{push_to_clipboard, push_to_clipboard_wl};
 
     if std::env::var("WAYLAND_DISPLAY").is_ok() {
-        push_to_clipboard_wl(data, false);
+        log_error!(push_to_clipboard_wl(data, false));
     } else if std::env::var("DISPLAY").is_ok() {
-        push_to_clipboard(data);
+        log_error!(push_to_clipboard(data));
     }
 }
 

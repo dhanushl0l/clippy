@@ -22,10 +22,10 @@ echo "Copying file..."
 # Create the service directory if it doesn't exist
 mkdir -p "$SERVICE_DIR"
 
-sudo cp  "clippy"  "$BIN_DIR/clippy"
-sudo cp  "clippy-gui"  "$BIN_DIR/clippy-gui"
+sudo cp  "target/release/clippy"  "$BIN_DIR/clippy"
+sudo cp  "target/release/clippy-gui"  "$BIN_DIR/clippy-gui"
 
-sudo cp "clippy.service" "$SERVICE_DIR/$SERVICE_NAME"
+sudo cp "build-linux/clippy.service" "$SERVICE_DIR/$SERVICE_NAME"
 
 for f in assets/icons/clippy-*.png; do
   base=$(basename "$f")
@@ -37,9 +37,8 @@ for f in assets/icons/clippy-*.png; do
   echo "Copied $f -> $target/clippy.png"
 done
 
-sudo cp clippy.desktop /usr/share/applications/clippy.desktop
+sudo cp build-linux/clippy.desktop /usr/share/applications/clippy.desktop
 
-cd ..
 rm -r "&TARGET_DIR"
 rm "&ARCHIVE_NAME"
 
