@@ -48,9 +48,34 @@ pub fn push_to_clipboard_wl(
         .map_err(|err| format!("{}", err))?
     };
 
-    if paste_on_click {}
+    if paste_on_click {
+        linux_ctrl_v()
+    }
 
     Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn linux_ctrl_v() {
+    use std::thread;
+    use std::time::Duration;
+    use uinput::event::keyboard;
+    let mut device = uinput::default()
+        .unwrap()
+        .name("test")
+        .unwrap()
+        .event(uinput::event::Keyboard::All)
+        .unwrap()
+        .create()
+        .unwrap();
+
+    thread::sleep(Duration::from_secs(1));
+
+    device.press(&keyboard::Key::RightControl).unwrap();
+    device.click(&keyboard::Key::V).unwrap();
+    device.release(&keyboard::Key::RightControl).unwrap();
+
+    device.synchronize().unwrap();
 }
 
 #[cfg(target_os = "linux")]
@@ -127,7 +152,9 @@ pub fn push_to_clipboard(
         }
 
         #[cfg(target_os = "linux")]
-        {}
+        {
+            linux_ctrl_v();
+        }
     }
 
     Ok(())

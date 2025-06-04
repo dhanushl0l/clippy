@@ -23,6 +23,7 @@ fs4 = "0.13.1"
 [target.'cfg(target_os = "linux")'.dependencies]
 wayland-clipboard-listener = "0.2.6"
 wl-clipboard-rs = "0.9.1"
+uinput = "0.1.3"
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 enigo = "0.3.0"

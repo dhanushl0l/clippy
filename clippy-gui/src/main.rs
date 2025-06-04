@@ -847,7 +847,7 @@ impl App for Clipboard {
 
                             if self.settings.click_on_quit {
                                 ui.horizontal(|ui| {
-                                    ui.label("Paste text on click");
+                                    ui.label("Paste on click");
                                     ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
                                         if ui
                                             .add(toggle(&mut self.settings.paste_on_click))
