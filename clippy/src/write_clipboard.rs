@@ -1,7 +1,7 @@
 use crate::{Data, set_global_bool};
 use base64::{Engine, engine::general_purpose};
 use clipboard_rs::{Clipboard, ClipboardContext, RustImageData, common::RustImage};
-use std::error::Error;
+use std::{error::Error, thread, time::Duration};
 
 #[cfg(target_os = "linux")]
 pub fn copy_to_linux(data: Data) -> Result<(), String> {
@@ -17,11 +17,15 @@ pub fn copy_to_linux(data: Data) -> Result<(), String> {
 #[cfg(target_os = "linux")]
 fn copy_to_clipboard_wl(data: Data) -> Result<(), String> {
     set_global_bool(true);
-    push_to_clipboard_wl(data, false)
+    push_to_clipboard_wl(data, false, false)
 }
 
 #[cfg(target_os = "linux")]
-pub fn push_to_clipboard_wl(data: Data, forground: bool) -> Result<(), String> {
+pub fn push_to_clipboard_wl(
+    data: Data,
+    forground: bool,
+    paste_on_click: bool,
+) -> Result<(), String> {
     use base64::{Engine, engine::general_purpose};
     use wl_clipboard_rs::copy::{ClipboardType, MimeType, Options, Source};
 
@@ -29,7 +33,7 @@ pub fn push_to_clipboard_wl(data: Data, forground: bool) -> Result<(), String> {
     opts.clipboard(ClipboardType::Regular);
     opts.foreground(forground);
 
-    Ok(if data.typ.starts_with("image/") {
+    if data.typ.starts_with("image/") {
         let data = general_purpose::STANDARD.decode(data.data).unwrap();
         opts.copy(
             Source::Bytes(data.into_boxed_slice()),
@@ -42,7 +46,11 @@ pub fn push_to_clipboard_wl(data: Data, forground: bool) -> Result<(), String> {
             MimeType::Text,
         )
         .map_err(|err| format!("{}", err))?
-    })
+    };
+
+    if paste_on_click {}
+
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]
@@ -76,16 +84,50 @@ pub fn push_to_clipboard_wl_command(data: Data) -> Result<(), String> {
 
 pub fn copy_to_clipboard(data: Data) -> Result<(), Box<dyn Error + Send + Sync>> {
     set_global_bool(true);
-    push_to_clipboard(data)
+    push_to_clipboard(data, false)
 }
 
-pub fn push_to_clipboard(data: Data) -> Result<(), Box<dyn Error + Send + Sync>> {
+pub fn push_to_clipboard(
+    data: Data,
+    paste_on_click: bool,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     let ctx = ClipboardContext::new()?;
 
     if data.typ.starts_with("image/") {
         ctx.set_image(RustImageData::from_bytes(&string_to_vecu8(data.data))?)?;
     } else {
         ctx.set_text(data.data)?;
+    }
+
+    if paste_on_click {
+        thread::sleep(Duration::from_secs(1));
+        #[cfg(not(target_os = "linux"))]
+        {
+            use enigo::{
+                Direction::{Click, Press, Release},
+                Enigo, Key, Keyboard, Settings,
+            };
+            let mut enigo = Enigo::new(&Settings::default()).unwrap();
+
+            let key = {
+                #[cfg(target_os = "macos")]
+                {
+                    Key::Meta
+                }
+
+                #[cfg(not(target_os = "macos"))]
+                {
+                    Key::Control
+                }
+            };
+
+            enigo.key(key, Press).unwrap();
+            enigo.key(Key::Unicode('v'), Click).unwrap();
+            enigo.key(key, Release).unwrap();
+        }
+
+        #[cfg(target_os = "linux")]
+        {}
     }
 
     Ok(())

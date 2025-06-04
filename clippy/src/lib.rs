@@ -287,6 +287,7 @@ pub struct UserSettings {
     sync: Option<UserCred>,
     pub store_image: bool,
     pub click_on_quit: bool,
+    pub paste_on_click: bool,
     pub disable_sync: bool,
     encrept: Option<String>,
     pub intrevel: u32,
@@ -309,6 +310,7 @@ impl UserSettings {
             store_image: true,
             encrept: None,
             click_on_quit: true,
+            paste_on_click: true,
             intrevel: 3,
             max_clipboard: Some(100),
             theme: SystemTheam::System,
@@ -776,7 +778,7 @@ pub fn create_past_lock(path: &PathBuf) -> Result<(), io::Error> {
     Ok(())
 }
 
-pub fn watch_for_next_clip_write(dir: PathBuf) {
+pub fn watch_for_next_clip_write(dir: PathBuf, paste_on_click: bool) {
     let mut target = dir.clone();
     target.push(".next");
 
@@ -789,7 +791,7 @@ pub fn watch_for_next_clip_write(dir: PathBuf) {
 
     loop {
         if fs::metadata(&target).is_ok() {
-            match read_parse(&target) {
+            match read_parse(&target, paste_on_click) {
                 Ok(_) => {
                     info!("New item copied")
                 }
@@ -806,17 +808,17 @@ pub fn watch_for_next_clip_write(dir: PathBuf) {
         thread::sleep(Duration::from_secs(1));
     }
 
-    fn read_parse(target: &PathBuf) -> Result<(), String> {
+    fn read_parse(target: &PathBuf, paste_on_click: bool) -> Result<(), String> {
         let contents = fs::read_to_string(&target)
             .map_err(|e| format!("Failed to read file {:?}: {}", target, e))?;
 
         let data = serde_json::from_str(&fs::read_to_string(&contents).unwrap()).unwrap();
 
         #[cfg(target_os = "linux")]
-        copy_to_linux(data);
+        copy_to_linux(data, paste_on_click);
 
         #[cfg(not(target_os = "linux"))]
-        write_clipboard::push_to_clipboard(data).unwrap();
+        write_clipboard::push_to_clipboard(data, paste_on_click).unwrap();
 
         fs::remove_file(&target).map_err(|e| format!("Failed to remove {:?}: {}", target, e))?;
         Ok(())
@@ -824,13 +826,13 @@ pub fn watch_for_next_clip_write(dir: PathBuf) {
 }
 
 #[cfg(target_os = "linux")]
-pub fn copy_to_linux(data: Data) {
+pub fn copy_to_linux(data: Data, paste_on_click: bool) {
     use write_clipboard::{push_to_clipboard, push_to_clipboard_wl};
 
     if std::env::var("WAYLAND_DISPLAY").is_ok() {
-        log_error!(push_to_clipboard_wl(data, false));
+        log_error!(push_to_clipboard_wl(data, false, paste_on_click));
     } else if std::env::var("DISPLAY").is_ok() {
-        log_error!(push_to_clipboard(data));
+        log_error!(push_to_clipboard(data, paste_on_click));
     }
 }
 

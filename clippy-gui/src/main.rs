@@ -841,14 +841,19 @@ impl App for Clipboard {
                                 });
                             });
 
-                            ui.horizontal(|ui| {
-                                ui.label("Placeholder");
-                                ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
-                                    if ui.add(toggle(&mut true)).changed() {
-                                        log_eprintln!(self.settings.write());
-                                    }
+                            if self.settings.click_on_quit {
+                                ui.horizontal(|ui| {
+                                    ui.label("Paste text on click");
+                                    ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
+                                        if ui
+                                            .add(toggle(&mut self.settings.paste_on_click))
+                                            .changed()
+                                        {
+                                            log_eprintln!(self.settings.write());
+                                        }
+                                    });
                                 });
-                            });
+                            }
 
                             if self.settings.is_login() {
                                 let note = "Prevents your clipboard from \
@@ -1080,7 +1085,8 @@ fn main() -> Result<(), eframe::Error> {
         viewport: ViewportBuilder::default()
             .with_inner_size(Vec2::new(600.0, 800.0))
             .with_app_id("org.dhanu.clippy")
-            .with_icon(icon),
+            .with_icon(icon)
+            .with_always_on_top(),
         ..Default::default()
     };
 

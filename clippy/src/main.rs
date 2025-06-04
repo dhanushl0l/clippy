@@ -127,8 +127,10 @@ fn main() {
 
     let (tx, rx) = tokio::sync::mpsc::channel::<(String, String, String)>(30);
 
+    let mut paste_on_click = false;
     match UserSettings::build_user() {
         Ok(usersettings) => {
+            paste_on_click = usersettings.paste_on_click;
             if !usersettings.disable_sync {
                 if let Some(sync) = usersettings.get_sync() {
                     start_cloud(rx, sync.clone(), usersettings);
@@ -145,8 +147,8 @@ fn main() {
     // this thread reads the gui clipboard entry && settings change
     {
         let path = get_path_local();
-        thread::spawn(|| {
-            watch_for_next_clip_write(path);
+        thread::spawn(move || {
+            watch_for_next_clip_write(path, paste_on_click);
         });
     }
 
