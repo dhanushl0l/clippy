@@ -49,13 +49,14 @@ pub fn push_to_clipboard_wl(
     };
 
     if paste_on_click {
+        #[cfg(all(target_os = "linux", not(feature = "server")))]
         linux_ctrl_v()
     }
 
     Ok(())
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(feature = "server")))]
 fn linux_ctrl_v() {
     use std::thread;
     use std::time::Duration;
@@ -151,7 +152,7 @@ pub fn push_to_clipboard(
             enigo.key(key, Release).unwrap();
         }
 
-        #[cfg(target_os = "linux")]
+        #[cfg(all(target_os = "linux", not(feature = "server")))]
         {
             linux_ctrl_v();
         }
