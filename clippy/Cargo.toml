@@ -12,18 +12,27 @@ bytes = "1.10.1"
 env_logger = "0.11.8"
 base64 = "0.22.1"
 log = "0.4.27"
-aes-gcm = "0.10.3"
 image = "0.25.6"
 once_cell = "1.21.3"
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 fs4 = "0.13.1"
+rand = "0.9.1"
+aes-gcm = "0.10.3"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 wayland-clipboard-listener = "0.2.6"
 wl-clipboard-rs = "0.9.1"
 uinput = "0.1.3"
+keyring = { version = "3.6.2", features = ["linux-native"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3.6.2", features = ["windows-native"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3.6.2", features = ["apple-native"] }
+
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 enigo = "0.3.0"

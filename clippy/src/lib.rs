@@ -11,15 +11,18 @@ use bytes::Bytes;
 use chrono::prelude::Utc;
 use encryption_decryption::{decrypt_file, encrept_file};
 use image::ImageReader;
+use keyring::Entry;
 use log::{debug, error, info, warn};
+use rand::TryRngCore;
+use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fs::{DirEntry, create_dir, create_dir_all};
-use std::io::Write;
+use std::io::{ErrorKind, Write};
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use std::{
     collections::BTreeSet,
     env,
@@ -32,7 +35,21 @@ use std::{process, thread};
 use tar::Archive;
 use tokio::sync::mpsc::Sender;
 
-const API_KEY: Option<&str> = option_env!("KEY");
+pub const APP_ID: &str = "org.clippy.clippy";
+
+pub static mut API_KEY: Option<&str> = None;
+pub const API_KEY_Fallback: Option<&str> = option_env!("KEY");
+
+pub fn read_key() -> Option<&'static str> {
+    unsafe { API_KEY }
+}
+
+pub fn set_key(value: String) -> Result<(), Box<dyn Error>> {
+    unsafe {
+        API_KEY = Some(Box::leak(value.into_boxed_str()));
+    }
+    Ok(())
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Data {
@@ -340,16 +357,20 @@ impl UserSettings {
             create_dir(&user_config)?;
         }
 
+        let user_settings = user_config.join(".settings");
         user_config.push(".user");
-        if user_config.is_file() {
+
+        if user_settings.is_file() {
+            let file = fs::read(user_settings)?;
+            Ok(serde_json::from_str(&String::from_utf8(file).unwrap()).unwrap())
+        } else if user_config.is_file() {
             let file = fs::read(user_config)?;
-            let file = decrypt_file(API_KEY.unwrap().as_bytes(), &file).unwrap();
+            let file = decrypt_file(read_key().unwrap().as_bytes(), &file).unwrap();
             Ok(serde_json::from_str(&String::from_utf8(file).unwrap()).unwrap())
         } else {
             let usersettings: UserSettings = UserSettings::new();
             let file = serde_json::to_string_pretty(&usersettings)?;
-            let file = encrept_file(API_KEY.unwrap().as_bytes(), file.as_bytes()).unwrap();
-            fs::write(&user_config, file)?;
+            fs::write(&user_settings, file)?;
             Ok(usersettings)
         }
     }
@@ -363,17 +384,39 @@ impl UserSettings {
             create_dir_all(&user_config)?;
         }
 
+        let user_config_sync = user_config.join(".user");
         // Create file path
-        user_config.push(".user");
+        user_config.push(".settings");
 
         // Serialize and encrypt
-        let data = serde_json::to_vec_pretty(self)?;
-        let en_data = encrept_file(API_KEY.unwrap().as_bytes(), &data)
-            .map_err(|e| Box::<dyn std::error::Error>::from(e.to_string()))?;
+        if self.sync == None {
+            let data = serde_json::to_vec_pretty(self)?;
+            let mut file = File::create(&user_config)?;
+            file.write_all(&data)?;
+            if user_config_sync.exists() {
+                fs::remove_file(user_config_sync)?;
+            }
+        } else {
+            let data = serde_json::to_vec_pretty(self)?;
 
-        let mut file = File::create(&user_config)?;
-        file.write_all(&en_data)?;
+            if !user_config_sync.exists() {
+                let mut key = [0u8; 16]; // 16 bytes → 32 hex chars
+                OsRng.try_fill_bytes(&mut key);
+                let key_str = key.iter().map(|b| format!("{:02x}", b)).collect::<String>();
+                assert_eq!(key_str.len(), 32);
+                write_key_sys("username", &key_str);
+                set_key(get_key_sys("username").unwrap());
+            }
 
+            let en_data = encrept_file(read_key().unwrap().as_bytes(), &data)
+                .map_err(|e| Box::<dyn std::error::Error>::from(e.to_string()))?;
+
+            let mut file = File::create(&user_config_sync)?;
+            file.write_all(&en_data)?;
+            if user_config.exists() {
+                fs::remove_file(user_config)?;
+            }
+        }
         Ok(())
     }
 }
@@ -395,10 +438,6 @@ impl Pending {
         for entry in fs::read_dir(get_path_pending())? {
             let path: PathBuf = entry?.path();
 
-            if path.extension().and_then(|s| s.to_str()) != Some("json") {
-                continue;
-            }
-
             let file_content = fs::read_to_string(&path)?;
             let data: Data = serde_json::from_str(&file_content)?;
 
@@ -418,11 +457,11 @@ impl Pending {
     }
 
     pub fn get(&self) -> Option<(String, String)> {
-        self.data.lock().unwrap().last().cloned()
+        self.data.lock().unwrap().first().cloned()
     }
 
     pub fn pop(&self) {
-        self.data.lock().unwrap().pop();
+        self.data.lock().unwrap().remove(0);
     }
 }
 
@@ -784,9 +823,20 @@ pub fn watch_for_next_clip_write(dir: PathBuf, paste_on_click: bool) {
 
     let mut settings = dir;
     settings.push("user");
-    settings.push(".user");
+    let sync_settings = settings.join(".user");
+    settings.push(".settings");
+
+    let mut login = false;
     let last_modified = fs::metadata(&settings)
         .and_then(|meta| meta.modified())
+        .or_else(|e| {
+            if e.kind() == ErrorKind::NotFound {
+                login = true;
+                fs::metadata(&sync_settings).and_then(|meta| meta.modified())
+            } else {
+                Err(e)
+            }
+        })
         .unwrap();
 
     loop {
@@ -798,14 +848,35 @@ pub fn watch_for_next_clip_write(dir: PathBuf, paste_on_click: bool) {
                 Err(err) => error!("{}", err),
             }
         }
-        if let Ok(modified) = fs::metadata(&settings).and_then(|m| m.modified()) {
-            if modified > last_modified {
-                warn!("Settings updated");
-                process::exit(0);
-            }
+
+        if login {
+            check_settings_updated(Path::new(&sync_settings), last_modified);
+        } else {
+            check_settings_updated(Path::new(&settings), last_modified);
         }
 
         thread::sleep(Duration::from_secs(1));
+    }
+
+    fn check_settings_updated(path: &Path, last_modified: SystemTime) {
+        match fs::metadata(path) {
+            Ok(meta) => {
+                if !meta.is_file() {
+                    warn!("Settings updated (not a file)");
+                    process::exit(0);
+                }
+                if let Ok(modified) = meta.modified() {
+                    if modified > last_modified {
+                        warn!("Settings updated (modified)");
+                        process::exit(0);
+                    }
+                }
+            }
+            Err(_) => {
+                warn!("Settings updated (deleted or missing)");
+                process::exit(0);
+            }
+        }
     }
 
     fn read_parse(target: &PathBuf, paste_on_click: bool) -> Result<(), String> {
@@ -893,4 +964,19 @@ pub fn remove(path: String, typ: String, time: &str, thumbnail: bool) {
             fs::rename(path, get_path_image().join(format!("{}.png", time))).unwrap();
         }
     }
+}
+
+pub fn get_key_sys(username: &str) -> Result<String, Box<dyn Error>> {
+    let entry = Entry::new(APP_ID, &username)?;
+    let key = entry.get_password()?;
+    if key.len() != 32 {
+        entry.delete_credential()?;
+        panic!("Unauthorized key {}", key.len())
+    }
+    Ok(key)
+}
+
+pub fn write_key_sys(username: &str, key: &str) -> Result<(), Box<dyn Error>> {
+    let entry = Entry::new(APP_ID, username)?;
+    Ok(entry.set_password(key)?)
 }

@@ -37,6 +37,7 @@ impl UserState {
         let base_path = Path::new(CRED_PATH);
 
         if let Ok(users) = fs::read_dir(base_path) {
+            println!("{:?}", users);
             for user in users.flatten() {
                 let path = user.path();
 
@@ -92,7 +93,7 @@ impl UserState {
         self.data.lock().unwrap().contains_key(username)
     }
 
-    pub fn update(&self, username: &str, id: i64) {
+    pub fn update(&self, username: &str, id: &str) {
         let mut map = self.data.lock().unwrap();
         if let Some(set) = map.get_mut(username) {
             let len = set.len();
@@ -283,9 +284,23 @@ use futures_util::StreamExt;
 pub async fn write_file(
     mut data: Multipart,
     username: &str,
-    id: String,
-) -> Result<(), actix_web::Error> {
-    let path: PathBuf = Path::new(DATABASE_PATH).join(username).join(id);
+    id: i64,
+) -> Result<String, actix_web::Error> {
+    let mut file_name = id.to_string();
+    let mut cont = 10;
+    file_name.push('-');
+    file_name.push_str(&cont.to_string());
+    let mut path: PathBuf = Path::new(DATABASE_PATH).join(username).join(&file_name);
+
+    let len = file_name.len();
+
+    while path.exists() {
+        cont += 1;
+        path.pop();
+        file_name.truncate(len - 2);
+        file_name.push_str(&cont.to_string());
+        path.push(&file_name);
+    }
 
     // Ensure parent directory exists
     if let Some(parent) = path.parent() {
@@ -311,7 +326,7 @@ pub async fn write_file(
         }
     }
 
-    Ok(())
+    Ok(file_name)
 }
 
 pub fn to_zip(files: Vec<String>) -> Result<HttpResponse, Error> {

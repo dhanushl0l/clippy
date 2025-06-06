@@ -6,9 +6,9 @@
 use clipboard_img_widget::item_card_image;
 use clipboard_widget::item_card;
 use clippy::{
-    Data, LoginUserCred, NewUser, NewUserOtp, SystemTheam, UserSettings, get_global_update_bool,
-    get_path, get_path_pending, is_valid_email, is_valid_username, log_eprintln,
-    set_global_update_bool,
+    APP_ID, Data, LoginUserCred, NewUser, NewUserOtp, SystemTheam, UserSettings,
+    get_global_update_bool, get_key_sys, get_path, get_path_pending, is_valid_email,
+    is_valid_username, log_eprintln, read_key, set_global_update_bool, set_key,
 };
 use clippy_gui::{Thumbnail, Waiting, str_formate};
 use custom_egui_widget::toggle;
@@ -1072,6 +1072,9 @@ fn setup() -> Result<(), Error> {
             println!("Clippy is running!")
         }
     }
+    let key = get_key_sys("username").unwrap();
+    set_key(key).unwrap();
+
     Ok(())
 }
 
@@ -1088,7 +1091,7 @@ fn main() -> Result<(), eframe::Error> {
     let options = NativeOptions {
         viewport: ViewportBuilder::default()
             .with_inner_size(Vec2::new(600.0, 800.0))
-            .with_app_id("org.dhanu.clippy")
+            .with_app_id(APP_ID)
             .with_icon(icon)
             .with_always_on_top(),
         ..Default::default()

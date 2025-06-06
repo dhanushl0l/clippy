@@ -166,17 +166,18 @@ async fn update(
         Err(err) => return HttpResponse::Unauthorized().body(err.to_string()),
     };
 
-    match write_file(payload, &username, id.to_string()).await {
-        Ok(_) => {
-            debug!("writing {}/{}", username, id)
+    let file_name = match write_file(payload, &username, id).await {
+        Ok(name) => {
+            debug!("writing {}/{}", username, name);
+            name
         }
         Err(err) => {
             return err.error_response();
         }
-    }
-    state.update(&username, id);
+    };
+    state.update(&username, &file_name);
 
-    HttpResponse::Ok().body(id.to_string())
+    HttpResponse::Ok().body(file_name)
 }
 
 async fn state(
@@ -230,6 +231,7 @@ async fn main() -> std::io::Result<()> {
 
     // Instead of reading the email and user separately,implemented a single method where userstate::build creates and builds both the UserState and EmailState
     let temp = UserState::build();
+    println!("{:?}", temp);
     let user_state = web::Data::new(temp.0);
     let email_state = web::Data::new(temp.1);
     let otp_state = web::Data::new(OTPState::new());

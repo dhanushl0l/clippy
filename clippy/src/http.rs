@@ -15,7 +15,11 @@ use std::{
 };
 use tokio::{fs::File, io::AsyncReadExt};
 
-pub const SERVER: &str = "http://127.0.0.1:7777";
+#[cfg(debug_assertions)]
+pub const SERVER: &str = "http://127.0.0.1:7777"; // debug build
+
+#[cfg(not(debug_assertions))]
+pub const SERVER: &str = "https://clippy.dhanu.cloud"; // release build
 
 static TOKEN: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new(String::new()));
 
@@ -49,7 +53,7 @@ pub async fn send(
         .await?;
 
     if response.status().is_success() {
-        Ok(response.text().await.unwrap())
+        Ok(response.text().await?)
     } else if response.status() == reqwest::StatusCode::UNAUTHORIZED {
         warn!("Token expired");
         match get_token_serv(usercred, client).await {
@@ -60,9 +64,9 @@ pub async fn send(
             }
         };
 
-        Err(response.text().await.unwrap().into())
+        Err(response.text().await?.into())
     } else {
-        Err(response.text().await.unwrap().into())
+        Err(response.text().await?.into())
     }
 }
 

@@ -65,8 +65,8 @@ pub fn start_cloud(
                                     remove(path, typ, &data, usersettings.store_image);
                                     userdata.add(data, usersettings.max_clipboard);
                                     info!("Surcess sending pending data");
-                                    pending.pop();
                                     set_global_update_bool(true);
+                                    pending.pop();
                                 }
                                 Err(err) => {
                                     if err.downcast_ref::<std::io::Error>().map_or(false, |ioe| {

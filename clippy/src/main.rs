@@ -5,13 +5,17 @@
 
 use clipboard_rs::{ClipboardWatcher, ClipboardWatcherContext};
 use clippy::user::start_cloud;
-use clippy::{UserSettings, get_path_local, read_clipboard, watch_for_next_clip_write};
+use clippy::{
+    API_KEY_Fallback, UserSettings, get_key_sys, get_path_local, read_clipboard, set_key,
+    watch_for_next_clip_write,
+};
 use env_logger::{Builder, Env};
 use fs4::fs_std::FileExt;
 use log::debug;
 use log::{error, info, warn};
 use std::error::Error;
 use std::fs::File;
+use std::time::Duration;
 use std::{process, thread};
 use tokio::sync::mpsc::Sender;
 
@@ -104,6 +108,16 @@ fn setup(file: &File) -> Result<(), Box<dyn Error>> {
             process::exit(1);
         }
     }
+
+    match get_key_sys("username") {
+        Ok(val) => {
+            set_key(val);
+        }
+        Err(e) => {
+            error!("Unable to read KEY: {}", e);
+            set_key(API_KEY_Fallback.unwrap().to_string());
+        }
+    };
     Ok(())
 }
 
@@ -146,6 +160,7 @@ fn main() {
 
     // this thread reads the gui clipboard entry && settings change
     {
+        thread::sleep(Duration::from_secs(1));
         let path = get_path_local();
         thread::spawn(move || {
             watch_for_next_clip_write(path, paste_on_click);
