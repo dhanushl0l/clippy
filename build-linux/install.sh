@@ -1,5 +1,7 @@
 #!/bin/bash
 
+cd "$(dirname "$0")"
+
 URL="https://repo.dhanu.cloud/clippy/clippy-release.tar.xz"
 ARCHIVE_NAME="clippy-release.tar.xz"
 TARGET_DIR="clippy"

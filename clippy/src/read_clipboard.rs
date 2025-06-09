@@ -1,4 +1,6 @@
-use crate::{Data, get_global_bool, set_global_bool};
+use std::sync::Arc;
+
+use crate::{Data, Pending, get_global_bool, set_global_bool};
 use base64::{Engine, engine::general_purpose};
 use clipboard_rs::common::RustImage;
 use clipboard_rs::{Clipboard, ClipboardContext, ClipboardHandler};
@@ -6,9 +8,7 @@ use log::{debug, error, info};
 use tokio::sync::mpsc::Sender;
 
 #[cfg(target_os = "linux")]
-pub fn read_wayland_clipboard(
-    tx: &Sender<(String, String, String)>,
-) -> Result<(), wl_clipboard_rs::paste::Error> {
+pub fn read_wayland_clipboard(pending: Arc<Pending>) -> Result<(), wl_clipboard_rs::paste::Error> {
     use std::collections::HashSet;
     use std::io::Read;
     use wl_clipboard_rs::paste::{ClipboardType, MimeType, Seat, get_contents, get_mime_types};
@@ -49,26 +49,26 @@ pub fn read_wayland_clipboard(
         let mut vec = Vec::new();
         let _ = dat.read_to_end(&mut vec);
 
-        parse_wayland_clipboard(typ, vec, tx);
+        parse_wayland_clipboard(typ, vec, pending);
     } else {
         set_global_bool(false);
     }
     Ok(())
 }
 
-pub struct Manager<'a> {
+pub struct Manager {
     ctx: ClipboardContext,
-    tx: &'a Sender<(String, String, String)>,
+    pending: Arc<Pending>,
 }
 
-impl<'a> Manager<'a> {
-    pub fn new(tx: &'a Sender<(String, String, String)>) -> Self {
+impl Manager {
+    pub fn new(pending: Arc<Pending>) -> Self {
         let ctx = ClipboardContext::new().unwrap();
-        Manager { ctx, tx }
+        Manager { ctx, pending }
     }
 }
 
-impl<'a> ClipboardHandler for Manager<'a> {
+impl<'a> ClipboardHandler for Manager {
     fn on_clipboard_change(&mut self) {
         if get_global_bool() {
             let ctx = &self.ctx;
@@ -82,14 +82,14 @@ impl<'a> ClipboardHandler for Manager<'a> {
                     val.to_png().unwrap().get_bytes().to_vec(),
                     String::from("image/png"),
                     String::from("os"),
-                    &self.tx,
+                    self.pending.clone(),
                 );
             } else if let Ok(val) = ctx.get_text() {
                 write_to_json(
                     val.into_bytes(),
                     String::from("String"),
                     String::from("os"),
-                    &self.tx,
+                    self.pending.clone(),
                 );
             }
         } else {
@@ -98,12 +98,7 @@ impl<'a> ClipboardHandler for Manager<'a> {
     }
 }
 
-pub fn write_to_json(
-    data: Vec<u8>,
-    typ: String,
-    device: String,
-    tx: &Sender<(String, String, String)>,
-) {
+pub fn write_to_json(data: Vec<u8>, typ: String, device: String, pending: Arc<Pending>) {
     let data = if typ.starts_with("image/") {
         compress_str(data).unwrap()
     } else {
@@ -111,13 +106,13 @@ pub fn write_to_json(
     };
 
     let data = Data::new(data, typ, device, false);
-    match data.write_to_json(tx) {
+    match data.write_to_json(pending) {
         Ok(_) => (),
         Err(err) => error!("Unable to write to json: {}", err),
     }
 }
 
-pub fn parse_wayland_clipboard(typ: String, data: Vec<u8>, tx: &Sender<(String, String, String)>) {
+pub fn parse_wayland_clipboard(typ: String, data: Vec<u8>, pending: Arc<Pending>) {
     info!("Clipboard data stored: {}", typ);
 
     let json_data;
@@ -128,7 +123,7 @@ pub fn parse_wayland_clipboard(typ: String, data: Vec<u8>, tx: &Sender<(String, 
     }
 
     let result = Data::new(json_data, typ, "os".to_owned(), false);
-    match result.write_to_json(tx) {
+    match result.write_to_json(pending) {
         Ok(_) => (),
         Err(err) => error!("Unable to write to json: {}", err),
     }

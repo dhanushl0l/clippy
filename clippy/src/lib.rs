@@ -11,10 +11,7 @@ use bytes::Bytes;
 use chrono::prelude::Utc;
 use encryption_decryption::{decrypt_file, encrept_file};
 use image::ImageReader;
-use keyring::Entry;
 use log::{debug, error, info, warn};
-use rand::TryRngCore;
-use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fs::{DirEntry, create_dir, create_dir_all};
@@ -32,24 +29,11 @@ use std::{
     path::PathBuf,
 };
 use std::{process, thread};
-use tar::Archive;
+use tar::{Archive, Builder};
 use tokio::sync::mpsc::Sender;
 
 pub const APP_ID: &str = "org.clippy.clippy";
-
-pub static mut API_KEY: Option<&str> = None;
-pub const API_KEY_Fallback: Option<&str> = option_env!("KEY");
-
-pub fn read_key() -> Option<&'static str> {
-    unsafe { API_KEY }
-}
-
-pub fn set_key(value: String) -> Result<(), Box<dyn Error>> {
-    unsafe {
-        API_KEY = Some(Box::leak(value.into_boxed_str()));
-    }
-    Ok(())
-}
+pub const API_KEY: Option<&str> = option_env!("KEY");
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Data {
@@ -69,7 +53,7 @@ impl Data {
         }
     }
 
-    pub fn write_to_json(&self, tx: &Sender<(String, String, String)>) -> Result<(), io::Error> {
+    pub fn write_to_json(&self, pending: Arc<Pending>) -> Result<(), io::Error> {
         let time = Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
         let path = get_path_pending();
         fs::create_dir_all(&path)?;
@@ -84,7 +68,7 @@ impl Data {
         let mut file = File::create(file_path)?;
         file.write_all(json_data.as_bytes())?;
 
-        match tx.try_send((file_path.to_str().unwrap().into(), time, self.typ.clone())) {
+        match pending.add(file_path.to_str().unwrap().into(), self.typ.clone()) {
             Ok(_) => {
                 set_global_update_bool(true);
             }
@@ -254,6 +238,17 @@ impl UserData {
         }
     }
 
+    pub fn get_30(&self) -> Vec<String> {
+        self.data
+            .lock()
+            .unwrap()
+            .iter()
+            .rev()
+            .take(30)
+            .cloned()
+            .collect()
+    }
+
     pub fn add_vec(&self, id: Vec<String>) {
         for id in id {
             self.data.lock().unwrap().insert(id);
@@ -357,66 +352,29 @@ impl UserSettings {
             create_dir(&user_config)?;
         }
 
-        let user_settings = user_config.join(".settings");
         user_config.push(".user");
 
-        if user_settings.is_file() {
-            let file = fs::read(user_settings)?;
-            Ok(serde_json::from_str(&String::from_utf8(file).unwrap()).unwrap())
-        } else if user_config.is_file() {
-            let file = fs::read(user_config)?;
-            let file = decrypt_file(read_key().unwrap().as_bytes(), &file).unwrap();
-            Ok(serde_json::from_str(&String::from_utf8(file).unwrap()).unwrap())
-        } else {
-            let usersettings: UserSettings = UserSettings::new();
-            let file = serde_json::to_string_pretty(&usersettings)?;
-            fs::write(&user_settings, file)?;
-            Ok(usersettings)
-        }
+        let file = fs::read(user_config)?;
+        let file = decrypt_file(API_KEY.unwrap().as_bytes(), &file).unwrap();
+        Ok(serde_json::from_str(&String::from_utf8(file).unwrap()).unwrap())
     }
 
     pub fn write(&self) -> Result<(), Box<dyn Error>> {
         let mut user_config = get_path_local();
         user_config.push("user");
 
-        // Ensure directory exists
         if !user_config.is_dir() {
             create_dir_all(&user_config)?;
         }
 
-        let user_config_sync = user_config.join(".user");
-        // Create file path
-        user_config.push(".settings");
+        user_config.push(".user");
 
-        // Serialize and encrypt
-        if self.sync == None {
-            let data = serde_json::to_vec_pretty(self)?;
-            let mut file = File::create(&user_config)?;
-            file.write_all(&data)?;
-            if user_config_sync.exists() {
-                fs::remove_file(user_config_sync)?;
-            }
-        } else {
-            let data = serde_json::to_vec_pretty(self)?;
+        let data = serde_json::to_vec_pretty(self)?;
+        let en_data = encrept_file(API_KEY.unwrap().as_bytes(), &data)
+            .map_err(|e| Box::<dyn std::error::Error>::from(e.to_string()))?;
 
-            if !user_config_sync.exists() {
-                let mut key = [0u8; 16]; // 16 bytes → 32 hex chars
-                OsRng.try_fill_bytes(&mut key);
-                let key_str = key.iter().map(|b| format!("{:02x}", b)).collect::<String>();
-                assert_eq!(key_str.len(), 32);
-                write_key_sys("username", &key_str);
-                set_key(get_key_sys("username").unwrap());
-            }
-
-            let en_data = encrept_file(read_key().unwrap().as_bytes(), &data)
-                .map_err(|e| Box::<dyn std::error::Error>::from(e.to_string()))?;
-
-            let mut file = File::create(&user_config_sync)?;
-            file.write_all(&en_data)?;
-            if user_config.exists() {
-                fs::remove_file(user_config)?;
-            }
-        }
+        let mut file = File::create(&user_config)?;
+        file.write_all(&en_data)?;
         Ok(())
     }
 }
@@ -448,8 +406,9 @@ impl Pending {
         })
     }
 
-    pub fn add(&self, id: String, typ: String) {
+    pub fn add(&self, id: String, typ: String) -> Result<(), Box<dyn Error>> {
         self.data.lock().unwrap().push((id, typ));
+        Ok(())
     }
 
     pub fn is_empty(&self) -> bool {
@@ -458,6 +417,33 @@ impl Pending {
 
     pub fn get(&self) -> Option<(String, String)> {
         self.data.lock().unwrap().first().cloned()
+    }
+
+    pub fn empty(&self) {
+        *self.data.lock().unwrap() = Vec::new();
+    }
+
+    pub fn get_zip(&self) -> Result<Vec<u8>, ()> {
+        let data = self.data.lock().unwrap();
+
+        let mut buffer = Vec::new();
+        {
+            let mut tar = Builder::new(&mut buffer);
+
+            for (file, _value) in data.iter() {
+                // println!("{}", file);
+                let path = Path::new(file);
+                if !path.is_file() {
+                    warn!("Unable to locate {}", path.display());
+                    continue;
+                }
+                tar.append_path_with_name(path, path.file_name().unwrap())
+                    .unwrap();
+            }
+            tar.finish().unwrap();
+        }
+
+        Ok(buffer)
     }
 
     pub fn pop(&self) {
@@ -700,36 +686,76 @@ pub fn cache_path() -> PathBuf {
 }
 
 pub fn extract_zip(data: Bytes) -> Result<Vec<String>, Box<dyn Error>> {
-    println!("zip");
     let target_dir = get_path();
     let mut id = Vec::new();
-    let mut archive = Archive::new(&*data);
+    let reader = std::io::Cursor::new(data);
+    let mut archive = Archive::new(reader);
 
-    for entry in archive.entries()? {
-        let mut file = entry?;
-        let path = file.path()?;
+    debug!("Extracting into {}", target_dir.display());
+
+    for (i, entry) in archive.entries()?.enumerate() {
+        debug!("Processing entry index: {}", i);
+        let mut file = match entry {
+            Ok(f) => f,
+            Err(e) => {
+                error!("Failed to read entry {}: {}", i, e);
+                continue;
+            }
+        };
+
+        let path = match file.path() {
+            Ok(p) => p.to_path_buf(),
+            Err(e) => {
+                error!("Invalid path at entry {}: {}", i, e);
+                continue;
+            }
+        };
+
+        let name = match path.file_name().and_then(|n| n.to_str()) {
+            Some(n) => n.to_string(),
+            None => {
+                error!("Invalid file name at entry {}: {:?}", i, path);
+                continue;
+            }
+        };
+
         let mut out_path = target_dir.clone();
-
-        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-            id.push(name.to_string());
-            out_path.push(name);
-        } else {
-            error!("Invalid file");
-            continue;
-        }
+        out_path.push(&name);
+        id.push(name.clone());
 
         if let Some(parent) = out_path.parent() {
-            fs::create_dir_all(parent)?;
+            if let Err(e) = fs::create_dir_all(parent) {
+                error!(
+                    "Directory creation failed for {}: {}",
+                    out_path.display(),
+                    e
+                );
+                continue;
+            }
         }
 
-        let mut outfile = File::create(&out_path)?;
-        std::io::copy(&mut file, &mut outfile)?;
+        match File::create(&out_path) {
+            Ok(mut out_file) => {
+                if let Err(e) = std::io::copy(&mut file, &mut out_file) {
+                    error!("Copy failed for {}: {}", out_path.display(), e);
+                    continue;
+                }
+            }
+            Err(e) => {
+                error!("File creation failed for {}: {}", out_path.display(), e);
+                continue;
+            }
+        }
+
+        info!("Extracted file: {}", out_path.display());
     }
 
-    match store_image(&id, target_dir) {
-        Ok(_) => (),
-        Err(err) => error!("Failed to store image file: {}", err),
+    if let Err(e) = store_image(&id, target_dir.clone()) {
+        error!("store_image failed: {}", e);
     }
+
+    info!("Extraction done, total files: {}", id.len());
+    println!("{:?}", id);
     Ok(id)
 }
 
@@ -823,20 +849,14 @@ pub fn watch_for_next_clip_write(dir: PathBuf, paste_on_click: bool) {
 
     let mut settings = dir;
     settings.push("user");
-    let sync_settings = settings.join(".user");
-    settings.push(".settings");
+    settings.push(".user");
 
-    let mut login = false;
+    if !settings.is_file() {
+        UserSettings::new().write();
+    }
+
     let last_modified = fs::metadata(&settings)
         .and_then(|meta| meta.modified())
-        .or_else(|e| {
-            if e.kind() == ErrorKind::NotFound {
-                login = true;
-                fs::metadata(&sync_settings).and_then(|meta| meta.modified())
-            } else {
-                Err(e)
-            }
-        })
         .unwrap();
 
     loop {
@@ -849,11 +869,7 @@ pub fn watch_for_next_clip_write(dir: PathBuf, paste_on_click: bool) {
             }
         }
 
-        if login {
-            check_settings_updated(Path::new(&sync_settings), last_modified);
-        } else {
-            check_settings_updated(Path::new(&settings), last_modified);
-        }
+        check_settings_updated(Path::new(&settings), last_modified);
 
         thread::sleep(Duration::from_secs(1));
     }
@@ -964,19 +980,4 @@ pub fn remove(path: String, typ: String, time: &str, thumbnail: bool) {
             fs::rename(path, get_path_image().join(format!("{}.png", time))).unwrap();
         }
     }
-}
-
-pub fn get_key_sys(username: &str) -> Result<String, Box<dyn Error>> {
-    let entry = Entry::new(APP_ID, &username)?;
-    let key = entry.get_password()?;
-    if key.len() != 32 {
-        entry.delete_credential()?;
-        panic!("Unauthorized key {}", key.len())
-    }
-    Ok(key)
-}
-
-pub fn write_key_sys(username: &str, key: &str) -> Result<(), Box<dyn Error>> {
-    let entry = Entry::new(APP_ID, username)?;
-    Ok(entry.set_password(key)?)
 }

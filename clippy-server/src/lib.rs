@@ -19,7 +19,7 @@ use std::{
 use tar::Builder;
 
 pub const CRED_PATH: &str = "credentials/users";
-const DATABASE_PATH: &str = "data-base/users";
+pub const DATABASE_PATH: &str = "data-base/users";
 const MAX_SIZE: usize = 100 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
@@ -166,6 +166,24 @@ impl UserState {
             }
         }
     }
+
+    pub fn get(&self, username: &str, id: &[String]) -> Result<Vec<String>, HttpResponse> {
+        let map = self.data.lock().unwrap();
+
+        let tree = map
+            .get(username)
+            .ok_or_else(|| HttpResponse::Unauthorized().body("Error: authentication failed"))?;
+
+        let mut temp = Vec::new();
+        if !map.is_empty() {
+            for i in tree {
+                if !id.contains(i) {
+                    temp.push(format!("{}/{}/{}", DATABASE_PATH, username, i));
+                }
+            }
+        }
+        Ok(temp)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -286,21 +304,10 @@ pub async fn write_file(
     username: &str,
     id: i64,
 ) -> Result<String, actix_web::Error> {
-    let mut file_name = id.to_string();
-    let mut cont = 10;
-    file_name.push('-');
-    file_name.push_str(&cont.to_string());
-    let mut path: PathBuf = Path::new(DATABASE_PATH).join(username).join(&file_name);
+    let mut path: PathBuf = PathBuf::new().join(format!("{}/{}", DATABASE_PATH, username));
 
-    let len = file_name.len();
-
-    while path.exists() {
-        cont += 1;
-        path.pop();
-        file_name.truncate(len - 2);
-        file_name.push_str(&cont.to_string());
-        path.push(&file_name);
-    }
+    let file_name = get_filename(id, path.clone());
+    path.push(&file_name);
 
     // Ensure parent directory exists
     if let Some(parent) = path.parent() {
@@ -327,6 +334,40 @@ pub async fn write_file(
     }
 
     Ok(file_name)
+}
+
+pub fn write_file_u8(data: Vec<u8>, username: &str, id: i64) -> Result<String, Error> {
+    let mut path: PathBuf = PathBuf::new().join(format!("{}/{}", DATABASE_PATH, username));
+
+    let file_name = get_filename(id, path.clone());
+    path.push(&file_name);
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    println!("{}", path.display());
+    fs::write(path, data);
+    Ok(file_name)
+}
+
+pub fn get_filename(id: i64, mut path: PathBuf) -> String {
+    let mut file_name = id.to_string();
+    let mut cont = 10;
+    file_name.push('-');
+    file_name.push_str(&cont.to_string());
+
+    path.push(&file_name);
+
+    let len = file_name.len();
+
+    while path.exists() {
+        cont += 1;
+        path.pop();
+        file_name.truncate(len - 2);
+        file_name.push_str(&cont.to_string());
+        path.push(&file_name);
+    }
+    file_name
 }
 
 pub fn to_zip(files: Vec<String>) -> Result<HttpResponse, Error> {

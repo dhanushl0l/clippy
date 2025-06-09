@@ -70,6 +70,39 @@ pub async fn send(
     }
 }
 
+pub async fn send_zip(
+    buffer: Vec<u8>,
+    usercred: &UserCred,
+    client: &Client,
+) -> Result<String, Box<dyn error::Error>> {
+    let part = multipart::Part::bytes(buffer);
+    let form = multipart::Form::new().part("file", part);
+
+    let response = client
+        .post(&format!("{}/update_zip", SERVER))
+        .bearer_auth(get_token())
+        .multipart(form)
+        .send()
+        .await?;
+
+    if response.status().is_success() {
+        Ok(response.text().await?)
+    } else if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+        warn!("Token expired");
+        match get_token_serv(usercred, client).await {
+            Ok(_) => debug!("Fetched a new authentication token"),
+            Err(err) => {
+                warn!("Unable to fetch authentication token");
+                debug!("{}", err);
+            }
+        };
+
+        Err(response.text().await?.into())
+    } else {
+        Err(response.text().await?.into())
+    }
+}
+
 pub async fn get_token_serv(user: &UserCred, client: &Client) -> Result<(), Box<dyn Error>> {
     let response = client
         .get(format!("{}/getkey", SERVER))
@@ -82,7 +115,7 @@ pub async fn get_token_serv(user: &UserCred, client: &Client) -> Result<(), Box<
         update_token(token);
         Ok(())
     } else {
-        if response.status().as_u16() == 401 {
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
             let mut user = UserSettings::build_user().unwrap();
             user.remove_user();
             user.write().unwrap();
@@ -96,11 +129,20 @@ pub async fn get_token_serv(user: &UserCred, client: &Client) -> Result<(), Box<
 
 pub async fn state(userdata: &UserData, client: &Client, user: &UserCred) -> Result<bool, String> {
     let response = client
-        .get(&format!("{}/state/{}", SERVER, user.username))
+        .get(&format!("{}/state", SERVER))
+        .bearer_auth(get_token())
         .query(&[("id", userdata.last_one())])
         .send()
         .await
         .map_err(|e| format!("Request error: {}", e))?;
+
+    match get_token_serv(user, client).await {
+        Ok(_) => debug!("Fetched a new authentication token"),
+        Err(err) => {
+            warn!("Unable to fetch authentication token");
+            debug!("{}", err);
+        }
+    }
 
     let body = match response.text().await {
         Ok(text) => text,
@@ -115,10 +157,11 @@ pub async fn state(userdata: &UserData, client: &Client, user: &UserCred) -> Res
 }
 
 pub async fn download(userdata: &UserData, client: &Client) -> Result<(), Box<dyn error::Error>> {
+    let data = userdata.get_30();
     let response = client
         .get(&format!("{}/get", SERVER))
         .bearer_auth(get_token())
-        .query(&[("current", userdata.last_one())])
+        .json(&data)
         .send()
         .await?;
 
