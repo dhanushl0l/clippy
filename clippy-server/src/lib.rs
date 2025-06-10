@@ -3,6 +3,7 @@ use actix_web::HttpResponse;
 use base64::{Engine, engine::general_purpose};
 use chrono::{Duration, Utc};
 use clippy::{LoginUserCred, NewUserOtp};
+use futures_util::StreamExt;
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use log::{debug, error};
 use rand::seq::IteratorRandom;
@@ -11,7 +12,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeSet, HashMap},
-    fs::{self, File},
+    fs::{self},
     io::{Error, Write},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
@@ -20,7 +21,7 @@ use tar::Builder;
 
 pub const CRED_PATH: &str = "credentials/users";
 pub const DATABASE_PATH: &str = "data-base/users";
-const MAX_SIZE: usize = 100 * 1024 * 1024;
+const MAX_SIZE: usize = 10 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct UserState {
@@ -297,8 +298,6 @@ pub fn gen_otp() -> String {
     otp
 }
 
-use futures_util::StreamExt;
-
 pub async fn write_file(
     mut data: Multipart,
     username: &str,
@@ -333,20 +332,6 @@ pub async fn write_file(
         }
     }
 
-    Ok(file_name)
-}
-
-pub fn write_file_u8(data: Vec<u8>, username: &str, id: i64) -> Result<String, Error> {
-    let mut path: PathBuf = PathBuf::new().join(format!("{}/{}", DATABASE_PATH, username));
-
-    let file_name = get_filename(id, path.clone());
-    path.push(&file_name);
-
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    println!("{}", path.display());
-    fs::write(path, data);
     Ok(file_name)
 }
 
@@ -424,6 +409,14 @@ impl OTPState {
             .lock()
             .unwrap()
             .insert(user, (otp, expiry_time.timestamp(), 0));
+
+        self.remove_expired();
+    }
+
+    pub fn remove_expired(&self) {
+        let now = Utc::now().timestamp();
+        let mut map = self.data.lock().unwrap();
+        map.retain(|_, (_, expiry, _)| *expiry > now);
     }
 
     pub fn check_otp(&self, user_otp: &NewUserOtp) -> Result<(), String> {
@@ -444,6 +437,8 @@ impl OTPState {
                     "This code has expired. Please request a new one.",
                 ));
             }
+        } else {
+            return Err(String::from("Invalid User"));
         };
         Ok(())
     }
@@ -455,7 +450,7 @@ pub fn get_auth(username: &str, exp: i64) -> Result<String, jsonwebtoken::errors
     let expiry_time = now + Duration::hours(exp);
 
     let claims = json!({
-        "iss": "https://clippy.dhanu.cloud", //plasholder
+        "iss": "https://clippy.dhanu.cloud",
         "aud": "clippy",
         "user": username,
         "iat": now.timestamp(),

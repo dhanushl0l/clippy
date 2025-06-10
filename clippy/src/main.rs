@@ -5,16 +5,16 @@
 
 use clipboard_rs::{ClipboardWatcher, ClipboardWatcherContext};
 use clippy::user::start_cloud;
-use clippy::{Pending, UserSettings, get_path_local, read_clipboard, watch_for_next_clip_write};
+use clippy::{UserSettings, get_path_local, read_clipboard, watch_for_next_clip_write};
 use env_logger::{Builder, Env};
 use fs4::fs_std::FileExt;
 use log::debug;
 use log::{error, info, warn};
 use std::error::Error;
 use std::fs::File;
-use std::sync::Arc;
 use std::time::Duration;
 use std::{process, thread};
+use tokio::sync::mpsc::Sender;
 
 #[cfg(target_os = "linux")]
 use clippy::read_clipboard::read_wayland_clipboard;
@@ -23,13 +23,13 @@ use clippy::read_clipboard::read_wayland_clipboard;
 use wayland_clipboard_listener::{WlClipboardPasteStream, WlListenType};
 
 #[cfg(target_os = "linux")]
-fn run(pending: Arc<Pending>) {
+fn run(tx: &Sender<(String, String, String)>) {
     use std::env;
 
     if env::var("WAYLAND_DISPLAY").is_ok() {
-        read_clipboard_wayland(pending)
+        read_clipboard_wayland(tx)
     } else if env::var("DISPLAY").is_ok() {
-        match read_clipboard(pending) {
+        match read_clipboard(tx) {
             Ok(_) => (),
             Err(err) => {
                 error!("Failed to initialize clipboard listener\n{}", err);
@@ -44,11 +44,11 @@ fn run(pending: Arc<Pending>) {
 
 // need to find a way to monitor clipboard changes in wayland the current way is not optimal
 #[cfg(target_os = "linux")]
-fn read_clipboard_wayland(pending: Arc<Pending>) {
+fn read_clipboard_wayland(tx: &Sender<(String, String, String)>) {
     let mut stream = WlClipboardPasteStream::init(WlListenType::ListenOnCopy).unwrap();
 
     for _ in stream.paste_stream().flatten().flatten() {
-        match read_wayland_clipboard(pending.clone()) {
+        match read_wayland_clipboard(tx) {
             Ok(_) => (),
             Err(err) => warn!("{}", err),
         }
@@ -56,7 +56,7 @@ fn read_clipboard_wayland(pending: Arc<Pending>) {
 }
 
 #[cfg(any(target_os = "windows", target_os = "macos"))]
-fn run(pending: Arc<Pending>) {
+fn run(tx: &Sender<(String, String, String)>) {
     match read_clipboard(tx) {
         Ok(_) => (),
         Err(err) => {
@@ -72,8 +72,10 @@ fn run(tx: Sender<(String, String)>) {
     process::exit(1);
 }
 
-fn read_clipboard(pending: Arc<Pending>) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let manager = read_clipboard::Manager::new(pending);
+fn read_clipboard(
+    tx: &Sender<(String, String, String)>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let manager = read_clipboard::Manager::new(tx);
 
     let mut watcher = ClipboardWatcherContext::new()?;
 
@@ -125,7 +127,7 @@ fn main() {
         }
     }
 
-    let pending = Arc::new(Pending::build().unwrap());
+    let (tx, rx) = tokio::sync::mpsc::channel::<(String, String, String)>(30);
 
     let mut paste_on_click = false;
     match UserSettings::build_user() {
@@ -133,7 +135,7 @@ fn main() {
             paste_on_click = usersettings.paste_on_click;
             if !usersettings.disable_sync {
                 if let Some(sync) = usersettings.get_sync() {
-                    start_cloud(pending.clone(), sync.clone(), usersettings);
+                    start_cloud(rx, sync.clone(), usersettings);
                 } else {
                 }
             } else {
@@ -153,5 +155,5 @@ fn main() {
         });
     }
 
-    run(pending.clone())
+    run(&tx)
 }

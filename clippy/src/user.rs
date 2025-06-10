@@ -1,67 +1,88 @@
 use crate::{
     Pending, UserCred, UserData, UserSettings,
-    http::{self, download, health, send_zip, state},
+    http::{self, download, health, state},
     remove, set_global_update_bool,
 };
 use log::{debug, error, info, warn};
 use reqwest::{self, Client};
 use std::{
-    process,
     sync::Arc,
     thread,
-    time::{self, Duration},
+    time::{self},
 };
 use tokio::{runtime::Runtime, select, sync::mpsc::Receiver, time::sleep};
 
-pub fn start_cloud(pending: Arc<Pending>, usercred: UserCred, usersettings: UserSettings) {
+pub fn start_cloud(
+    mut rx: Receiver<(String, String, String)>,
+    usercred: UserCred,
+    usersettings: UserSettings,
+) {
     thread::spawn(move || {
         debug!("Start thread 3");
         let user_data = Arc::new(UserData::build());
         let client = Arc::new(Client::new());
         let usercred = Arc::new(usercred);
+        let pending = Arc::new(Pending::build().unwrap_or_else(|e| {
+            error!("{}", e);
+            Pending::new()
+        }));
 
         let async_runtime = Runtime::new().unwrap();
 
         async_runtime.block_on(async {
             let task1 = tokio::spawn({
+                let pending = pending.clone();
                 let client = client.clone();
                 let usercred = usercred.clone();
                 let user_data = user_data.clone();
+
+                async move {
+                    while let Some((path, id, typ)) = rx.recv().await {
+                        debug!("New clipboard data: path = {}, id = {}", path, id);
+                        match http::send(&path, &usercred, &client).await {
+                            Ok(data) => {
+                                remove(path, typ, &data, usersettings.store_image);
+                                user_data.add(data, usersettings.max_clipboard);
+                                info!("Surcess sending new data");
+                                set_global_update_bool(true);
+                            }
+                            Err(err) => {
+                                pending.add(path, typ).unwrap();
+                                warn!("Failed to send recent clipboard: {}", err);
+                            }
+                        };
+                    }
+                }
+            });
+
+            let task2 = tokio::spawn({
+                let pending = pending.clone();
+                let client = client.clone();
+                let usercred = usercred.clone();
+                let userdata = user_data.clone();
                 async move {
                     loop {
                         let mut api_health = false;
-
-                        if pending.data.lock().unwrap().len() > 1 {
-                            match pending.get_zip() {
-                                Ok(val) => {
-                                    match send_zip(val, &usercred, &client).await {
-                                        Ok(_) => {
-                                            pending.empty();
-                                        }
-                                        Err(_) => (),
-                                    };
+                        if let Some((path, typ)) = pending.get() {
+                            match http::send(&path, &usercred, &client).await {
+                                Ok(data) => {
+                                    remove(path, typ, &data, usersettings.store_image);
+                                    userdata.add(data, usersettings.max_clipboard);
+                                    info!("Surcess sending pending data");
+                                    set_global_update_bool(true);
+                                    pending.pop();
                                 }
                                 Err(err) => {
-                                    // error!("{}", err);
+                                    if err.downcast_ref::<std::io::Error>().map_or(false, |ioe| {
+                                        ioe.kind() == std::io::ErrorKind::NotFound
+                                    }) {
+                                        error!("The clipboard data not found");
+                                        pending.pop();
+                                    }
+                                    warn!("Failed to send pending clipboard: {}", err);
                                     api_health = true;
                                 }
                             };
-                        } else if pending.data.lock().unwrap().len() == 1 {
-                            if let Some((path, typ)) = pending.get() {
-                                match http::send(&path, &usercred, &client).await {
-                                    Ok(data) => {
-                                        remove(path, typ, &data, usersettings.store_image);
-                                        user_data.add(data, usersettings.max_clipboard);
-                                        info!("Surcess sending new data");
-                                        set_global_update_bool(true);
-                                        pending.pop();
-                                    }
-                                    Err(err) => {
-                                        pending.add(path, typ);
-                                        warn!("Failed to send recent clipboard: {}", err);
-                                    }
-                                };
-                            }
                         } else {
                             sleep(time::Duration::from_secs(5)).await;
                         };
@@ -72,7 +93,7 @@ pub fn start_cloud(pending: Arc<Pending>, usercred: UserCred, usersettings: User
                 }
             });
 
-            let task2 = tokio::spawn({
+            let task3 = tokio::spawn({
                 let user_data = user_data.clone();
                 let client = client.clone();
                 let usercred = usercred.clone();
@@ -115,8 +136,9 @@ pub fn start_cloud(pending: Arc<Pending>, usercred: UserCred, usersettings: User
             });
 
             let result = select! {
-                res = task1 => ("task2", res),
-                res = task2 => ("task3", res),
+                res = task1 => ("task1", res),
+                res = task2 => ("task2", res),
+                res = task3 => ("task3", res),
             };
 
             match result {

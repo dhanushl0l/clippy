@@ -7,20 +7,17 @@ use actix_web_httpauth::extractors::bearer::BearerAuth;
 use chrono::Utc;
 use clippy::{LoginUserCred, NewUser, NewUserOtp};
 use clippy_server::{
-    CRED_PATH, DATABASE_PATH, EmailState, OTPState, UserCred, UserState, auth, gen_otp, get_auth,
-    get_param, hash_key, to_zip, write_file, write_file_u8,
+    CRED_PATH, EmailState, OTPState, UserCred, UserState, auth, gen_otp, get_auth, get_param,
+    hash_key, to_zip, write_file,
 };
 use email::send_otp;
 use env_logger::{Builder, Env};
-use futures_util::StreamExt;
 use log::{debug, error};
 use std::{
     collections::HashMap,
     fs::{self},
-    io::{Cursor, Read},
     path::Path,
 };
-use tar::Archive;
 mod email;
 
 macro_rules! param {
@@ -183,61 +180,6 @@ async fn update(
     HttpResponse::Ok().body(file_name)
 }
 
-async fn update_zip(
-    mut payload: Multipart,
-    auth_key: BearerAuth,
-    state: web::Data<UserState>,
-) -> impl Responder {
-    let key = auth_key.token();
-
-    let username = match auth(key) {
-        Ok(val) => val,
-        Err(err) => return HttpResponse::Unauthorized().body(err.to_string()),
-    };
-
-    let mut data: Vec<u8> = Vec::new();
-    while let Some(field) = payload.next().await {
-        let mut field = match field {
-            Ok(f) => f,
-            Err(e) => return HttpResponse::BadRequest().body(e.to_string()),
-        };
-
-        while let Some(chunk) = field.next().await {
-            let chunk = match chunk {
-                Ok(c) => c,
-                Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
-            };
-            data.extend_from_slice(&chunk);
-        }
-    }
-
-    let cursor = Cursor::new(data);
-    let mut tar = Archive::new(cursor);
-
-    let id = Utc::now().timestamp();
-    let mut files = Vec::new();
-    for entry_result in tar.entries().unwrap() {
-        let mut entry = entry_result.unwrap();
-        let mut buffer = Vec::new();
-        entry.read_to_end(&mut buffer).unwrap();
-        match write_file_u8(buffer, &username, id) {
-            Ok(name) => {
-                files.push(name);
-            }
-            Err(err) => {
-                error!("unable to extract file: {}", err)
-            }
-        }
-    }
-
-    for i in files {
-        state.update(&username, &i);
-        println!("{}", id);
-    }
-
-    HttpResponse::Ok().body("Upload and extract successful")
-}
-
 async fn state(
     id: web::Query<HashMap<String, String>>,
     auth_key: BearerAuth,
@@ -287,11 +229,6 @@ async fn get(
     }
 }
 
-async fn handler(json: web::Json<Vec<String>>) -> HttpResponse {
-    let vec_str: Vec<String> = json.into_inner();
-    HttpResponse::Ok().json(vec_str)
-}
-
 async fn health() -> impl Responder {
     HttpResponse::Ok()
 }
@@ -302,7 +239,6 @@ async fn main() -> std::io::Result<()> {
 
     // Instead of reading the email and user separately,implemented a single method where userstate::build creates and builds both the UserState and EmailState
     let temp = UserState::build();
-    println!("{:?}", temp);
     let user_state = web::Data::new(temp.0);
     let email_state = web::Data::new(temp.1);
     let otp_state = web::Data::new(OTPState::new());
@@ -314,7 +250,6 @@ async fn main() -> std::io::Result<()> {
             .app_data(email_state.clone())
             .route("/state", web::get().to(state))
             .route("/update", web::post().to(update))
-            .route("/update_zip", web::post().to(update_zip))
             .route("/signin", web::post().to(signin))
             .route("/authotp", web::post().to(signin_auth))
             .route("/login", web::get().to(login))

@@ -15,7 +15,7 @@ use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fs::{DirEntry, create_dir, create_dir_all};
-use std::io::{ErrorKind, Write};
+use std::io::Write;
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
@@ -53,7 +53,7 @@ impl Data {
         }
     }
 
-    pub fn write_to_json(&self, pending: Arc<Pending>) -> Result<(), io::Error> {
+    pub fn write_to_json(&self, tx: &Sender<(String, String, String)>) -> Result<(), io::Error> {
         let time = Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
         let path = get_path_pending();
         fs::create_dir_all(&path)?;
@@ -68,7 +68,7 @@ impl Data {
         let mut file = File::create(file_path)?;
         file.write_all(json_data.as_bytes())?;
 
-        match pending.add(file_path.to_str().unwrap().into(), self.typ.clone()) {
+        match tx.try_send((file_path.to_str().unwrap().into(), time, self.typ.clone())) {
             Ok(_) => {
                 set_global_update_bool(true);
             }
@@ -406,6 +406,10 @@ impl Pending {
         })
     }
 
+    pub fn len(&self) -> usize {
+        self.data.lock().unwrap().len()
+    }
+
     pub fn add(&self, id: String, typ: String) -> Result<(), Box<dyn Error>> {
         self.data.lock().unwrap().push((id, typ));
         Ok(())
@@ -423,7 +427,18 @@ impl Pending {
         *self.data.lock().unwrap() = Vec::new();
     }
 
-    pub fn get_zip(&self) -> Result<Vec<u8>, ()> {
+    pub fn remove_len(&self, len: usize) {
+        let mut data = self.data.lock().unwrap();
+        if data.len() == len {
+            *data = vec![];
+        } else {
+            for i in 0..len {
+                data.remove(i);
+            }
+        }
+    }
+
+    pub fn get_zip(&self) -> Result<(Vec<u8>, usize), ()> {
         let data = self.data.lock().unwrap();
 
         let mut buffer = Vec::new();
@@ -443,7 +458,7 @@ impl Pending {
             tar.finish().unwrap();
         }
 
-        Ok(buffer)
+        Ok((buffer, self.len()))
     }
 
     pub fn pop(&self) {
@@ -852,7 +867,7 @@ pub fn watch_for_next_clip_write(dir: PathBuf, paste_on_click: bool) {
     settings.push(".user");
 
     if !settings.is_file() {
-        UserSettings::new().write();
+        log_error!(UserSettings::new().write());
     }
 
     let last_modified = fs::metadata(&settings)

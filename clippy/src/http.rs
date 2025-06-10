@@ -54,51 +54,18 @@ pub async fn send(
 
     if response.status().is_success() {
         Ok(response.text().await?)
-    } else if response.status() == reqwest::StatusCode::UNAUTHORIZED {
-        warn!("Token expired");
-        match get_token_serv(usercred, client).await {
-            Ok(_) => debug!("Fetched a new authentication token"),
-            Err(err) => {
-                warn!("Unable to fetch authentication token");
-                debug!("{}", err);
-            }
-        };
-
-        Err(response.text().await?.into())
     } else {
-        Err(response.text().await?.into())
-    }
-}
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            warn!("Token expired");
 
-pub async fn send_zip(
-    buffer: Vec<u8>,
-    usercred: &UserCred,
-    client: &Client,
-) -> Result<String, Box<dyn error::Error>> {
-    let part = multipart::Part::bytes(buffer);
-    let form = multipart::Form::new().part("file", part);
-
-    let response = client
-        .post(&format!("{}/update_zip", SERVER))
-        .bearer_auth(get_token())
-        .multipart(form)
-        .send()
-        .await?;
-
-    if response.status().is_success() {
-        Ok(response.text().await?)
-    } else if response.status() == reqwest::StatusCode::UNAUTHORIZED {
-        warn!("Token expired");
-        match get_token_serv(usercred, client).await {
-            Ok(_) => debug!("Fetched a new authentication token"),
-            Err(err) => {
-                warn!("Unable to fetch authentication token");
-                debug!("{}", err);
+            match get_token_serv(usercred, client).await {
+                Ok(_) => debug!("Fetched a new authentication token"),
+                Err(err) => {
+                    warn!("Unable to fetch authentication token");
+                    debug!("{}", err);
+                }
             }
-        };
-
-        Err(response.text().await?.into())
-    } else {
+        }
         Err(response.text().await?.into())
     }
 }
@@ -136,12 +103,16 @@ pub async fn state(userdata: &UserData, client: &Client, user: &UserCred) -> Res
         .await
         .map_err(|e| format!("Request error: {}", e))?;
 
-    match get_token_serv(user, client).await {
-        Ok(_) => debug!("Fetched a new authentication token"),
-        Err(err) => {
-            warn!("Unable to fetch authentication token");
-            debug!("{}", err);
-        }
+    if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+        warn!("Token expired");
+        match get_token_serv(user, client).await {
+            Ok(_) => debug!("Fetched a new authentication token"),
+            Err(err) => {
+                warn!("Unable to fetch authentication token");
+                debug!("{}", err);
+            }
+        };
+        return Err(String::from("Token expired"));
     }
 
     let body = match response.text().await {
