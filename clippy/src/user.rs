@@ -39,7 +39,8 @@ pub fn start_cloud(
                 async move {
                     while let Some((path, id, typ)) = rx.recv().await {
                         debug!("New clipboard data: path = {}, id = {}", path, id);
-                        match http::send(&path, &usercred, &client).await {
+                        match http::send_to_cloud(&path, &usercred, &client, &user_data, true).await
+                        {
                             Ok(data) => {
                                 remove(path, typ, &data, usersettings.store_image);
                                 user_data.add(data, usersettings.max_clipboard);
@@ -64,7 +65,14 @@ pub fn start_cloud(
                     loop {
                         let mut api_health = false;
                         if let Some((path, typ)) = pending.get() {
-                            match http::send(&path, &usercred, &client).await {
+                            let mut last = false;
+                            if pending.len() == 1 {
+                                last = true
+                            }
+
+                            match http::send_to_cloud(&path, &usercred, &client, &userdata, last)
+                                .await
+                            {
                                 Ok(data) => {
                                     remove(path, typ, &data, usersettings.store_image);
                                     userdata.add(data, usersettings.max_clipboard);

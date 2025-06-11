@@ -33,11 +33,33 @@ fn get_token() -> String {
     key.clone()
 }
 
+pub async fn send_to_cloud(
+    file_path: &str,
+    usercred: &UserCred,
+    client: &Client,
+    userdata: &UserData,
+    last: bool,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let result = send(&file_path, &usercred, &client).await;
+
+    if last {
+        match just_download(userdata, client).await {
+            Ok(_) => (),
+            Err(e) => {
+                error!("unable to get data");
+                debug!("{}", e);
+            }
+        };
+    }
+
+    result
+}
+
 pub async fn send(
     file_path: &str,
     usercred: &UserCred,
     client: &Client,
-) -> Result<String, Box<dyn error::Error>> {
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let mut file = File::open(file_path).await?;
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer).await?;
@@ -149,6 +171,9 @@ pub async fn download(userdata: &UserData, client: &Client) -> Result<(), Box<dy
     set_global_update_bool(true);
 
     let val = extract_zip(body)?;
+    if !val.is_sorted() {
+        panic!("val is not sorted make it sorted fn name clippy/http download()")
+    }
     if let Some(last) = val.last() {
         let data = read_data_by_id(last);
 
@@ -171,6 +196,37 @@ pub async fn download(userdata: &UserData, client: &Client) -> Result<(), Box<dy
     userdata.add_vec(val);
 
     Ok(())
+}
+
+pub async fn just_download(userdata: &UserData, client: &Client) -> Result<(), reqwest::Error> {
+    let data = userdata.get_30();
+    let response = client
+        .get(&format!("{}/get", SERVER))
+        .bearer_auth(get_token())
+        .json(&data)
+        .send()
+        .await?;
+
+    match response.status() {
+        reqwest::StatusCode::UNAUTHORIZED => {
+            get_token();
+            Err(response.error_for_status().unwrap_err())
+        }
+        reqwest::StatusCode::ALREADY_REPORTED => {
+            debug!("No need for data fetch, DB updated");
+            Ok(())
+        }
+        reqwest::StatusCode::OK => {
+            let body = response.error_for_status()?.bytes().await?;
+            let val = extract_zip(body).unwrap();
+            userdata.add_vec(val);
+            set_global_update_bool(true);
+            Ok(())
+        }
+        _ => {
+            return Err(response.error_for_status().unwrap_err());
+        }
+    }
 }
 
 pub async fn health(client: &Client) {

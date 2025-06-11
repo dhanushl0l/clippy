@@ -132,24 +132,19 @@ async fn get_key(cred: web::Json<UserCred>, state: web::Data<UserState>) -> impl
 }
 
 async fn login(cred: web::Json<LoginUserCred>, state: web::Data<UserState>) -> impl Responder {
-    if state.verify(&cred.username) {
-        let user_cred_db = match UserCred::read(&cred.username) {
-            Ok(val) => {
-                debug!("{:?}", state);
-                val
-            }
-            Err(err) => {
-                return HttpResponse::Unauthorized()
-                    .body(format!("User not found: {}", err.to_string()));
-            }
-        };
-        if user_cred_db.verify(&cred) {
-            HttpResponse::Ok().json(user_cred_db)
-        } else {
-            HttpResponse::Unauthorized().body("User credentials do not match")
-        }
+    if !state.verify(&cred.username) {
+        return HttpResponse::Unauthorized().body("Invalid credentials");
+    }
+
+    let user_cred_db = match UserCred::read(&cred.username) {
+        Ok(val) => val,
+        Err(_) => return HttpResponse::Unauthorized().body("Invalid credentials"),
+    };
+
+    if user_cred_db.verify(&cred) {
+        HttpResponse::Ok().json(user_cred_db)
     } else {
-        HttpResponse::Unauthorized().body("User credentials do not match")
+        HttpResponse::Unauthorized().body("Invalid credentials")
     }
 }
 

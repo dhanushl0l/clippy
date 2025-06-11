@@ -176,7 +176,9 @@ impl UserState {
             .ok_or_else(|| HttpResponse::Unauthorized().body("Error: authentication failed"))?;
 
         let mut temp = Vec::new();
-        if !map.is_empty() {
+        if map.is_empty() {
+            return Err(HttpResponse::AlreadyReported().body("Db is updated"));
+        } else {
             for i in tree {
                 if !id.contains(i) {
                     temp.push(format!("{}/{}/{}", DATABASE_PATH, username, i));
