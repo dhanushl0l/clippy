@@ -49,34 +49,10 @@ pub fn push_to_clipboard_wl(
     };
 
     if paste_on_click {
-        #[cfg(all(target_os = "linux", all(feature = "default")))]
-        linux_ctrl_v()
+        ctrl_v();
     }
 
     Ok(())
-}
-
-#[cfg(all(target_os = "linux", all(feature = "default")))]
-fn linux_ctrl_v() {
-    use std::thread;
-    use std::time::Duration;
-    use uinput::event::keyboard;
-    let mut device = uinput::default()
-        .unwrap()
-        .name("test")
-        .unwrap()
-        .event(uinput::event::Keyboard::All)
-        .unwrap()
-        .create()
-        .unwrap();
-
-    thread::sleep(Duration::from_secs(1));
-
-    device.press(&keyboard::Key::RightControl).unwrap();
-    device.click(&keyboard::Key::V).unwrap();
-    device.release(&keyboard::Key::RightControl).unwrap();
-
-    device.synchronize().unwrap();
 }
 
 #[cfg(target_os = "linux")]
@@ -126,38 +102,37 @@ pub fn push_to_clipboard(
     }
 
     if paste_on_click {
-        thread::sleep(Duration::from_secs(1));
-        #[cfg(not(target_os = "linux"))]
-        {
-            use enigo::{
-                Direction::{Click, Press, Release},
-                Enigo, Key, Keyboard, Settings,
-            };
-            let mut enigo = Enigo::new(&Settings::default()).unwrap();
-
-            let key = {
-                #[cfg(target_os = "macos")]
-                {
-                    Key::Meta
-                }
-
-                #[cfg(not(target_os = "macos"))]
-                {
-                    Key::Control
-                }
-            };
-
-            enigo.key(key, Press).unwrap();
-            enigo.key(Key::Unicode('v'), Click).unwrap();
-            enigo.key(key, Release).unwrap();
-        }
+        ctrl_v();
     }
 
-    #[cfg(all(target_os = "linux", all(feature = "default")))]
-    {
-        linux_ctrl_v();
-    }
     Ok(())
+}
+
+fn ctrl_v() {
+    thread::sleep(Duration::from_millis(500));
+    {
+        use enigo::{
+            Direction::{Click, Press, Release},
+            Enigo, Key, Keyboard, Settings,
+        };
+        let mut enigo = Enigo::new(&Settings::default()).unwrap();
+
+        let key = {
+            #[cfg(target_os = "macos")]
+            {
+                Key::Meta
+            }
+
+            #[cfg(not(target_os = "macos"))]
+            {
+                Key::Control
+            }
+        };
+
+        enigo.key(key, Press).unwrap();
+        enigo.key(Key::Unicode('v'), Click).unwrap();
+        enigo.key(key, Release).unwrap();
+    }
 }
 
 // fn read_data(file: String) -> Data {
