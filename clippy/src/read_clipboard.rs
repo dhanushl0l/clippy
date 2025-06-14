@@ -1,57 +1,42 @@
+#[cfg(target_os = "linux")]
+use std::io;
+
 use crate::{Data, get_global_bool, set_global_bool};
 use base64::{Engine, engine::general_purpose};
 use clipboard_rs::common::RustImage;
 use clipboard_rs::{Clipboard, ClipboardContext, ClipboardHandler};
 use log::{debug, error, info};
 use tokio::sync::mpsc::Sender;
+use wayland_clipboard_listener::ClipBoardListenContext;
 
 #[cfg(target_os = "linux")]
-pub fn read_wayland_clipboard(
-    tx: &Sender<(String, String, String)>,
-) -> Result<(), wl_clipboard_rs::paste::Error> {
-    use std::collections::HashSet;
-    use std::io::Read;
-    use wl_clipboard_rs::paste::{ClipboardType, MimeType, Seat, get_contents, get_mime_types};
+pub fn read_wayland_clipboard(tx: &Sender<(String, String, String)>) -> Result<(), io::Error> {
+    use wayland_clipboard_listener::{WlClipboardPasteStream, WlListenType};
 
-    if get_global_bool() {
-        let typ: HashSet<String> = get_mime_types(ClipboardType::Regular, Seat::Unspecified)?;
+    let preferred_formats: Vec<String> = [
+        "image/png",
+        "image/jpeg",
+        "image/jxl",
+        "image/tiff",
+        "image/bmp",
+        "text/plain;charset=utf-8",
+        "text/plain",
+        "STRING",
+        "UTF8_STRING",
+        "text/uri-list",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
 
-        for i in &typ {
-            if i == "text/clippy" {
-                return Ok(());
-            }
+    let mut stream = WlClipboardPasteStream::init(WlListenType::ListenOnCopy).unwrap();
+    stream.set_priority(preferred_formats);
+    for i in stream.paste_stream().flatten().flatten() {
+        if get_global_bool() {
+            parse_wayland_clipboard(i.context, tx);
+        } else {
+            set_global_bool(false);
         }
-
-        let preferred_formats = [
-            "image/png",
-            "image/jpeg",
-            "image/jxl",
-            "image/tiff",
-            "image/bmp",
-            "text/plain;charset=utf-8",
-            "text/plain",
-            "STRING",
-            "UTF8_STRING",
-            "text/uri-list",
-        ];
-
-        let mut main_type = String::new();
-        // Check for preferred formats in order of priority
-        for &format in &preferred_formats {
-            if let Some(fallback) = typ.iter().find(|m| *m == format) {
-                main_type = fallback.to_owned();
-                break;
-            }
-        }
-
-        let mime_type = MimeType::Specific(&main_type);
-        let (mut dat, typ) = get_contents(ClipboardType::Regular, Seat::Unspecified, mime_type)?;
-        let mut vec = Vec::new();
-        let _ = dat.read_to_end(&mut vec);
-
-        parse_wayland_clipboard(typ, vec, tx);
-    } else {
-        set_global_bool(false);
     }
     Ok(())
 }
@@ -117,7 +102,11 @@ pub fn write_to_json(
     }
 }
 
-pub fn parse_wayland_clipboard(typ: String, data: Vec<u8>, tx: &Sender<(String, String, String)>) {
+pub fn parse_wayland_clipboard(
+    data: ClipBoardListenContext,
+    tx: &Sender<(String, String, String)>,
+) {
+    let (typ, data) = (data.mime_type, data.context);
     info!("Clipboard data stored: {}", typ);
 
     let json_data;

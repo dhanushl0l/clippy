@@ -23,31 +23,23 @@ fn copy_to_clipboard_wl(data: Data) -> Result<(), String> {
 #[cfg(target_os = "linux")]
 pub fn push_to_clipboard_wl(
     data: Data,
-    forground: bool,
+    _forground: bool,
     paste_on_click: bool,
 ) -> Result<(), String> {
-    use base64::{Engine, engine::general_purpose};
-    use wl_clipboard_rs::copy::{ClipboardType, MimeType, Options, Source};
+    use wayland_clipboard_listener::WlClipboardCopyStream;
 
-    let mut opts = Options::new();
-    opts.clipboard(ClipboardType::Regular);
-    opts.foreground(forground);
+    thread::spawn(move || {
+        let context = if data.typ.starts_with("text") {
+            data.data.into_bytes()
+        } else {
+            string_to_vecu8(data.data)
+        };
 
-    if data.typ.starts_with("image/") {
-        let data = general_purpose::STANDARD.decode(data.data).unwrap();
-        opts.copy(
-            Source::Bytes(data.into_boxed_slice()),
-            MimeType::Specific("image/png".to_string()),
-        )
-        .map_err(|err| format!("{}", err))?
-    } else {
-        opts.copy(
-            Source::Bytes(data.data.into_bytes().into_boxed_slice()),
-            MimeType::Text,
-        )
-        .map_err(|err| format!("{}", err))?
-    };
-
+        let mut stream = WlClipboardCopyStream::init().unwrap();
+        stream
+            .copy_to_clipboard(context, vec![&data.typ], false)
+            .unwrap();
+    });
     if paste_on_click {
         ctrl_v();
     }
