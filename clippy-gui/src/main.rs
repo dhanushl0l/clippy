@@ -10,7 +10,7 @@ use clippy::{
     get_global_update_bool, get_path, get_path_pending, is_valid_email, is_valid_username,
     log_eprintln, set_global_update_bool,
 };
-use clippy_gui::{Thumbnail, Waiting, str_formate};
+use clippy_gui::{Thumbnail, Waiting};
 use custom_egui_widget::toggle;
 use eframe::{
     App, NativeOptions,
@@ -40,8 +40,8 @@ mod edit_window;
 mod http;
 
 struct Clipboard {
-    data: HashMap<u32, Vec<(Thumbnail, Data, PathBuf, bool)>>,
-    page: u32,
+    data: HashMap<u32, Vec<(PathBuf, bool)>>,
+    page: (u32, Option<Vec<(Thumbnail, PathBuf, Data, bool)>>),
     changed: bool,
     settings: UserSettings,
     show_settings: bool,
@@ -62,10 +62,11 @@ struct Clipboard {
 impl Clipboard {
     fn new() -> Self {
         let data = Self::get_data();
+        let page = Self::get_current_page(&data, 1);
 
         Self {
             data,
-            page: 1,
+            page: (1, page),
             changed: false,
             settings: match UserSettings::build_user() {
                 Ok(val) => val,
@@ -92,9 +93,39 @@ impl Clipboard {
 
     fn refresh(&mut self) {
         self.data = Self::get_data();
+        let page = Self::get_current_page(&self.data, self.page.0);
+        self.page.1 = page;
     }
 
-    fn get_data() -> HashMap<u32, Vec<(Thumbnail, Data, PathBuf, bool)>> {
+    fn get_current_page(
+        page: &HashMap<u32, Vec<(PathBuf, bool)>>,
+        page_num: u32,
+    ) -> Option<Vec<(Thumbnail, PathBuf, Data, bool)>> {
+        println!("{:?}", page);
+        let page = page.get(&page_num)?;
+        let mut result = Vec::new();
+        for path in page {
+            if let Ok(content) = fs::read_to_string(&path.0) {
+                match serde_json::from_str::<Data>(&content) {
+                    Ok(file) => {
+                        if file.typ.starts_with("image/") {
+                            if let Some(val) = file.get_image_thumbnail(&path.0) {
+                                result.push((Thumbnail::Image(val), path.0.clone(), file, path.1));
+                            }
+                        } else {
+                            if let Some(val) = file.get_data() {
+                                result.push((Thumbnail::Text(val), path.0.clone(), file, path.1));
+                            }
+                        }
+                    }
+                    Err(err) => eprintln!("{:?}", err),
+                }
+            }
+        }
+        Some(result)
+    }
+
+    fn get_data() -> HashMap<u32, Vec<(PathBuf, bool)>> {
         let mut data = HashMap::new();
         let mut temp = Vec::new();
 
@@ -104,40 +135,12 @@ impl Clipboard {
         if let Ok(entries) = fs::read_dir(get_path_pending()) {
             let mut entries: Vec<_> = entries.flatten().collect();
             entries.sort_unstable_by_key(|entry| Reverse(entry.path()));
-            let max = if entries.len() != 0 {
-                entries.len() - 1
-            } else {
-                0
-            };
 
-            for (i, entry) in entries.iter().enumerate() {
+            for entry in entries.iter() {
                 let path = entry.path();
                 if path.is_file() {
-                    if let Ok(content) = fs::read_to_string(&path) {
-                        count += 1;
-                        match serde_json::from_str::<Data>(&content) {
-                            Ok(file) => {
-                                if file.typ.starts_with("image/") {
-                                    if let Some(val) = file.get_image_thumbnail(&entry) {
-                                        temp.push((Thumbnail::Image(val), file, path, true));
-                                    }
-                                } else {
-                                    if let Some(val) = file.get_data() {
-                                        temp.push((
-                                            Thumbnail::Text(str_formate(&val)),
-                                            file,
-                                            path,
-                                            true,
-                                        ));
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                eprintln!("Failed to parse {}: {}", path.display(), e)
-                            }
-                        }
-                    }
-
+                    temp.push((path, true)); // or false in the second loop
+                    count += 1;
                     if count >= 20 {
                         data.insert(page, temp);
                         temp = vec![];
@@ -146,8 +149,6 @@ impl Clipboard {
                             break;
                         }
                         count = 0;
-                    } else if i == max {
-                        break;
                     }
                 }
             }
@@ -156,40 +157,11 @@ impl Clipboard {
         if let Ok(entries) = fs::read_dir(get_path()) {
             let mut entries: Vec<_> = entries.flatten().collect();
             entries.sort_unstable_by_key(|entry| Reverse(entry.path()));
-            let max = if entries.len() != 0 {
-                entries.len() - 1
-            } else {
-                0
-            };
-
-            for (i, entry) in entries.iter().enumerate() {
+            for entry in entries.iter() {
                 let path = entry.path();
                 if path.is_file() {
-                    if let Ok(content) = fs::read_to_string(&path) {
-                        count += 1;
-                        match serde_json::from_str::<Data>(&content) {
-                            Ok(file) => {
-                                if file.typ.starts_with("image/") {
-                                    if let Some(val) = file.get_image_thumbnail(&entry) {
-                                        temp.push((Thumbnail::Image(val), file, path, false));
-                                    }
-                                } else {
-                                    if let Some(val) = file.get_data() {
-                                        temp.push((
-                                            Thumbnail::Text(str_formate(&val)),
-                                            file,
-                                            path,
-                                            false,
-                                        ));
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                eprintln!("Failed to parse {}: {}", path.display(), e)
-                            }
-                        }
-                    }
-
+                    temp.push((path, false)); // or false in the second loop
+                    count += 1;
                     if count >= 20 {
                         data.insert(page, temp);
                         temp = vec![];
@@ -198,10 +170,6 @@ impl Clipboard {
                             break;
                         }
                         count = 0;
-                    } else if i == max {
-                        data.insert(page, temp);
-                        temp = vec![];
-                        break;
                     }
                 }
             }
@@ -239,11 +207,14 @@ impl App for Clipboard {
                                     ));
 
                                 if ui.add(button_next).on_hover_text("Previous page").clicked() {
-                                    self.page -= 1;
-                                    self.scrool_to_top = true;
+                                    if self.page.0 > 1 {
+                                        self.page.0 -= 1;
+                                        self.refresh();
+                                        self.scrool_to_top = true;
+                                    }
                                 }
 
-                                ui.label(self.page.to_string());
+                                ui.label(self.page.0.to_string());
 
                                 let button_prev = Button::new(RichText::new("➡").size(15.0))
                                     .min_size(Vec2::new(20.0, 20.0))
@@ -254,8 +225,11 @@ impl App for Clipboard {
                                     ));
 
                                 if ui.add(button_prev).on_hover_text("Next page").clicked() {
-                                    self.page += 1;
-                                    self.scrool_to_top = true;
+                                    if self.data.contains_key(&(self.page.0 + 1)) {
+                                        self.page.0 += 1;
+                                        self.refresh();
+                                        self.scrool_to_top = true;
+                                    }
                                 }
                             });
                     });
@@ -798,7 +772,7 @@ impl App for Clipboard {
                                     ui.label("Total no of clipboard");
                                     ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
                                         if ui
-                                            .add(egui::Slider::new(&mut val, 10..=1000).text(""))
+                                            .add(egui::Slider::new(&mut val, 30..=1000).text(""))
                                             .changed()
                                         {
                                             self.settings.max_clipboard = Some(val);
@@ -978,13 +952,10 @@ impl App for Clipboard {
                         self.scrool_to_top = false;
                     }
 
-                    let data = self.data.get(&self.page).or_else(|| {
-                        self.page = 1;
-                        self.data.get(&self.page)
-                    });
+                    let data = &self.page.1;
 
                     if let Some(data) = data {
-                        for (thumbnail, i, path, sync) in data {
+                        for (thumbnail, path, i, sync) in data {
                             if let Some(dat) = i.get_data() {
                                 ui.add_enabled_ui(true, |ui| {
                                     item_card(

@@ -40,17 +40,15 @@ pub async fn send_to_cloud(
     userdata: &UserData,
     last: bool,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    let result = send(&file_path, &usercred, &client).await;
-
     if last {
         match just_download(userdata, client).await {
             Ok(_) => (),
             Err(e) => {
-                error!("unable to get data");
                 debug!("{}", e);
             }
         };
     }
+    let result = send(&file_path, &usercred, &client).await;
 
     result
 }

@@ -98,8 +98,8 @@ impl UserState {
         let mut map = self.data.lock().unwrap();
         if let Some(set) = map.get_mut(username) {
             let len = set.len();
-            if len > 30 {
-                let remove_count = len - 30;
+            if len > 29 {
+                let remove_count = len - 29;
                 let to_remove: Vec<_> = set.iter().take(remove_count).cloned().collect();
                 for val in to_remove {
                     debug!("removing {:?}", val);

@@ -14,7 +14,7 @@ use image::ImageReader;
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::error::Error;
-use std::fs::{DirEntry, create_dir, create_dir_all};
+use std::fs::create_dir;
 use std::io::Write;
 use std::path::Path;
 use std::str::FromStr;
@@ -90,7 +90,7 @@ impl Data {
         }
     }
 
-    pub fn get_image_thumbnail(&self, id: &DirEntry) -> Option<(Vec<u8>, (u32, u32))> {
+    pub fn get_image_thumbnail(&self, id: &PathBuf) -> Option<(Vec<u8>, (u32, u32))> {
         let image = ImageReader::open(get_image_path(id)).ok()?.decode().ok()?;
 
         let rgba = image.to_rgba8();
@@ -294,7 +294,7 @@ impl LoginUserCred {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct UserSettings {
     sync: Option<UserCred>,
     pub store_image: bool,
@@ -307,7 +307,7 @@ pub struct UserSettings {
     pub theme: SystemTheam,
 }
 
-#[derive(Serialize, Deserialize, PartialEq)]
+#[derive(Serialize, Deserialize, PartialEq, Clone)]
 pub enum SystemTheam {
     System,
     Dark,
@@ -351,30 +351,46 @@ impl UserSettings {
         if !user_config.is_dir() {
             create_dir(&user_config)?;
         }
-
+        user_config.push(".settings");
+        let file = fs::read(&user_config)?;
+        let mut settings: UserSettings = serde_json::from_slice(&file).unwrap();
+        user_config.pop();
         user_config.push(".user");
-
-        let file = fs::read(user_config)?;
-        let file = decrypt_file(API_KEY.unwrap().as_bytes(), &file).unwrap();
-        Ok(serde_json::from_str(&String::from_utf8(file).unwrap()).unwrap())
+        let file = if let Ok(data) = fs::read(&user_config) {
+            Some(data)
+        } else {
+            None
+        };
+        if let Some(file) = file {
+            let file = decrypt_file(API_KEY.unwrap().as_bytes(), &file).unwrap();
+            let data: UserCred = serde_json::from_str(&String::from_utf8(file).unwrap()).unwrap();
+            settings.sync = Some(data);
+        }
+        Ok(settings)
     }
 
     pub fn write(&self) -> Result<(), Box<dyn Error>> {
         let mut user_config = get_path_local();
         user_config.push("user");
-
-        if !user_config.is_dir() {
-            create_dir_all(&user_config)?;
+        user_config.push(".user");
+        let user = self.sync.clone();
+        if let Some(data) = user {
+            let data = serde_json::to_vec_pretty(&data)?;
+            let en_data = encrept_file(API_KEY.unwrap().as_bytes(), &data)
+                .map_err(|e| Box::<dyn std::error::Error>::from(e.to_string()))?;
+            let mut file = File::create(&user_config)?;
+            file.write_all(&en_data)?;
         }
 
-        user_config.push(".user");
+        user_config.pop();
+        user_config.push(".settings");
 
-        let data = serde_json::to_vec_pretty(self)?;
-        let en_data = encrept_file(API_KEY.unwrap().as_bytes(), &data)
-            .map_err(|e| Box::<dyn std::error::Error>::from(e.to_string()))?;
-
+        let mut data = self.clone();
+        data.sync = None;
+        let data = serde_json::to_vec_pretty(&data)?;
         let mut file = File::create(&user_config)?;
-        file.write_all(&en_data)?;
+        file.write_all(&data)?;
+
         Ok(())
     }
 }
@@ -789,9 +805,9 @@ pub fn store_image(id: &[String], target_dir: PathBuf) -> Result<(), Box<dyn Err
     Ok(())
 }
 
-pub fn get_image_path(id: &DirEntry) -> PathBuf {
+pub fn get_image_path(id: &PathBuf) -> PathBuf {
     let mut path = get_path_image();
-    let file_nema = format!("{}.png", id.file_name().to_str().unwrap());
+    let file_nema = format!("{}.png", id.file_name().unwrap().to_str().unwrap());
     path.push(file_nema);
     path
 }
@@ -864,7 +880,7 @@ pub fn watch_for_next_clip_write(dir: PathBuf, paste_on_click: bool) {
 
     let mut settings = dir;
     settings.push("user");
-    settings.push(".user");
+    settings.push(".settings");
 
     if !settings.is_file() {
         log_error!(UserSettings::new().write());

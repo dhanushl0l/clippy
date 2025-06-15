@@ -215,6 +215,9 @@ async fn get(
         Ok(val) => val,
         Err(err) => return err,
     };
+    if files.is_empty() {
+        return HttpResponse::AlreadyReported().body("User clipboard state is already uptodate");
+    }
     match to_zip(files) {
         Ok(data) => data,
         Err(err) => {
