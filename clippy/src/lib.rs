@@ -68,10 +68,10 @@ impl Data {
         let mut file = File::create(file_path)?;
         file.write_all(json_data.as_bytes())?;
 
+        set_global_update_bool(true);
+
         match tx.try_send((file_path.to_str().unwrap().into(), time, self.typ.clone())) {
-            Ok(_) => {
-                set_global_update_bool(true);
-            }
+            Ok(_) => (),
             Err(err) => warn!(
                 "Failed to send file '{}' to channel: {}",
                 file_path.display(),

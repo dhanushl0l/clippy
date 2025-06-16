@@ -5,9 +5,8 @@ use crate::{Data, get_global_bool, set_global_bool};
 use base64::{Engine, engine::general_purpose};
 use clipboard_rs::common::RustImage;
 use clipboard_rs::{Clipboard, ClipboardContext, ClipboardHandler};
-use log::{debug, error, info};
+use log::{debug, error};
 use tokio::sync::mpsc::Sender;
-use wayland_clipboard_listener::ClipBoardListenContext;
 
 #[cfg(target_os = "linux")]
 pub fn read_wayland_clipboard(tx: &Sender<(String, String, String)>) -> Result<(), io::Error> {
@@ -102,12 +101,13 @@ pub fn write_to_json(
     }
 }
 
+#[cfg(target_os = "linux")]
 pub fn parse_wayland_clipboard(
     data: ClipBoardListenContext,
     tx: &Sender<(String, String, String)>,
 ) {
     let (typ, data) = (data.mime_type, data.context);
-    info!("Clipboard data stored: {}", typ);
+    log::info!("Clipboard data stored: {}", typ);
 
     let json_data;
     if !typ.starts_with("image/") {

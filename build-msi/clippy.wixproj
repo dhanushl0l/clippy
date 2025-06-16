@@ -1,2 +1,9 @@
 ﻿<Project Sdk="WixToolset.Sdk/6.0.0">
+
+  <PropertyGroup>
+    <ClippyGroup Condition="'$(Platform)' == 'x64'">clippy</ClippyGroup>
+    <ClippyGroup Condition="'$(Platform)' != 'x64'">clippy32</ClippyGroup>
+    <DefineConstants>$(DefineConstants);ClippyGroup=$(ClippyGroup)</DefineConstants>
+  </PropertyGroup>
+
 </Project>

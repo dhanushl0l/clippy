@@ -938,6 +938,7 @@ impl App for Clipboard {
         });
 
         if self.changed || get_global_update_bool() {
+            println!("chandge");
             self.refresh();
             self.changed = false;
             set_global_update_bool(false);

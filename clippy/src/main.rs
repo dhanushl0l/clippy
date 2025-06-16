@@ -132,7 +132,7 @@ fn main() {
     let mut paste_on_click = false;
     match UserSettings::build_user() {
         Ok(usersettings) => {
-            paste_on_click = usersettings.paste_on_click;
+            paste_on_click = usersettings.paste_on_click && usersettings.click_on_quit;
             if !usersettings.disable_sync {
                 if let Some(sync) = usersettings.get_sync() {
                     start_cloud(rx, sync.clone(), usersettings);
