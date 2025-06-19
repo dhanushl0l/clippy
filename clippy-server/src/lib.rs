@@ -1,5 +1,8 @@
+mod ws_connection;
+
 use actix_multipart::Multipart;
-use actix_web::HttpResponse;
+use actix_web::{HttpResponse, rt};
+use actix_ws::{MessageStream, Session};
 use base64::{Engine, engine::general_purpose};
 use chrono::{Duration, Utc};
 use clippy::{LoginUserCred, NewUserOtp};
@@ -11,13 +14,18 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeSet, HashMap, hash_map::Entry},
     fs::{self},
     io::{Error, Write},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
 use tar::Builder;
+use tokio::sync::{
+    self,
+    broadcast::{self, Receiver, Sender},
+};
+use ws_connection::ws_connection;
 
 pub const CRED_PATH: &str = "credentials/users";
 pub const DATABASE_PATH: &str = "data-base/users";
@@ -168,24 +176,20 @@ impl UserState {
         }
     }
 
-    pub fn get(&self, username: &str, id: &[String]) -> Result<Vec<String>, HttpResponse> {
+    pub fn get(&self, username: &str, id: &[String]) -> Option<Vec<String>> {
         let map = self.data.lock().unwrap();
 
-        let tree = map
-            .get(username)
-            .ok_or_else(|| HttpResponse::Unauthorized().body("Error: authentication failed"))?;
+        let tree = map.get(username)?;
 
         let mut temp = Vec::new();
-        if map.is_empty() {
-            return Err(HttpResponse::AlreadyReported().body("Db is updated"));
-        } else {
-            for i in tree {
-                if !id.contains(i) {
-                    temp.push(format!("{}/{}/{}", DATABASE_PATH, username, i));
-                }
+
+        for i in tree {
+            if !id.contains(i) {
+                temp.push(format!("{}/{}/{}", DATABASE_PATH, username, i));
             }
         }
-        Ok(temp)
+
+        Some(temp)
     }
 }
 
@@ -357,7 +361,7 @@ pub fn get_filename(id: i64, mut path: PathBuf) -> String {
     file_name
 }
 
-pub fn to_zip(files: Vec<String>) -> Result<HttpResponse, Error> {
+pub fn to_zip(files: Vec<String>) -> Result<Vec<u8>, Error> {
     let mut buffer = Vec::new();
     {
         let mut tar = Builder::new(&mut buffer);
@@ -369,7 +373,7 @@ pub fn to_zip(files: Vec<String>) -> Result<HttpResponse, Error> {
 
         tar.finish()?;
     }
-    Ok(HttpResponse::Ok().body(buffer))
+    Ok(buffer)
 }
 
 const SECRET_KEY: Option<&str> = option_env!("KEY");
@@ -446,6 +450,78 @@ impl OTPState {
     }
 }
 
+pub struct RoomManager {
+    room: sync::Mutex<HashMap<String, Room>>,
+}
+pub struct Room {
+    clients: sync::Mutex<Vec<rt::task::JoinHandle<()>>>,
+    tx: Sender<MessageState>,
+}
+
+impl RoomManager {
+    pub fn new() -> Self {
+        Self {
+            room: sync::Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub async fn add_task(
+        &self,
+        user: String,
+        session: Session,
+        msg_stream: MessageStream,
+        state: actix_web::web::Data<UserState>,
+    ) {
+        let mut rooms = self.room.lock().await;
+        match rooms.entry(user.clone()) {
+            Entry::Occupied(mut entry) => {
+                let a = entry.get_mut();
+                let tx = a.tx.clone();
+                a.add(session, msg_stream, tx, state, user).await;
+            }
+            Entry::Vacant(entry) => {
+                let mut room = Room::new();
+                let tx = room.tx.clone();
+                room.add(session, msg_stream, tx, state, user).await;
+                entry.insert(room);
+            }
+        }
+    }
+}
+
+impl Room {
+    fn new() -> Self {
+        let (tx, _) = tokio::sync::broadcast::channel(100);
+        Self {
+            clients: sync::Mutex::new(Vec::new()),
+            tx,
+        }
+    }
+
+    async fn add(
+        &mut self,
+        session: Session,
+        msg_stream: MessageStream,
+        tx: Sender<MessageState>,
+        state: actix_web::web::Data<UserState>,
+        user: String,
+    ) {
+        let val = self.clients.get_mut();
+        // val.retain(|x| {
+        //     println!("removing{:?}", x);
+        //     !x.is_finished()
+        // });
+        val.push(rt::spawn(ws_connection(
+            session, msg_stream, tx, state, user,
+        )));
+        println!("total threads {}", val.len());
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum MessageState {
+    NewPath(PathBuf),
+}
 pub fn get_auth(username: &str, exp: i64) -> Result<String, jsonwebtoken::errors::Error> {
     let now = Utc::now();
     let time = now.to_rfc3339();

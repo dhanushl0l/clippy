@@ -1,16 +1,28 @@
 use crate::{
-    Pending, UserCred, UserData, UserSettings,
-    http::{self, download, health, state},
+    Pending, Resopnse, UserCred, UserData, UserSettings,
+    http::{self, download, get_token, get_token_serv, health, state},
     remove, set_global_update_bool,
 };
+use awc::{http::header, ws};
+use bytes::Bytes;
+use futures_util::{SinkExt, StreamExt};
 use log::{debug, error, info, warn};
 use reqwest::{self, Client};
 use std::{
+    collections::HashMap,
+    io,
     sync::Arc,
     thread,
     time::{self},
 };
-use tokio::{runtime::Runtime, select, sync::mpsc::Receiver, time::sleep};
+use tokio::{
+    fs::File,
+    io::AsyncReadExt,
+    runtime::{Builder, Runtime},
+    select,
+    sync::mpsc::{self, Receiver},
+    time::sleep,
+};
 
 pub fn start_cloud(
     mut rx: Receiver<(String, String, String)>,
@@ -18,147 +30,153 @@ pub fn start_cloud(
     usersettings: UserSettings,
 ) {
     thread::spawn(move || {
-        debug!("Start thread 3");
-        let user_data = Arc::new(UserData::build());
-        let client = Arc::new(Client::new());
-        let usercred = Arc::new(usercred);
-        let pending = Arc::new(Pending::build().unwrap_or_else(|e| {
+        let mut surcess = HashMap::new();
+        let mut pending = Pending::build().unwrap_or_else(|e| {
             error!("{}", e);
             Pending::new()
-        }));
+        });
+        actix_rt::System::new().block_on(async {
+            loop {
+                let user_data = UserData::build();
 
-        let async_runtime = Runtime::new().unwrap();
+                log::info!("starting echo WebSocket client");
+                let client = Arc::new(Client::new());
+                get_token_serv(&usercred, &client).await;
+                let token = get_token();
+                let result = awc::Client::new()
+                    .ws("ws://0.0.0.0:7777/connect")
+                    .set_header(header::AUTHORIZATION, format!("Bearer {}", token))
+                    .max_frame_size(20 * 1024 * 1024) // 20 MB
+                    .connect()
+                    .await;
 
-        async_runtime.block_on(async {
-            let task1 = tokio::spawn({
-                let pending = pending.clone();
-                let client = client.clone();
-                let usercred = usercred.clone();
-                let user_data = user_data.clone();
-
-                async move {
-                    while let Some((path, id, typ)) = rx.recv().await {
-                        debug!("New clipboard data: path = {}, id = {}", path, id);
-                        match http::send_to_cloud(&path, &usercred, &client, &user_data, true).await
-                        {
-                            Ok(data) => {
-                                remove(path, typ, &data, usersettings.store_image);
-                                user_data.add(data, usersettings.max_clipboard);
-                                info!("Surcess sending new data");
-                                set_global_update_bool(true);
-                            }
-                            Err(err) => {
-                                pending.add(path, typ).unwrap();
-                                warn!("Failed to send recent clipboard: {}", err);
-                            }
-                        };
+                let (res, mut ws) = match result {
+                    Ok((resp, conn)) => (resp, conn),
+                    Err(e) => {
+                        eprintln!("Client connect error: {e:?}");
+                        return;
                     }
-                }
-            });
+                };
 
-            let task2 = tokio::spawn({
-                let pending = pending.clone();
-                let client = client.clone();
-                let usercred = usercred.clone();
-                let userdata = user_data.clone();
-                async move {
-                    loop {
-                        let mut api_health = false;
-                        if let Some((path, typ)) = pending.get() {
-                            let mut last = false;
-                            if pending.len() == 1 {
-                                last = true
+                debug!("response: {res:?}");
+
+                'outer: loop {
+                    select! {
+                        Some(msg) = ws.next() => {
+                            match msg {
+                                Ok(ws::Frame::Text(txt)) => {
+                                    let state: Resopnse = serde_json::from_slice(&txt).unwrap();
+                                    match state {
+                                        Resopnse::Success {old,new} => {
+                                            let (path, typ) = surcess.remove(&old).unwrap();
+                                            remove(path, typ, &new, usersettings.store_image);
+                                            user_data.add(new, usersettings.max_clipboard);
+                                            info!("Surcess sending new data");
+                                            set_global_update_bool(true);
+                                        },
+                                        _ => {}
+                                    }
+
+                                }
+                                Ok(ws::Frame::Ping(p)) => {
+                                    ws.send(ws::Message::Pong(p)).await.unwrap();
+                                }
+                                Err(e) => {
+                                    error!("WebSocket error: {}", e);
+                                    break;
+                                }
+                                _ => {}
                             }
+                        }
 
-                            match http::send_to_cloud(&path, &usercred, &client, &userdata, last)
-                                .await
-                            {
-                                Ok(data) => {
-                                    remove(path, typ, &data, usersettings.store_image);
-                                    userdata.add(data, usersettings.max_clipboard);
-                                    info!("Surcess sending pending data");
-                                    set_global_update_bool(true);
+                        Some((path, id, typ)) = rx.recv() => {
+                            match File::open(&path).await {
+                                Ok(mut file) => {
+                                    let mut file_data = Vec::new();
+                                    match file.read_to_end(&mut file_data).await {
+                                        Ok(_) => {
+                                            let mut buffer = Vec::new();
+                                            buffer.extend_from_slice(format!("{}\n", id).as_bytes());
+                                            buffer.extend_from_slice(&file_data);
+    
+                                            match ws
+                                                .send(ws::Message::Binary(Bytes::from(buffer)))
+                                                .await
+                                            {
+                                                Ok(_) => {
+                                                    surcess.insert(id, (path, typ));
+                                                }
+                                                Err(e) => {
+                                                    debug!("unable to send data to server\n{}", e);
+                                                    if let Err(_) =
+                                                        ws.send(ws::Message::Ping(Bytes::new())).await
+                                                    {
+                                                        error!("Unable to connect to channel");
+                                                        break 'outer;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            error!("Failed to read file data: {}", e);                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("Failed to open file {:?}: {}", path, e);
                                     pending.pop();
                                 }
-                                Err(err) => {
-                                    if err.downcast_ref::<std::io::Error>().map_or(false, |ioe| {
-                                        ioe.kind() == std::io::ErrorKind::NotFound
-                                    }) {
-                                        error!("The clipboard data not found");
-                                        pending.pop();
-                                    }
-                                    warn!("Failed to send pending clipboard: {}", err);
-                                    api_health = true;
-                                }
-                            };
-                        } else {
-                            sleep(time::Duration::from_secs(5)).await;
-                        };
-                        if api_health {
-                            health(&client).await;
+                            }
                         }
+                        // else => break, // optional: breaks if both streams end
                     }
-                }
-            });
-
-            let task3 = tokio::spawn({
-                let user_data = user_data.clone();
-                let client = client.clone();
-                let usercred = usercred.clone();
-                async move {
-                    let mut log = true;
-
-                    loop {
-                        let mut api_health = false;
-
-                        match state(&user_data, &client, &usercred).await {
-                            Ok(val) => {
-                                if val {
-                                    sleep(time::Duration::from_secs(5)).await;
-                                    if log {
-                                        info!("Database uptodate");
-                                        log = false;
-                                    }
-                                } else {
-                                    match download(&user_data, &client).await {
-                                        Ok(_) => debug!("Downloade updated files"),
-                                        Err(err) => {
-                                            warn!("Downloade updated files error: {}", err)
+                    while let Some((path, id, typ)) = pending.get() {
+                            match File::open(&path).await {
+                                Ok(mut file) => {
+                                    let mut file_data = Vec::new();
+                                    match file.read_to_end(&mut file_data).await {
+                                        Ok(_) => {
+                                            let mut buffer = Vec::new();
+                                            buffer.extend_from_slice(format!("{}\n", id).as_bytes());
+                                            buffer.extend_from_slice(&file_data);
+    
+                                            match ws
+                                                .send(ws::Message::Binary(Bytes::from(buffer)))
+                                                .await
+                                            {
+                                                Ok(_) => {
+                                                    surcess.insert(id, (path, typ));
+                                                    pending.pop();
+                                                }
+                                                Err(e) => {
+                                                    debug!("unable to send data to server\n{}", e);
+                                                    if let Err(_) =
+                                                        ws.send(ws::Message::Ping(Bytes::new())).await
+                                                    {
+                                                        error!("Unable to connect to channel");
+                                                        break 'outer;
+                                                    }
+                                                }
+                                            }
                                         }
-                                    };
-                                    log = true;
-                                    sleep(time::Duration::from_secs(5)).await;
+                                        Err(e) => {
+                                            error!("Failed to read file data: {}", e);
+                                            pending.pop();
+                                        }
+                                    }
                                 }
-                            }
-                            Err(err) => {
-                                log = false;
-                                api_health = true;
-                                warn!("unable to reach the server: {}", err);
-                            }
-                        }
-                        if api_health {
-                            health(&client).await;
+                                Err(e) => {
+                                    error!("Failed to open file {:?}: {}", path, e);
+                                    pending.pop();
+                                }
                         }
                     }
                 }
-            });
-
-            let result = select! {
-                res = task1 => ("task1", res),
-                res = task2 => ("task2", res),
-                res = task3 => ("task3", res),
-            };
-
-            match result {
-                (name, Ok(val)) => {
-                    error!("{} failed: {:?}", name, val);
-                    std::process::exit(0);
-                }
-                (name, Err(e)) => {
-                    error!("{} failed: {}", name, e);
-                    std::process::exit(1);
-                }
+                pending = Pending::build().unwrap_or_else(|e| {
+                    error!("{}", e);
+                    Pending::new()
+                });
+                health(&client, &mut rx, &mut pending).await;
             }
-        });
+        })
     });
 }

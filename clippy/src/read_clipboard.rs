@@ -103,7 +103,7 @@ pub fn write_to_json(
 
 #[cfg(target_os = "linux")]
 pub fn parse_wayland_clipboard(
-    data: ClipBoardListenContext,
+    data: wayland_clipboard_listener::ClipBoardListenContext,
     tx: &Sender<(String, String, String)>,
 ) {
     let (typ, data) = (data.mime_type, data.context);

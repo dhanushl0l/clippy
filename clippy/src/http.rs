@@ -1,5 +1,6 @@
 use crate::{
-    UserCred, UserData, UserSettings, extract_zip, read_data_by_id, set_global_update_bool,
+    Pending, UserCred, UserData, UserSettings, extract_zip, read_data_by_id,
+    set_global_update_bool,
     write_clipboard::{self},
 };
 use core::time;
@@ -13,7 +14,7 @@ use std::{
     thread,
     time::Duration,
 };
-use tokio::{fs::File, io::AsyncReadExt};
+use tokio::{fs::File, io::AsyncReadExt, sync::mpsc::Receiver};
 
 #[cfg(debug_assertions)]
 pub const SERVER: &str = "http://127.0.0.1:7777"; // debug build
@@ -28,7 +29,7 @@ pub fn update_token(new_data: String) {
     *key = new_data;
 }
 
-fn get_token() -> String {
+pub fn get_token() -> String {
     let key = TOKEN.lock().unwrap();
     key.clone()
 }
@@ -227,7 +228,11 @@ pub async fn just_download(userdata: &UserData, client: &Client) -> Result<(), r
     }
 }
 
-pub async fn health(client: &Client) {
+pub async fn health(
+    client: &Client,
+    rx: &mut Receiver<(String, String, String)>,
+    pending: &mut Pending,
+) {
     let mut log = true;
     loop {
         let response = client
@@ -240,6 +245,9 @@ pub async fn health(client: &Client) {
                 if response.status().is_success() {
                     break;
                 } else {
+                    while let Ok((path, id, typ)) = rx.try_recv() {
+                        pending.add(path, id, typ);
+                    }
                     if log {
                         warn!("Server is out");
                         log = false
@@ -247,6 +255,9 @@ pub async fn health(client: &Client) {
                 }
             }
             Err(err) => {
+                while let Ok((path, id, typ)) = rx.try_recv() {
+                    pending.add(path, id, typ);
+                }
                 debug!("{}", err);
                 thread::sleep(time::Duration::from_secs(5));
             }

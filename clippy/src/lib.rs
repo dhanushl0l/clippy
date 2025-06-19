@@ -265,7 +265,7 @@ impl UserData {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct UserCred {
     pub username: String,
     pub email: String,
@@ -373,6 +373,7 @@ impl UserSettings {
         let mut user_config = get_path_local();
         user_config.push("user");
         user_config.push(".user");
+        println!("{:?}", self.sync);
         let user = self.sync.clone();
         if let Some(data) = user {
             let data = serde_json::to_vec_pretty(&data)?;
@@ -397,14 +398,12 @@ impl UserSettings {
 
 #[derive(Debug, Clone)]
 pub struct Pending {
-    data: Arc<Mutex<Vec<(String, String)>>>,
+    data: Vec<(String, String, String)>,
 }
 
 impl Pending {
     pub fn new() -> Self {
-        Self {
-            data: Arc::new(Mutex::new(Vec::new())),
-        }
+        Self { data: Vec::new() }
     }
 
     pub fn build() -> Result<Self, io::Error> {
@@ -414,55 +413,53 @@ impl Pending {
 
             let file_content = fs::read_to_string(&path)?;
             let data: Data = serde_json::from_str(&file_content)?;
+            let file_name = path
+                .file_name()
+                .and_then(|f| f.to_str())
+                .unwrap_or_default()
+                .to_string();
 
-            temp.push((path.to_string_lossy().into_owned(), data.typ));
+            temp.push((path.to_string_lossy().into_owned(), file_name, data.typ));
         }
-        Ok(Self {
-            data: Arc::new(Mutex::new(temp)),
-        })
+        Ok(Self { data: temp })
     }
 
     pub fn len(&self) -> usize {
-        self.data.lock().unwrap().len()
+        self.data.len()
     }
 
-    pub fn add(&self, id: String, typ: String) -> Result<(), Box<dyn Error>> {
-        self.data.lock().unwrap().push((id, typ));
-        Ok(())
+    pub fn add(&mut self, path: String, id: String, typ: String) {
+        self.data.push((path, id, typ));
     }
 
     pub fn is_empty(&self) -> bool {
-        self.data.lock().unwrap().is_empty()
+        self.data.is_empty()
     }
 
-    pub fn get(&self) -> Option<(String, String)> {
-        self.data.lock().unwrap().first().cloned()
+    pub fn get(&self) -> Option<(String, String, String)> {
+        self.data.first().cloned()
     }
 
-    pub fn empty(&self) {
-        *self.data.lock().unwrap() = Vec::new();
+    pub fn empty(&mut self) {
+        self.data.clear();
     }
 
-    pub fn remove_len(&self, len: usize) {
-        let mut data = self.data.lock().unwrap();
-        if data.len() == len {
-            *data = vec![];
+    pub fn remove_len(&mut self, len: usize) {
+        if self.data.len() == len {
+            self.data.clear();
         } else {
             for i in 0..len {
-                data.remove(i);
+                self.data.remove(i);
             }
         }
     }
 
     pub fn get_zip(&self) -> Result<(Vec<u8>, usize), ()> {
-        let data = self.data.lock().unwrap();
-
         let mut buffer = Vec::new();
         {
             let mut tar = Builder::new(&mut buffer);
 
-            for (file, _value) in data.iter() {
-                // println!("{}", file);
+            for (file, _, _value) in self.data.iter() {
                 let path = Path::new(file);
                 if !path.is_file() {
                     warn!("Unable to locate {}", path.display());
@@ -477,8 +474,9 @@ impl Pending {
         Ok((buffer, self.len()))
     }
 
-    pub fn pop(&self) {
-        self.data.lock().unwrap().remove(0);
+    pub fn pop(&mut self) {
+        println!("popiing");
+        self.data.remove(0);
     }
 }
 
@@ -518,6 +516,16 @@ impl NewUserOtp {
             key,
         }
     }
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub enum Resopnse {
+    Updated,
+    Outdated,
+    CheckVersion(String),
+    CheckVersionArr(Vec<String>),
+    Success { old: String, new: String },
+    Error(String),
 }
 
 pub fn get_path_local() -> PathBuf {

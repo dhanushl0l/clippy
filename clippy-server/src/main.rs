@@ -1,14 +1,14 @@
 use actix_multipart::Multipart;
 use actix_web::{
-    App, HttpResponse, HttpServer, Responder,
-    web::{self},
+    App, HttpRequest, HttpResponse, HttpServer, Responder,
+    web::{self, PayloadConfig},
 };
 use actix_web_httpauth::extractors::bearer::BearerAuth;
 use chrono::Utc;
 use clippy::{LoginUserCred, NewUser, NewUserOtp};
 use clippy_server::{
-    CRED_PATH, EmailState, OTPState, UserCred, UserState, auth, gen_otp, get_auth, get_param,
-    hash_key, to_zip, write_file,
+    CRED_PATH, EmailState, OTPState, RoomManager, UserCred, UserState, auth, gen_otp, get_auth,
+    get_param, hash_key, to_zip, write_file,
 };
 use email::send_otp;
 use env_logger::{Builder, Env};
@@ -17,6 +17,7 @@ use std::{
     collections::HashMap,
     fs::{self},
     path::Path,
+    sync::Arc,
 };
 mod email;
 
@@ -175,60 +176,86 @@ async fn update(
     HttpResponse::Ok().body(file_name)
 }
 
-async fn state(
-    id: web::Query<HashMap<String, String>>,
-    auth_key: BearerAuth,
-    state: web::Data<UserState>,
-) -> impl Responder {
-    let key = auth_key.token();
-    let id = param!(&id, "id");
+// async fn state(
+//     id: web::Query<HashMap<String, String>>,
+//     auth_key: BearerAuth,
+//     state: web::Data<UserState>,
+// ) -> impl Responder {
+//     let key = auth_key.token();
+//     let id = param!(&id, "id");
 
-    let user = match auth(key) {
-        Ok(val) => val,
-        Err(err) => {
-            error!("{}", err.to_string());
-            return HttpResponse::Unauthorized().body(err.to_string());
-        }
-    };
+//     let user = match auth(key) {
+//         Ok(val) => val,
+//         Err(err) => {
+//             error!("{}", err.to_string());
+//             return HttpResponse::Unauthorized().body(err.to_string());
+//         }
+//     };
 
-    if state.is_updated(&user, &id) {
-        HttpResponse::Ok().body("UPDATED")
-    } else {
-        HttpResponse::Ok().body("OUTDATED")
-    }
-}
+//     if state.is_updated(&user, &id) {
+//         HttpResponse::Ok().body("UPDATED")
+//     } else {
+//         HttpResponse::Ok().body("OUTDATED")
+//     }
+// }
 
-async fn get(
-    auth_key: BearerAuth,
-    payload: web::Json<Vec<String>>,
-    state: web::Data<UserState>,
-) -> impl Responder {
-    let key = auth_key.token();
-    let current = payload.0;
+// async fn get(
+//     auth_key: BearerAuth,
+//     payload: web::Json<Vec<String>>,
+//     state: web::Data<UserState>,
+// ) -> impl Responder {
+//     let key = auth_key.token();
+//     let current = payload.0;
 
-    let username = match auth(key) {
-        Ok(val) => val,
-        Err(err) => return HttpResponse::Unauthorized().body(err.to_string()),
-    };
+//     let username = match auth(key) {
+//         Ok(val) => val,
+//         Err(err) => return HttpResponse::Unauthorized().body(err.to_string()),
+//     };
 
-    let files = match state.get(&username, &current) {
-        Ok(val) => val,
-        Err(err) => return err,
-    };
-    if files.is_empty() {
-        return HttpResponse::AlreadyReported().body("User clipboard state is already uptodate");
-    }
-    match to_zip(files) {
-        Ok(data) => data,
-        Err(err) => {
-            error!("{:?}", err);
-            HttpResponse::Unauthorized().body(err.to_string())
-        }
-    }
-}
+//     let files = match state.get(&username, &current) {
+//         Ok(val) => val,
+//         Err(err) => return err,
+//     };
+//     if files.is_empty() {
+//         return HttpResponse::AlreadyReported().body("User clipboard state is already uptodate");
+//     }
+//     match to_zip(files) {
+//         Ok(data) => data,
+//         Err(err) => {
+//             error!("{:?}", err);
+//             HttpResponse::Unauthorized().body(err.to_string())
+//         }
+//     }
+// }
 
 async fn health() -> impl Responder {
     HttpResponse::Ok()
+}
+
+async fn handle_connection(
+    auth_key: BearerAuth,
+    req: HttpRequest,
+    stream: web::Payload,
+    room: web::Data<RoomManager>,
+    state: web::Data<UserState>,
+) -> Result<HttpResponse, actix_web::Error> {
+    let key = auth_key.token();
+    let username = match auth(key) {
+        Ok(val) => val,
+        Err(err) => return Err(actix_web::error::ErrorUnauthorized("Unable to authorize.")),
+    };
+
+    // let user = web::Query::<HashMap<String, String>>::from_query(req.query_string())?
+    //     .get("user")
+    //     .cloned()
+    //     .unwrap_or_else(|| "default".into());
+
+    let (res, session, msg_stream) = actix_ws::handle(&req, stream)?;
+    let msg_stream = msg_stream.max_frame_size(1024 * 1024 * 40);
+
+    room.add_task(username, session, msg_stream, state.clone())
+        .await;
+    Ok(res)
 }
 
 #[actix_web::main]
@@ -240,18 +267,19 @@ async fn main() -> std::io::Result<()> {
     let user_state = web::Data::new(temp.0);
     let email_state = web::Data::new(temp.1);
     let otp_state = web::Data::new(OTPState::new());
+    let data = web::Data::new(RoomManager::new());
 
     HttpServer::new(move || {
         App::new()
             .app_data(user_state.clone())
             .app_data(otp_state.clone())
             .app_data(email_state.clone())
-            .route("/state", web::get().to(state))
+            .app_data(data.clone())
+            .route("/connect", web::get().to(handle_connection))
             .route("/update", web::post().to(update))
             .route("/signin", web::post().to(signin))
             .route("/authotp", web::post().to(signin_auth))
             .route("/login", web::get().to(login))
-            .route("/get", web::get().to(get))
             .route("/getkey", web::get().to(get_key))
             .route("/usercheck", web::get().to(check_user))
             .route("/health", web::get().to(health))
