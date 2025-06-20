@@ -1,28 +1,17 @@
+#[cfg(target_os = "linux")]
+use crate::write_clipboard;
 use crate::{
-    Pending, Resopnse, UserCred, UserData, UserSettings,
-    http::{self, download, get_token, get_token_serv, health, state},
-    remove, set_global_update_bool,
+    Pending, Resopnse, UserCred, UserData, UserSettings, extract_zip,
+    http::{get_token, get_token_serv, health},
+    read_data_by_id, remove, set_global_update_bool,
 };
 use awc::{http::header, ws};
 use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, error, info, warn};
 use reqwest::{self, Client};
-use std::{
-    collections::HashMap,
-    io,
-    sync::Arc,
-    thread,
-    time::{self},
-};
-use tokio::{
-    fs::File,
-    io::AsyncReadExt,
-    runtime::{Builder, Runtime},
-    select,
-    sync::mpsc::{self, Receiver},
-    time::sleep,
-};
+use std::{collections::HashMap, sync::Arc, thread};
+use tokio::{fs::File, io::AsyncReadExt, select, sync::mpsc::Receiver};
 
 pub fn start_cloud(
     mut rx: Receiver<(String, String, String)>,
@@ -35,13 +24,15 @@ pub fn start_cloud(
             error!("{}", e);
             Pending::new()
         });
+        let user_data = UserData::build();
+
         actix_rt::System::new().block_on(async {
             loop {
-                let user_data = UserData::build();
-
                 log::info!("starting echo WebSocket client");
                 let client = Arc::new(Client::new());
-                get_token_serv(&usercred, &client).await;
+                if let Err(e) = get_token_serv(&usercred, &client).await{
+                    panic!("Implement auth expaired logic {}",e)
+                };
                 let token = get_token();
                 let result = awc::Client::new()
                     .ws("ws://0.0.0.0:7777/connect")
@@ -59,6 +50,12 @@ pub fn start_cloud(
                 };
 
                 debug!("response: {res:?}");
+                let state = user_data.get_30();
+                let data = Resopnse::CheckVersionArr(state);
+                if let Err(e) = ws.send(ws::Message::Text(serde_json::to_string(&data).unwrap().into())).await{
+                    error!("unable to send initial state {}",e);
+                };
+
 
                 'outer: loop {
                     select! {
@@ -74,9 +71,25 @@ pub fn start_cloud(
                                             info!("Surcess sending new data");
                                             set_global_update_bool(true);
                                         },
+                                        Resopnse::Outdated => {
+                                            let state = user_data.get_30();
+                                            let data = Resopnse::CheckVersionArr(state);
+                                            if let Err(e) = ws.send(ws::Message::Text(serde_json::to_string(&data).unwrap().into())).await{
+                                                error!("unable to send initial state {}",e);
+                                            };
+                                        }
                                         _ => {}
                                     }
 
+                                }
+                                Ok(ws::Frame::Binary(bin)) => {
+                                    let val = extract_zip(bin).unwrap();
+                                    if let Some(val) = val.last() {
+                                        if *val > user_data.last_one() {
+                                            past_last(val);
+                                        }
+                                    }
+                                    user_data.add_vec(val);
                                 }
                                 Ok(ws::Frame::Ping(p)) => {
                                     ws.send(ws::Message::Pong(p)).await.unwrap();
@@ -98,10 +111,7 @@ pub fn start_cloud(
                                             let mut buffer = Vec::new();
                                             buffer.extend_from_slice(format!("{}\n", id).as_bytes());
                                             buffer.extend_from_slice(&file_data);
-    
-                                            match ws
-                                                .send(ws::Message::Binary(Bytes::from(buffer)))
-                                                .await
+                                            match ws.send(ws::Message::Binary(Bytes::from(buffer))).await
                                             {
                                                 Ok(_) => {
                                                     surcess.insert(id, (path, typ));
@@ -118,12 +128,12 @@ pub fn start_cloud(
                                             }
                                         }
                                         Err(e) => {
-                                            error!("Failed to read file data: {}", e);                                        }
+                                            error!("Failed to read file data: {}", e);                                        
+                                        }
                                     }
                                 }
                                 Err(e) => {
                                     error!("Failed to open file {:?}: {}", path, e);
-                                    pending.pop();
                                 }
                             }
                         }
@@ -138,11 +148,7 @@ pub fn start_cloud(
                                             let mut buffer = Vec::new();
                                             buffer.extend_from_slice(format!("{}\n", id).as_bytes());
                                             buffer.extend_from_slice(&file_data);
-    
-                                            match ws
-                                                .send(ws::Message::Binary(Bytes::from(buffer)))
-                                                .await
-                                            {
+                                            match ws.send(ws::Message::Binary(Bytes::from(buffer))).await {
                                                 Ok(_) => {
                                                     surcess.insert(id, (path, typ));
                                                     pending.pop();
@@ -179,4 +185,20 @@ pub fn start_cloud(
             }
         })
     });
+}
+
+fn past_last(last: &str) {
+    let data = read_data_by_id(last);
+    match data {
+        Ok(val) => {
+            #[cfg(not(target_os = "linux"))]
+            write_clipboard::copy_to_clipboard(val).unwrap();
+
+            #[cfg(target_os = "linux")]
+            write_clipboard::copy_to_linux(val).unwrap();
+        }
+        Err(err) => {
+            warn!("{}", err)
+        }
+    }
 }

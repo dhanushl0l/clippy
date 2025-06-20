@@ -1,9 +1,4 @@
-use std::{
-    fs::{self, File},
-    io::Write,
-    path::PathBuf,
-    time::Duration,
-};
+use std::{fs::File, io::Write, path::PathBuf, time::Duration};
 
 use actix_ws::{Message, MessageStream, Session};
 use chrono::Utc;
@@ -16,7 +11,7 @@ use tokio::{
     time::{self, Instant},
 };
 
-use crate::{DATABASE_PATH, MessageState, UserState, get_filename, to_zip};
+use crate::{DATABASE_PATH, ServResopnse, UserState, get_filename, to_zip};
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -24,7 +19,7 @@ const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
 pub async fn ws_connection(
     mut session: Session,
     mut msg_stream: MessageStream,
-    tx: Sender<MessageState>,
+    tx: Sender<ServResopnse>,
     state: actix_web::web::Data<UserState>,
     user: String,
 ) {
@@ -125,8 +120,9 @@ pub async fn ws_connection(
                                 let name = String::from_utf8_lossy(header);
                                 let mut file = File::create(&path).unwrap();
                                 file.write_all(file_data).unwrap();
+                                state.update(&user,&file_name);
                                 debug!("Saved file: {name}");
-                                tx.send(MessageState::NewPath(path));
+                                tx.send(ServResopnse::New);
                                 let file:Resopnse = Resopnse::  Success { old: name.to_string(), new: file_name.clone() };
                                 let file_str = serde_json::to_string(&file).unwrap();
                                 session.text(file_str).await.unwrap();
@@ -158,12 +154,14 @@ pub async fn ws_connection(
             result = rx.recv() => {
                 match result {
                     Ok(val) => {
-                        // match val {
-                        //     MessageState::NewPath(path) => {
-                        //         let data = fs::read(path).unwrap();
-                        //         if let Err(e) = session.binary(data).await {}
-                        //     }
-                        // }
+                        match val {
+                            ServResopnse::New => {
+                                let status: Resopnse = Resopnse::Outdated;
+                                if let Err(e) =  session.text(serde_json::to_string(&status).unwrap()).await{
+                                    debug!("Unable to send response {}",e);
+                                };
+                            }
+                        }
                     }
                     Err(e) => {
                         eprintln!("Broadcast receive error: {e}");

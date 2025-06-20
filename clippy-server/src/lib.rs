@@ -21,10 +21,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 use tar::Builder;
-use tokio::sync::{
-    self,
-    broadcast::{self, Receiver, Sender},
-};
+use tokio::sync::{self, broadcast::Sender};
 use ws_connection::ws_connection;
 
 pub const CRED_PATH: &str = "credentials/users";
@@ -455,7 +452,7 @@ pub struct RoomManager {
 }
 pub struct Room {
     clients: sync::Mutex<Vec<rt::task::JoinHandle<()>>>,
-    tx: Sender<MessageState>,
+    tx: Sender<ServResopnse>,
 }
 
 impl RoomManager {
@@ -502,7 +499,7 @@ impl Room {
         &mut self,
         session: Session,
         msg_stream: MessageStream,
-        tx: Sender<MessageState>,
+        tx: Sender<ServResopnse>,
         state: actix_web::web::Data<UserState>,
         user: String,
     ) {
@@ -519,8 +516,8 @@ impl Room {
 }
 
 #[derive(Debug, Clone)]
-pub enum MessageState {
-    NewPath(PathBuf),
+pub enum ServResopnse {
+    New,
 }
 pub fn get_auth(username: &str, exp: i64) -> Result<String, jsonwebtoken::errors::Error> {
     let now = Utc::now();

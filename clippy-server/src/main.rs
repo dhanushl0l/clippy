@@ -1,34 +1,23 @@
 use actix_multipart::Multipart;
 use actix_web::{
     App, HttpRequest, HttpResponse, HttpServer, Responder,
-    web::{self, PayloadConfig},
+    web::{self},
 };
 use actix_web_httpauth::extractors::bearer::BearerAuth;
 use chrono::Utc;
 use clippy::{LoginUserCred, NewUser, NewUserOtp};
 use clippy_server::{
     CRED_PATH, EmailState, OTPState, RoomManager, UserCred, UserState, auth, gen_otp, get_auth,
-    get_param, hash_key, to_zip, write_file,
+    hash_key, write_file,
 };
 use email::send_otp;
 use env_logger::{Builder, Env};
 use log::{debug, error};
 use std::{
-    collections::HashMap,
     fs::{self},
     path::Path,
-    sync::Arc,
 };
 mod email;
-
-macro_rules! param {
-    ($map:expr, $key:expr) => {
-        match get_param($map, $key) {
-            Ok(val) => val,
-            Err(res) => return res,
-        }
-    };
-}
 
 async fn signin(
     data: web::Json<NewUser>,
@@ -176,58 +165,6 @@ async fn update(
     HttpResponse::Ok().body(file_name)
 }
 
-// async fn state(
-//     id: web::Query<HashMap<String, String>>,
-//     auth_key: BearerAuth,
-//     state: web::Data<UserState>,
-// ) -> impl Responder {
-//     let key = auth_key.token();
-//     let id = param!(&id, "id");
-
-//     let user = match auth(key) {
-//         Ok(val) => val,
-//         Err(err) => {
-//             error!("{}", err.to_string());
-//             return HttpResponse::Unauthorized().body(err.to_string());
-//         }
-//     };
-
-//     if state.is_updated(&user, &id) {
-//         HttpResponse::Ok().body("UPDATED")
-//     } else {
-//         HttpResponse::Ok().body("OUTDATED")
-//     }
-// }
-
-// async fn get(
-//     auth_key: BearerAuth,
-//     payload: web::Json<Vec<String>>,
-//     state: web::Data<UserState>,
-// ) -> impl Responder {
-//     let key = auth_key.token();
-//     let current = payload.0;
-
-//     let username = match auth(key) {
-//         Ok(val) => val,
-//         Err(err) => return HttpResponse::Unauthorized().body(err.to_string()),
-//     };
-
-//     let files = match state.get(&username, &current) {
-//         Ok(val) => val,
-//         Err(err) => return err,
-//     };
-//     if files.is_empty() {
-//         return HttpResponse::AlreadyReported().body("User clipboard state is already uptodate");
-//     }
-//     match to_zip(files) {
-//         Ok(data) => data,
-//         Err(err) => {
-//             error!("{:?}", err);
-//             HttpResponse::Unauthorized().body(err.to_string())
-//         }
-//     }
-// }
-
 async fn health() -> impl Responder {
     HttpResponse::Ok()
 }
@@ -242,13 +179,13 @@ async fn handle_connection(
     let key = auth_key.token();
     let username = match auth(key) {
         Ok(val) => val,
-        Err(err) => return Err(actix_web::error::ErrorUnauthorized("Unable to authorize.")),
+        Err(err) => {
+            return {
+                error!("unable to process jwt: {}", err);
+                Err(actix_web::error::ErrorUnauthorized("Unable to authorize."))
+            };
+        }
     };
-
-    // let user = web::Query::<HashMap<String, String>>::from_query(req.query_string())?
-    //     .get("user")
-    //     .cloned()
-    //     .unwrap_or_else(|| "default".into());
 
     let (res, session, msg_stream) = actix_ws::handle(&req, stream)?;
     let msg_stream = msg_stream.max_frame_size(1024 * 1024 * 40);
