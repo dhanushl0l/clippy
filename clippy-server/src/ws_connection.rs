@@ -1,6 +1,7 @@
 use std::{fs::File, io::Write, path::PathBuf, time::Duration};
 
-use actix_ws::{Message, MessageStream, Session};
+use actix_web::web::{Bytes, BytesMut};
+use actix_ws::{Item, Message, MessageStream, Session};
 use chrono::Utc;
 use clippy::Resopnse;
 use futures_util::StreamExt;
@@ -26,6 +27,7 @@ pub async fn ws_connection(
     let mut last_pong = Instant::now();
     let mut heartbeat = time::interval(HEARTBEAT_INTERVAL);
     let mut rx = tx.subscribe();
+    let mut buffer: Option<BytesMut> = None;
 
     loop {
         select! {
@@ -74,7 +76,9 @@ pub async fn ws_connection(
                                                 } else {
                                                     match to_zip(data) {
                                                         Ok(data) => {
-                                                            if let Err(e) = session.binary(data).await {}
+                                                            if let Err(e) = session.binary(data).await {
+                                                                error!("Error sending bin to client{}",e);
+                                                            }
                                                         },
                                                         Err(err) => {
                                                             error!("{:?}", err);
@@ -103,36 +107,34 @@ pub async fn ws_connection(
                             break;
                         }
                         Message::Binary(bin) => {
-                            let mut path: PathBuf = PathBuf::new().join(format!("{}/{}/", DATABASE_PATH, user));
-                            match std::fs::create_dir_all(&path){
-                                Ok(_) => {},
-                                Err(e) => error!("unable to create user dir {}",e)
-                            };
-
-                            let file_name = get_filename(Utc::now().timestamp(),path.clone());
-                            path.push(&file_name);
-                            let bin = bin.to_vec();
-
-                            if let Some(pos) = bin.iter().position(|&b| b == b'\n') {
-                                let header = &bin[..pos];
-                                let file_data = &bin[pos + 1..];
-
-                                let name = String::from_utf8_lossy(header);
-                                let mut file = File::create(&path).unwrap();
-                                file.write_all(file_data).unwrap();
-                                state.update(&user,&file_name);
-                                debug!("Saved file: {name}");
-                                tx.send(ServResopnse::New);
-                                let file:Resopnse = Resopnse::  Success { old: name.to_string(), new: file_name.clone() };
-                                let file_str = serde_json::to_string(&file).unwrap();
-                                session.text(file_str).await.unwrap();
-                            } else {
-                                error!("No header found");
+                            handle_bin(&user,&state,&tx,&mut session,bin).await;
+                        },
+                        Message::Continuation(item) => {
+                            match item {
+                            Item::FirstBinary(data) => {
+                                buffer = Some(BytesMut::from(&data[..]));
                             }
-                        },
-                        Message::Continuation(vsl) => {
-                            println!("{:?}",vsl)
-                        },
+
+                            Item::Continue(data) => {
+                                if let Some(buf) = &mut buffer {
+                                    buf.extend_from_slice(&data);
+                                } else {
+                                    eprintln!("Received CONTINUE without FIRST. Dropping.");
+                                    buffer = None;
+                                }
+                            }
+
+                            Item::Last(data) => {
+                                if let Some(mut buf) = buffer.take() {
+                                    buf.extend_from_slice(&data);
+                                    handle_bin(&user,&state,&tx,&mut session,buf.freeze()).await;
+                                } else {
+                                    eprintln!("Received LAST without FIRST. Dropping.");
+                                }
+                            }
+                            _ => {}
+                        }
+                        }
                         Message::Nop => {
                             println!("nop")
                         },
@@ -172,4 +174,44 @@ pub async fn ws_connection(
         }
     }
     println!("WebSocket session closed");
+}
+
+async fn handle_bin(
+    user: &str,
+    state: &actix_web::web::Data<UserState>,
+    tx: &Sender<ServResopnse>,
+    session: &mut Session,
+    bin: Bytes,
+) {
+    let mut path: PathBuf = PathBuf::new().join(format!("{}/{}/", DATABASE_PATH, user));
+    match std::fs::create_dir_all(&path) {
+        Ok(_) => {}
+        Err(e) => error!("unable to create user dir {}", e),
+    };
+
+    let file_name = get_filename(Utc::now().timestamp(), path.clone());
+    path.push(&file_name);
+    let bin = bin.to_vec();
+
+    if let Some(pos) = bin.iter().position(|&b| b == b'\n') {
+        let header = &bin[..pos];
+        let file_data = &bin[pos + 1..];
+
+        let name = String::from_utf8_lossy(header);
+        let mut file = File::create(&path).unwrap();
+        file.write_all(file_data).unwrap();
+        state.update(&user, &file_name);
+        debug!("Saved file: {name}");
+        if let Err(e) = tx.send(ServResopnse::New) {
+            error!("error sending state: {}", e);
+        };
+        let file: Resopnse = Resopnse::Success {
+            old: name.to_string(),
+            new: file_name.clone(),
+        };
+        let file_str = serde_json::to_string(&file).unwrap();
+        session.text(file_str).await.unwrap();
+    } else {
+        error!("No header found");
+    }
 }

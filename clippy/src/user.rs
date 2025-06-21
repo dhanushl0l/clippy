@@ -1,17 +1,18 @@
 #[cfg(target_os = "linux")]
 use crate::write_clipboard;
 use crate::{
-    Pending, Resopnse, UserCred, UserData, UserSettings, extract_zip,
+    MessageType, Pending, Resopnse, UserCred, UserData, UserSettings, extract_zip,
     http::{SERVER_WS, get_token, get_token_serv, health},
     read_data_by_id, remove, set_global_update_bool,
 };
 use actix_codec::Framed;
 use actix_codec::{AsyncRead, AsyncWrite};
+use actix_http::ws::Item;
 use awc::{
     http::header,
     ws::{self, Codec},
 };
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, error, info, warn};
 use reqwest::{self, Client};
@@ -43,14 +44,17 @@ pub fn start_cloud(
                     continue;
                 };
                 let token = get_token();
-                let result = awc::Client::new()
+                let config_ws = awc::Client::builder()
+                    .max_http_version(awc::http::Version::HTTP_11)
+                    .finish();
+                let result = config_ws
                     .ws(SERVER_WS)
                     .set_header(header::AUTHORIZATION, format!("Bearer {}", token))
                     .max_frame_size(20 * 1024 * 1024) // 20 MB
                     .connect()
                     .await;
 
-                let (res, mut ws) = match result {
+                let (_res, mut ws) = match result {
                     Ok((resp, conn)) => (resp, conn),
                     Err(e) => {
                         eprintln!("Client connect error: {e:?}");
@@ -124,42 +128,56 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
     pending: &mut Pending,
     rx: &mut Receiver<(String, String, String)>,
 ) -> Result<(), Box<dyn Error>> {
+    let mut buffer: Option<BytesMut> = None;
+    let mut current_type: Option<MessageType> = None;
     loop {
         select! {
             Some(msg) = ws.next() => {
                 match msg? {
                     ws::Frame::Text(txt) => {
-                        let state: Resopnse = serde_json::from_slice(&txt).unwrap();
-                        match state {
-                            Resopnse::Success {old,new} => {
-                                let (path, typ) = surcess.remove(&old).unwrap();
-                                remove(path, typ, &new, usersettings.store_image);
-                                user_data.add(new, usersettings.max_clipboard);
-                                info!("Surcess sending new data");
-                                set_global_update_bool(true);
-                            },
-                            Resopnse::Outdated => {
-                                let state = user_data.get_30();
-                                let data = Resopnse::CheckVersionArr(state);
-                                if let Err(e) = ws.send(ws::Message::Text(serde_json::to_string(&data).unwrap().into())).await{
-                                    error!("unable to send initial state {}",e);
-                                };
-                            }
-                            _ => {}
-                        }
-
+                        process_text(txt,surcess,usersettings,user_data,ws).await;
                     }
                     ws::Frame::Binary(bin) => {
-                        let val = extract_zip(bin).unwrap();
-                        if let Some(val) = val.last() {
-                            if *val > user_data.last_one() {
-                                past_last(val);
-                            }
-                        }
-                        user_data.add_vec(val);
+                        process_bin(bin, user_data).await;
                     }
                     ws::Frame::Ping(p) => {
                         ws.send(ws::Message::Pong(p)).await.unwrap();
+                    }
+                    ws::Frame::Continuation(bin) => {
+                        match bin {
+                            Item::FirstText(data) => {
+                                buffer = Some(BytesMut::from(&data[..]));
+                                current_type = Some(MessageType::Text);
+                            }
+
+                            Item::FirstBinary(data) => {
+                                buffer = Some(BytesMut::from(&data[..]));
+                                current_type = Some(MessageType::Binary);
+                            }
+
+                            Item::Continue(data) => {
+                                if let Some(buf) = &mut buffer {
+                                    buf.extend_from_slice(&data);
+                                } else {
+                                    eprintln!("Received CONTINUE without FIRST. Dropping.");
+                                    buffer = None;
+                                    current_type = None;
+                                }
+                            }
+
+                            Item::Last(data) => {
+                                if let (Some(mut buf), Some(msg_type)) = (buffer.take(), current_type.take()) {
+                                    buf.extend_from_slice(&data);
+                                    let complete = buf.freeze();
+                                    match msg_type {
+                                        MessageType::Text => process_text(complete,surcess,usersettings,user_data,ws).await,
+                                        MessageType::Binary => process_bin(complete, user_data).await,
+                                    }
+                                } else {
+                                    eprintln!("Received LAST without FIRST. Dropping.");
+                                }
+                            }
+                        }
                     }
                     _ => {}
                 }
@@ -196,6 +214,7 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
                 }
             }
         }
+
         if let Err(e) = send_pending(ws, surcess, pending).await {
             error!("Unable to connect to server");
             debug!("{}", e);
@@ -234,4 +253,46 @@ async fn send_pending<T: AsyncRead + AsyncWrite + Unpin + 'static>(
         }
     }
     Ok(())
+}
+
+async fn process_text<T: AsyncRead + AsyncWrite + Unpin + 'static>(
+    bin: Bytes,
+    surcess: &mut HashMap<String, (String, String)>,
+    usersettings: &UserSettings,
+    user_data: &UserData,
+    ws: &mut Framed<T, Codec>,
+) {
+    let state: Resopnse = serde_json::from_slice(&bin).unwrap();
+    match state {
+        Resopnse::Success { old, new } => {
+            let (path, typ) = surcess.remove(&old).unwrap();
+            remove(path, typ, &new, usersettings.store_image);
+            user_data.add(new, usersettings.max_clipboard);
+            info!("Surcess sending new data");
+            set_global_update_bool(true);
+        }
+        Resopnse::Outdated => {
+            let state = user_data.get_30();
+            let data = Resopnse::CheckVersionArr(state);
+            if let Err(e) = ws
+                .send(ws::Message::Text(
+                    serde_json::to_string(&data).unwrap().into(),
+                ))
+                .await
+            {
+                error!("unable to send initial state {}", e);
+            };
+        }
+        _ => {}
+    }
+}
+
+async fn process_bin(bin: Bytes, user_data: &UserData) {
+    let val = extract_zip(bin).unwrap();
+    if let Some(val) = val.last() {
+        if *val > user_data.last_one() {
+            past_last(val);
+        }
+    }
+    user_data.add_vec(val);
 }

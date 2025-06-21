@@ -20,10 +20,11 @@ tokio = { workspace = true }
 fs4 = "0.13.1"
 rand = "0.9.1"
 aes-gcm = "0.10.3"
-awc = "3.7.0"
+awc = { version = "3", features = ["rustls"] }
 futures-util = "0.3.31"
 actix-rt = "2.10.0"
 actix-codec = "0.5.2"
+actix-http = "3.11.0"
 
 
 [target.'cfg(target_os = "linux")'.dependencies]

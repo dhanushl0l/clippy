@@ -535,6 +535,11 @@ pub enum Resopnse {
     Error(String),
 }
 
+pub enum MessageType {
+    Text,
+    Binary,
+}
+
 pub fn get_path_local() -> PathBuf {
     #[cfg(target_os = "linux")]
     {
