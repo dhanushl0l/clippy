@@ -40,6 +40,7 @@ pub fn push_to_clipboard_wl(
             .copy_to_clipboard(context, vec![&data.typ], false)
             .unwrap();
     });
+    #[cfg(feature = "default")]
     if paste_on_click {
         ctrl_v();
     }
@@ -92,14 +93,14 @@ pub fn push_to_clipboard(
     } else {
         ctx.set_text(data.data)?;
     }
-
+    #[cfg(feature = "default")]
     if paste_on_click {
         ctrl_v();
     }
-
     Ok(())
 }
 
+#[cfg(feature = "default")]
 fn ctrl_v() {
     thread::sleep(Duration::from_millis(500));
     {

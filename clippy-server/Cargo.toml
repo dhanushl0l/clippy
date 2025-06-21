@@ -14,7 +14,7 @@ uuid = { version = "1.16.0", features = ["serde", "v4"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
-clippy = { path = "../clippy" }
+clippy = { path = "../clippy", default-features = false, features = ["server"] }
 chrono = "0.4.40"
 jsonwebtoken = "9.3.1"
 lettre = { version = "0.11", default-features = false, features = [

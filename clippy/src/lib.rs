@@ -381,6 +381,13 @@ impl UserSettings {
                 .map_err(|e| Box::<dyn std::error::Error>::from(e.to_string()))?;
             let mut file = File::create(&user_config)?;
             file.write_all(&en_data)?;
+        } else {
+            if user_config.is_file() {
+                if let Err(e) = fs::remove_file(&user_config) {
+                    error!("Unable to store settings");
+                    debug!("{}", e);
+                };
+            }
         }
 
         user_config.pop();

@@ -2,7 +2,7 @@
 use crate::write_clipboard;
 use crate::{
     Pending, Resopnse, UserCred, UserData, UserSettings, extract_zip,
-    http::{get_token, get_token_serv, health},
+    http::{SERVER_WS, get_token, get_token_serv, health},
     read_data_by_id, remove, set_global_update_bool,
 };
 use actix_codec::Framed;
@@ -44,7 +44,7 @@ pub fn start_cloud(
                 };
                 let token = get_token();
                 let result = awc::Client::new()
-                    .ws("ws://0.0.0.0:7777/connect")
+                    .ws(SERVER_WS)
                     .set_header(header::AUTHORIZATION, format!("Bearer {}", token))
                     .max_frame_size(20 * 1024 * 1024) // 20 MB
                     .connect()
