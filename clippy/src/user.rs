@@ -1,7 +1,7 @@
 #[cfg(target_os = "linux")]
 use crate::write_clipboard;
 use crate::{
-    MessageType, Pending, Resopnse, UserCred, UserData, UserSettings, extract_zip,
+    DataState, MessageType, Pending, Resopnse, UserCred, UserData, UserSettings, extract_zip,
     http::{SERVER_WS, get_token, get_token_serv, health},
     read_data_by_id, remove, set_global_update_bool,
 };
@@ -16,7 +16,7 @@ use bytes::{Bytes, BytesMut};
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, error, info, warn};
 use reqwest::{self, Client};
-use std::{collections::HashMap, error::Error, sync::Arc, thread};
+use std::{error::Error, sync::Arc, thread};
 use tokio::{fs::File, io::AsyncReadExt, select, sync::mpsc::Receiver};
 
 pub fn start_cloud(
@@ -25,7 +25,7 @@ pub fn start_cloud(
     usersettings: UserSettings,
 ) {
     thread::spawn(move || {
-        let mut surcess = HashMap::new();
+        // let mut surcess = HashMap::new();
         let mut pending = Pending::build().unwrap_or_else(|e| {
             error!("{}", e);
             Pending::new()
@@ -67,15 +67,9 @@ pub fn start_cloud(
                     error!("Unable to connect to server");
                     debug!("{}", e);
                 };
-                if let Err(e) = handle_connection(
-                    &mut ws,
-                    &user_data,
-                    &mut surcess,
-                    &usersettings,
-                    &mut pending,
-                    &mut rx,
-                )
-                .await
+                if let Err(e) =
+                    handle_connection(&mut ws, &user_data, &usersettings, &mut pending, &mut rx)
+                        .await
                 {
                     error!("Unable to connect to server");
                     debug!("{}", e);
@@ -123,7 +117,6 @@ async fn check_uptodate_state<T: AsyncRead + AsyncWrite + Unpin + 'static>(
 async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
     ws: &mut Framed<T, Codec>,
     user_data: &UserData,
-    surcess: &mut HashMap<String, (String, String)>,
     usersettings: &UserSettings,
     pending: &mut Pending,
     rx: &mut Receiver<(String, String, String)>,
@@ -135,7 +128,7 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
             Some(msg) = ws.next() => {
                 match msg? {
                     ws::Frame::Text(txt) => {
-                        process_text(txt,surcess,usersettings,user_data,ws).await;
+                        process_text(txt,pending,usersettings,user_data,ws).await;
                     }
                     ws::Frame::Binary(bin) => {
                         process_bin(bin, user_data).await;
@@ -170,7 +163,7 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
                                     buf.extend_from_slice(&data);
                                     let complete = buf.freeze();
                                     match msg_type {
-                                        MessageType::Text => process_text(complete,surcess,usersettings,user_data,ws).await,
+                                        MessageType::Text => process_text(complete,pending,usersettings,user_data,ws).await,
                                         MessageType::Binary => process_bin(complete, user_data).await,
                                     }
                                 } else {
@@ -184,71 +177,52 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
             }
 
             Some((path, id, typ)) = rx.recv() => {
-                match File::open(&path).await {
-                    Ok(mut file) => {
-                        let mut file_data = Vec::new();
-                        match file.read_to_end(&mut file_data).await {
-                            Ok(_) => {
-                                let mut buffer = Vec::new();
-                                buffer.extend_from_slice(format!("{}\n", id).as_bytes());
-                                buffer.extend_from_slice(&file_data);
-                                match ws.send(ws::Message::Binary(Bytes::from(buffer))).await
-                                {
-                                    Ok(_) => {
-                                        surcess.insert(id, (path, typ));
-                                    }
-                                    Err(e) => {
-                                        debug!("unable to send data to server\n{}", e);
-                                        ws.send(ws::Message::Ping(Bytes::new())).await?;
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                error!("Failed to read file data: {}", e);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        error!("Failed to open file {:?}: {}", path, e);
-                    }
-                }
+                pending.add(path, id, typ);
             }
         }
 
-        if let Err(e) = send_pending(ws, surcess, pending).await {
-            error!("Unable to connect to server");
-            debug!("{}", e);
-        };
+        if !pending.is_empty() {
+            send_pending(ws, pending).await?;
+        }
+
+        ws.send(ws::Message::Pong(Bytes::new())).await?;
     }
 }
 
 async fn send_pending<T: AsyncRead + AsyncWrite + Unpin + 'static>(
     ws: &mut Framed<T, Codec>,
-    surcess: &mut HashMap<String, (String, String)>,
     pending: &mut Pending,
 ) -> Result<(), Box<dyn Error>> {
-    while let Some((path, id, typ)) = pending.get() {
-        match File::open(&path).await {
-            Ok(mut file) => {
-                let mut file_data = Vec::new();
-                match file.read_to_end(&mut file_data).await {
-                    Ok(_) => {
-                        let mut buffer = Vec::new();
-                        buffer.extend_from_slice(format!("{}\n", id).as_bytes());
-                        buffer.extend_from_slice(&file_data);
-                        ws.send(ws::Message::Binary(Bytes::from(buffer))).await?;
-                        surcess.insert(id, (path, typ));
-                        pending.pop();
-                    }
-                    Err(e) => {
-                        error!("Failed to read file data: {}", e);
-                        pending.pop();
+    let pending_ids: Vec<String> = pending
+        .get_pending()
+        .into_iter()
+        .filter(|(_, v)| matches!(v.state, DataState::WaitingToSend))
+        .map(|(id, _)| id.clone())
+        .collect();
+
+    for id in pending_ids {
+        if let Some(value) = pending.get(&id) {
+            match File::open(&value.path).await {
+                Ok(mut file) => {
+                    let mut file_data = Vec::new();
+                    match file.read_to_end(&mut file_data).await {
+                        Ok(_) => {
+                            let mut buffer = Vec::new();
+                            buffer.extend_from_slice(format!("{}\n", id).as_bytes());
+                            buffer.extend_from_slice(&file_data);
+                            ws.send(ws::Message::Binary(Bytes::from(buffer))).await?;
+                            pending.change_state(&id);
+                        }
+                        Err(e) => {
+                            error!("Failed to read file data: {}", e);
+                            pending.pop(&id);
+                        }
                     }
                 }
-            }
-            Err(e) => {
-                error!("Failed to open file {:?}: {}", path, e);
-                pending.pop();
+                Err(e) => {
+                    error!("Failed to open file {:?}: {}", value.path, e);
+                    pending.pop(&id);
+                }
             }
         }
     }
@@ -257,7 +231,7 @@ async fn send_pending<T: AsyncRead + AsyncWrite + Unpin + 'static>(
 
 async fn process_text<T: AsyncRead + AsyncWrite + Unpin + 'static>(
     bin: Bytes,
-    surcess: &mut HashMap<String, (String, String)>,
+    pending: &mut Pending,
     usersettings: &UserSettings,
     user_data: &UserData,
     ws: &mut Framed<T, Codec>,
@@ -265,8 +239,8 @@ async fn process_text<T: AsyncRead + AsyncWrite + Unpin + 'static>(
     let state: Resopnse = serde_json::from_slice(&bin).unwrap();
     match state {
         Resopnse::Success { old, new } => {
-            let (path, typ) = surcess.remove(&old).unwrap();
-            remove(path, typ, &new, usersettings.store_image);
+            let value = pending.remove(&old).unwrap();
+            remove(value.path, value.typ, &new, usersettings.store_image);
             user_data.add(new, usersettings.max_clipboard);
             info!("Surcess sending new data");
             set_global_update_bool(true);
@@ -295,4 +269,5 @@ async fn process_bin(bin: Bytes, user_data: &UserData) {
         }
     }
     user_data.add_vec(val);
+    set_global_update_bool(true);
 }

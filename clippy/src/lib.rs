@@ -13,6 +13,7 @@ use encryption_decryption::{decrypt_file, encrept_file};
 use image::ImageReader;
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, HashMap};
 use std::error::Error;
 use std::fs::create_dir;
 use std::io::Write;
@@ -373,7 +374,6 @@ impl UserSettings {
         let mut user_config = get_path_local();
         user_config.push("user");
         user_config.push(".user");
-        println!("{:?}", self.sync);
         let user = self.sync.clone();
         if let Some(data) = user {
             let data = serde_json::to_vec_pretty(&data)?;
@@ -403,30 +403,54 @@ impl UserSettings {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
+pub enum DataState {
+    WaitingToSend,
+    SentButNotAcked,
+}
+
+#[derive(Debug)]
+pub struct Value {
+    path: PathBuf,
+    typ: String,
+    state: DataState,
+}
+
+impl Value {
+    fn new(path: PathBuf, typ: String) -> Self {
+        Self {
+            path,
+            typ,
+            state: DataState::WaitingToSend,
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct Pending {
-    data: Vec<(String, String, String)>,
+    data: BTreeMap<String, Value>,
 }
 
 impl Pending {
     pub fn new() -> Self {
-        Self { data: Vec::new() }
+        Self {
+            data: BTreeMap::new(),
+        }
     }
 
     pub fn build() -> Result<Self, io::Error> {
-        let mut temp = Vec::new();
+        let mut temp = BTreeMap::new();
         for entry in fs::read_dir(get_path_pending())? {
             let path: PathBuf = entry?.path();
 
             let file_content = fs::read_to_string(&path)?;
             let data: Data = serde_json::from_str(&file_content)?;
-            let file_name = path
-                .file_name()
-                .and_then(|f| f.to_str())
-                .unwrap_or_default()
-                .to_string();
-
-            temp.push((path.to_string_lossy().into_owned(), file_name, data.typ));
+            let file_name = if let Some(name) = path.file_name().and_then(|f| f.to_str()) {
+                name.to_string()
+            } else {
+                continue;
+            };
+            temp.insert(file_name, Value::new(path, data.typ));
         }
         Ok(Self { data: temp })
     }
@@ -436,29 +460,23 @@ impl Pending {
     }
 
     pub fn add(&mut self, path: String, id: String, typ: String) {
-        self.data.push((path, id, typ));
+        self.data.insert(id, Value::new(PathBuf::from(path), typ));
     }
 
     pub fn is_empty(&self) -> bool {
         self.data.is_empty()
     }
 
-    pub fn get(&self) -> Option<(String, String, String)> {
-        self.data.first().cloned()
+    pub fn get(&self, id: &str) -> Option<&Value> {
+        self.data.get(id)
+    }
+
+    pub fn remove(&mut self, id: &str) -> Option<Value> {
+        self.data.remove(id)
     }
 
     pub fn empty(&mut self) {
         self.data.clear();
-    }
-
-    pub fn remove_len(&mut self, len: usize) {
-        if self.data.len() == len {
-            self.data.clear();
-        } else {
-            for i in 0..len {
-                self.data.remove(i);
-            }
-        }
     }
 
     pub fn get_zip(&self) -> Result<(Vec<u8>, usize), ()> {
@@ -466,10 +484,10 @@ impl Pending {
         {
             let mut tar = Builder::new(&mut buffer);
 
-            for (file, _, _value) in self.data.iter() {
-                let path = Path::new(file);
+            for (id, value) in self.data.iter() {
+                let path = &value.path;
                 if !path.is_file() {
-                    warn!("Unable to locate {}", path.display());
+                    warn!("Unable to locate {}", id);
                     continue;
                 }
                 tar.append_path_with_name(path, path.file_name().unwrap())
@@ -481,9 +499,23 @@ impl Pending {
         Ok((buffer, self.len()))
     }
 
-    pub fn pop(&mut self) {
-        println!("popiing");
-        self.data.remove(0);
+    pub fn pop(&mut self, id: &str) {
+        self.data.remove(id);
+    }
+
+    pub fn get_pending(&self) -> Vec<(&String, &Value)> {
+        let mut temp = Vec::new();
+        for (id, value) in self.data.iter() {
+            temp.push((id, value));
+        }
+        temp
+    }
+
+    pub fn change_state(&mut self, id: &str) {
+        let temp = self.data.get_mut(id);
+        if let Some(val) = temp {
+            val.state = DataState::SentButNotAcked;
+        }
     }
 }
 
@@ -1007,7 +1039,7 @@ pub fn is_valid_email(email: &str) -> bool {
     true
 }
 
-pub fn remove(path: String, typ: String, time: &str, thumbnail: bool) {
+pub fn remove(mut path: PathBuf, typ: String, time: &str, thumbnail: bool) {
     match fs::rename(&path, get_path().join(&time)) {
         Ok(_) => (),
         Err(err) => error!("{:?}", err),
@@ -1015,7 +1047,6 @@ pub fn remove(path: String, typ: String, time: &str, thumbnail: bool) {
 
     if thumbnail {
         if typ.starts_with("image/") {
-            let mut path = PathBuf::from_str(&path).unwrap();
             let file_name = format!(
                 "{}.png",
                 path.file_name()
