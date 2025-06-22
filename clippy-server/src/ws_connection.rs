@@ -1,7 +1,7 @@
 use std::{fs::File, io::Write, path::PathBuf, time::Duration};
 
 use actix_web::web::{Bytes, BytesMut};
-use actix_ws::{Item, Message, MessageStream, Session};
+use actix_ws::{CloseCode, CloseReason, Item, Message, MessageStream, Session};
 use chrono::Utc;
 use clippy::Resopnse;
 use futures_util::StreamExt;
@@ -9,13 +9,10 @@ use log::{debug, error};
 use tokio::{
     select,
     sync::broadcast::Sender,
-    time::{self, Instant},
+    time::{self, Instant, sleep},
 };
 
 use crate::{DATABASE_PATH, ServResopnse, UserState, get_filename, to_zip};
-
-const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
-const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub async fn ws_connection(
     mut session: Session,
@@ -25,30 +22,24 @@ pub async fn ws_connection(
     user: String,
 ) {
     let mut last_pong = Instant::now();
-    let mut heartbeat = time::interval(HEARTBEAT_INTERVAL);
     let mut rx = tx.subscribe();
     let mut buffer: Option<BytesMut> = None;
 
     loop {
         select! {
-            _ = heartbeat.tick() => {
-                if let Err(e) = session.ping(b"").await {
-                    eprintln!("Ping failed: {e}");
-                    break;
-                }
-
-                if Instant::now().duration_since(last_pong) > CLIENT_TIMEOUT {
-                    eprintln!("Client heartbeat timed out");
+            _ = sleep(Duration::from_secs(10)) => {
+                if last_pong.elapsed() > Duration::from_secs(15) {
+                    error!("No ping from client. Closing connection.");
+                    session.close(Some(CloseReason::from(CloseCode::Abnormal))).await.ok();
                     break;
                 }
             }
 
             msg = msg_stream.next() => {
+                last_pong = Instant::now();
                 match msg {
                     Some(Ok(msg)) => match msg {
-                        Message::Pong(_) => {
-                            last_pong = Instant::now();
-                        }
+                        Message::Pong(_) => {}
                         Message::Text(txt) => {
                             if let Ok(parsed) = serde_json::from_str::<Resopnse>(&txt) {
                                 match parsed {
@@ -173,7 +164,7 @@ pub async fn ws_connection(
             }
         }
     }
-    println!("WebSocket session closed");
+    error!("WebSocket session closed");
 }
 
 async fn handle_bin(

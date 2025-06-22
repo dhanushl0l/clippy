@@ -10,14 +10,20 @@ use actix_codec::{AsyncRead, AsyncWrite};
 use actix_http::ws::Item;
 use awc::{
     http::header,
-    ws::{self, Codec},
+    ws::{self, Codec, Message},
 };
 use bytes::{Bytes, BytesMut};
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, error, info, warn};
 use reqwest::{self, Client};
-use std::{error::Error, sync::Arc, thread};
-use tokio::{fs::File, io::AsyncReadExt, select, sync::mpsc::Receiver};
+use std::{error::Error, sync::Arc, thread, time::Duration};
+use tokio::{
+    fs::File,
+    io::AsyncReadExt,
+    select,
+    sync::mpsc::Receiver,
+    time::{Instant, sleep},
+};
 
 pub fn start_cloud(
     mut rx: Receiver<(String, String, String)>,
@@ -25,7 +31,6 @@ pub fn start_cloud(
     usersettings: UserSettings,
 ) {
     thread::spawn(move || {
-        // let mut surcess = HashMap::new();
         let mut pending = Pending::build().unwrap_or_else(|e| {
             error!("{}", e);
             Pending::new()
@@ -123,9 +128,11 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
 ) -> Result<(), Box<dyn Error>> {
     let mut buffer: Option<BytesMut> = None;
     let mut current_type: Option<MessageType> = None;
+    let mut last_pong = Instant::now();
     loop {
         select! {
             Some(msg) = ws.next() => {
+                last_pong = Instant::now();
                 match msg? {
                     ws::Frame::Text(txt) => {
                         process_text(txt,pending,usersettings,user_data,ws).await;
@@ -179,6 +186,16 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
             Some((path, id, typ)) = rx.recv() => {
                 pending.add(path, id, typ);
             }
+            _ = sleep(Duration::from_secs(10)) => {
+                // Send ping every 10s
+                ws.send(Message::Ping(Vec::new().into())).await.ok();
+
+                // Check last pong
+                if last_pong.elapsed() > Duration::from_secs(15) {
+                    eprintln!("No pong in time. Disconnecting.");
+                    return Err("Server is out".into());
+                }
+            }
         }
 
         if !pending.is_empty() {
@@ -199,6 +216,7 @@ async fn send_pending<T: AsyncRead + AsyncWrite + Unpin + 'static>(
         .filter(|(_, v)| matches!(v.state, DataState::WaitingToSend))
         .map(|(id, _)| id.clone())
         .collect();
+    println!("sending pending");
 
     for id in pending_ids {
         if let Some(value) = pending.get(&id) {
