@@ -13,12 +13,11 @@ use encryption_decryption::{decrypt_file, encrept_file};
 use image::ImageReader;
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::fs::create_dir;
 use std::io::Write;
 use std::path::Path;
-use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 use std::{
@@ -31,6 +30,7 @@ use std::{
 };
 use std::{process, thread};
 use tar::{Archive, Builder};
+use tokio::sync::Notify;
 use tokio::sync::mpsc::Sender;
 
 pub const APP_ID: &str = "org.clippy.clippy";
@@ -403,7 +403,7 @@ impl UserSettings {
     }
 }
 
-#[derive(Debug)]
+#[derive(PartialEq, Debug)]
 pub enum DataState {
     WaitingToSend,
     SentButNotAcked,
@@ -429,12 +429,14 @@ impl Value {
 #[derive(Debug)]
 pub struct Pending {
     data: BTreeMap<String, Value>,
+    notify: Arc<Notify>,
 }
 
 impl Pending {
     pub fn new() -> Self {
         Self {
             data: BTreeMap::new(),
+            notify: Arc::new(Notify::new()),
         }
     }
 
@@ -452,14 +454,43 @@ impl Pending {
             };
             temp.insert(file_name, Value::new(path, data.typ));
         }
-        Ok(Self { data: temp })
+        Ok(Self {
+            data: temp,
+            notify: Arc::new(Notify::new()),
+        })
     }
 
     pub fn len(&self) -> usize {
         self.data.len()
     }
 
+    pub async fn next(&self) -> Option<(bool, String, &Value)> {
+        loop {
+            let mut found: Option<(&String, &Value)> = None;
+            let mut count = 0;
+
+            for (k, v) in &self.data {
+                if v.state == DataState::WaitingToSend {
+                    count += 1;
+                    if found.is_none() {
+                        found = Some((k, v));
+                    } else {
+                        break;
+                    }
+                }
+            }
+
+            if let Some((k, v)) = found {
+                let is_last = count == 1;
+                return Some((is_last, k.clone(), v));
+            }
+
+            self.notify.notified().await;
+        }
+    }
+
     pub fn add(&mut self, path: String, id: String, typ: String) {
+        self.notify.notify_one();
         self.data.insert(id, Value::new(PathBuf::from(path), typ));
     }
 

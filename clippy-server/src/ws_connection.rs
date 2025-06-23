@@ -9,7 +9,7 @@ use log::{debug, error};
 use tokio::{
     select,
     sync::broadcast::Sender,
-    time::{self, Instant, sleep},
+    time::{Instant, sleep},
 };
 
 use crate::{DATABASE_PATH, ServResopnse, UserState, get_filename, to_zip};
@@ -29,15 +29,14 @@ pub async fn ws_connection(
     loop {
         select! {
             msg = msg_stream.next() => {
-                last_pong = Instant::now();
                 match msg {
                     Some(Ok(msg)) => match msg {
                         Message::Ping(ping) => {
                             let _ = session.pong(&ping).await;
                         }
                         Message::Pong(_) => {
+                            last_pong = Instant::now();
                         }
-
                         Message::Text(txt) => {
                             if let Ok(parsed) = serde_json::from_str::<Resopnse>(&txt) {
                                 match parsed {
@@ -90,13 +89,11 @@ pub async fn ws_connection(
                                     _ => {}
                                 }
                             }
-                        }
-                        Message::Close(reason) => {
-                            println!("Client closed: {:?}", reason);
-                            break;
+                            last_pong = Instant::now();
                         }
                         Message::Binary(bin) => {
                             handle_bin(&user,&state,&tx,&mut session,bin,&mut old).await;
+                            last_pong = Instant::now();
                         },
                         Message::Continuation(item) => {
                             match item {
@@ -123,6 +120,11 @@ pub async fn ws_connection(
                             }
                             _ => {}
                         }
+                        last_pong = Instant::now();
+                        }
+                        Message::Close(reason) => {
+                            println!("Client closed: {:?}", reason);
+                            break;
                         }
                         Message::Nop => {},
                     }
@@ -158,12 +160,11 @@ pub async fn ws_connection(
                 }
             }
             _ = sleep(Duration::from_secs(1)) => {
-                if last_pong.elapsed() > Duration::from_secs(5) {
-                    let _ = session.ping(&Bytes::new()).await;
-                }
                 if last_pong.elapsed() > Duration::from_secs(15) {
                     eprintln!("No pong in time. Disconnecting.");
                     return;
+                } else if last_pong.elapsed() > Duration::from_secs(5) {
+                    let _ = session.ping(&Bytes::new()).await;
                 }
             }
         }
@@ -189,19 +190,30 @@ async fn handle_bin(
     path.push(&file_name);
     let bin = bin.to_vec();
 
-    if let Some(pos) = bin.iter().position(|&b| b == b'\n') {
-        let header = &bin[..pos];
-        let file_data = &bin[pos + 1..];
+    let mut iter = bin.iter().enumerate().filter(|&(_, &b)| b == b'\n');
+
+    let pos1 = iter.next().map(|(i, _)| i);
+    let pos2 = iter.next().map(|(i, _)| i);
+
+    if let (Some(pos1), Some(pos2)) = (pos1, pos2) {
+        let header = &bin[..pos1];
+        let is_last = &bin[pos1 + 1..pos2];
+
+        let file_data = &bin[pos2 + 1..];
 
         let name = String::from_utf8_lossy(header);
+        let is_last: bool = String::from_utf8_lossy(is_last).parse().unwrap();
+
         let mut file = File::create(&path).unwrap();
         file.write_all(file_data).unwrap();
         state.update(&user, &file_name);
         debug!("Saved file: {name}");
-        if let Err(e) = tx.send(ServResopnse::New(file_name.clone())) {
-            error!("error sending state: {}", e);
-        };
-        *old = file_name.clone();
+        if is_last {
+            if let Err(e) = tx.send(ServResopnse::New(file_name.clone())) {
+                error!("error sending state: {}", e);
+            };
+            *old = file_name.clone();
+        }
         let file: Resopnse = Resopnse::Success {
             old: name.to_string(),
             new: file_name.clone(),

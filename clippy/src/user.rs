@@ -1,7 +1,7 @@
 #[cfg(target_os = "linux")]
 use crate::write_clipboard;
 use crate::{
-    DataState, MessageType, Pending, Resopnse, UserCred, UserData, UserSettings, extract_zip,
+    MessageType, Pending, Resopnse, UserCred, UserData, UserSettings, extract_zip,
     http::{SERVER_WS, get_token, get_token_serv, health},
     read_data_by_id, remove, set_global_update_bool,
 };
@@ -132,12 +132,11 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
     loop {
         select! {
             _ = sleep(Duration::from_secs(1)) => {
-                if last_pong.elapsed() > Duration::from_secs(5) {
-                    let _ = ws.send(Message::Ping(Bytes::new())).await;
-                }
                 if last_pong.elapsed() > Duration::from_secs(15) {
                     eprintln!("No pong in time. Disconnecting.");
                     return Err("Server is out".into());
+                } else if last_pong.elapsed() > Duration::from_secs(5) {
+                    let _ = ws.send(Message::Ping(Bytes::new())).await;
                 }
             }
 
@@ -196,61 +195,37 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
                 }
             }
 
+            Some((last,id, value)) = pending.next() => {
+                match File::open(&value.path).await {
+                    Ok(mut file) => {
+                        let mut file_data = Vec::new();
+                        match file.read_to_end(&mut file_data).await {
+                            Ok(_) => {
+                                let mut buffer = Vec::new();
+                                buffer.extend_from_slice(format!("{}\n{}\n", id,last).as_bytes());
+                                buffer.extend_from_slice(&file_data);
+                                ws.send(ws::Message::Binary(Bytes::from(buffer))).await?;
+                                pending.change_state(&id);
+                                last_pong = Instant::now();
+                            }
+                            Err(e) => {
+                                error!("Failed to read file data: {}", e);
+                                pending.pop(&id);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to open file {:?}: {}", value.path, e);
+                        pending.pop(&id);
+                    }
+                }
+            }
             Some((path, id, typ)) = rx.recv() => {
                 pending.add(path, id, typ);
             }
 
         }
-
-        if !pending.is_empty() {
-            send_pending(ws, pending, &mut last_pong).await?;
-        }
-
-        ws.send(ws::Message::Pong(Bytes::new())).await?;
     }
-}
-
-async fn send_pending<T: AsyncRead + AsyncWrite + Unpin + 'static>(
-    ws: &mut Framed<T, Codec>,
-    pending: &mut Pending,
-    last_pong: &mut Instant,
-) -> Result<(), Box<dyn Error>> {
-    let pending_ids: Vec<String> = pending
-        .get_pending()
-        .into_iter()
-        .filter(|(_, v)| matches!(v.state, DataState::WaitingToSend))
-        .map(|(id, _)| id.clone())
-        .collect();
-    println!("sending pending");
-
-    for id in pending_ids {
-        if let Some(value) = pending.get(&id) {
-            match File::open(&value.path).await {
-                Ok(mut file) => {
-                    let mut file_data = Vec::new();
-                    match file.read_to_end(&mut file_data).await {
-                        Ok(_) => {
-                            let mut buffer = Vec::new();
-                            buffer.extend_from_slice(format!("{}\n", id).as_bytes());
-                            buffer.extend_from_slice(&file_data);
-                            ws.send(ws::Message::Binary(Bytes::from(buffer))).await?;
-                            pending.change_state(&id);
-                        }
-                        Err(e) => {
-                            error!("Failed to read file data: {}", e);
-                            pending.pop(&id);
-                        }
-                    }
-                }
-                Err(e) => {
-                    error!("Failed to open file {:?}: {}", value.path, e);
-                    pending.pop(&id);
-                }
-            }
-        }
-    }
-    *last_pong = Instant::now();
-    Ok(())
 }
 
 async fn process_text<T: AsyncRead + AsyncWrite + Unpin + 'static>(
