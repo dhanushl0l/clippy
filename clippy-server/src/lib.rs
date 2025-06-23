@@ -517,7 +517,7 @@ impl Room {
 
 #[derive(Debug, Clone)]
 pub enum ServResopnse {
-    New,
+    New(String),
 }
 pub fn get_auth(username: &str, exp: i64) -> Result<String, jsonwebtoken::errors::Error> {
     let now = Utc::now();

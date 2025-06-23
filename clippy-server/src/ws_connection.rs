@@ -1,7 +1,7 @@
 use std::{fs::File, io::Write, path::PathBuf, time::Duration};
 
 use actix_web::web::{Bytes, BytesMut};
-use actix_ws::{CloseCode, CloseReason, Item, Message, MessageStream, Session};
+use actix_ws::{Item, Message, MessageStream, Session};
 use chrono::Utc;
 use clippy::Resopnse;
 use futures_util::StreamExt;
@@ -24,22 +24,20 @@ pub async fn ws_connection(
     let mut last_pong = Instant::now();
     let mut rx = tx.subscribe();
     let mut buffer: Option<BytesMut> = None;
+    let mut old = String::new();
 
     loop {
         select! {
-            _ = sleep(Duration::from_secs(10)) => {
-                if last_pong.elapsed() > Duration::from_secs(15) {
-                    error!("No ping from client. Closing connection.");
-                    session.close(Some(CloseReason::from(CloseCode::Abnormal))).await.ok();
-                    break;
-                }
-            }
-
             msg = msg_stream.next() => {
                 last_pong = Instant::now();
                 match msg {
                     Some(Ok(msg)) => match msg {
-                        Message::Pong(_) => {}
+                        Message::Ping(ping) => {
+                            let _ = session.pong(&ping).await;
+                        }
+                        Message::Pong(_) => {
+                        }
+
                         Message::Text(txt) => {
                             if let Ok(parsed) = serde_json::from_str::<Resopnse>(&txt) {
                                 match parsed {
@@ -98,7 +96,7 @@ pub async fn ws_connection(
                             break;
                         }
                         Message::Binary(bin) => {
-                            handle_bin(&user,&state,&tx,&mut session,bin).await;
+                            handle_bin(&user,&state,&tx,&mut session,bin,&mut old).await;
                         },
                         Message::Continuation(item) => {
                             match item {
@@ -118,7 +116,7 @@ pub async fn ws_connection(
                             Item::Last(data) => {
                                 if let Some(mut buf) = buffer.take() {
                                     buf.extend_from_slice(&data);
-                                    handle_bin(&user,&state,&tx,&mut session,buf.freeze()).await;
+                                    handle_bin(&user,&state,&tx,&mut session,buf.freeze(),&mut old).await;
                                 } else {
                                     eprintln!("Received LAST without FIRST. Dropping.");
                                 }
@@ -126,12 +124,7 @@ pub async fn ws_connection(
                             _ => {}
                         }
                         }
-                        Message::Nop => {
-                            println!("nop")
-                        },
-                        Message::Ping(ping) => {
-                            println!("{:?}",ping)
-                        },
+                        Message::Nop => {},
                     }
                     Some(Err(e)) => {
                         eprintln!("Stream error: {e}");
@@ -148,11 +141,13 @@ pub async fn ws_connection(
                 match result {
                     Ok(val) => {
                         match val {
-                            ServResopnse::New => {
+                            ServResopnse::New(new) => {
+                                if new != old {
                                 let status: Resopnse = Resopnse::Outdated;
                                 if let Err(e) =  session.text(serde_json::to_string(&status).unwrap()).await{
                                     debug!("Unable to send response {}",e);
                                 };
+                            }
                             }
                         }
                     }
@@ -160,6 +155,15 @@ pub async fn ws_connection(
                         eprintln!("Broadcast receive error: {e}");
                         break;
                     }
+                }
+            }
+            _ = sleep(Duration::from_secs(1)) => {
+                if last_pong.elapsed() > Duration::from_secs(5) {
+                    let _ = session.ping(&Bytes::new()).await;
+                }
+                if last_pong.elapsed() > Duration::from_secs(15) {
+                    eprintln!("No pong in time. Disconnecting.");
+                    return;
                 }
             }
         }
@@ -173,6 +177,7 @@ async fn handle_bin(
     tx: &Sender<ServResopnse>,
     session: &mut Session,
     bin: Bytes,
+    old: &mut String,
 ) {
     let mut path: PathBuf = PathBuf::new().join(format!("{}/{}/", DATABASE_PATH, user));
     match std::fs::create_dir_all(&path) {
@@ -193,9 +198,10 @@ async fn handle_bin(
         file.write_all(file_data).unwrap();
         state.update(&user, &file_name);
         debug!("Saved file: {name}");
-        if let Err(e) = tx.send(ServResopnse::New) {
+        if let Err(e) = tx.send(ServResopnse::New(file_name.clone())) {
             error!("error sending state: {}", e);
         };
+        *old = file_name.clone();
         let file: Resopnse = Resopnse::Success {
             old: name.to_string(),
             new: file_name.clone(),

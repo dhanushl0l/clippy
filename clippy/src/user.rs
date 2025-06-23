@@ -131,18 +131,31 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
     let mut last_pong = Instant::now();
     loop {
         select! {
+            _ = sleep(Duration::from_secs(1)) => {
+                if last_pong.elapsed() > Duration::from_secs(5) {
+                    let _ = ws.send(Message::Ping(Bytes::new())).await;
+                }
+                if last_pong.elapsed() > Duration::from_secs(15) {
+                    eprintln!("No pong in time. Disconnecting.");
+                    return Err("Server is out".into());
+                }
+            }
+
             Some(msg) = ws.next() => {
                 last_pong = Instant::now();
                 match msg? {
                     ws::Frame::Text(txt) => {
-                        process_text(txt,pending,usersettings,user_data,ws).await;
+                        process_text(txt,pending,usersettings,user_data,ws,&mut last_pong).await;
                     }
                     ws::Frame::Binary(bin) => {
-                        process_bin(bin, user_data).await;
+                        process_bin(bin, user_data,&mut last_pong).await;
                     }
                     ws::Frame::Ping(p) => {
                         ws.send(ws::Message::Pong(p)).await.unwrap();
                     }
+                    ws::Frame::Pong(_) => {
+                    }
+
                     ws::Frame::Continuation(bin) => {
                         match bin {
                             Item::FirstText(data) => {
@@ -170,8 +183,8 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
                                     buf.extend_from_slice(&data);
                                     let complete = buf.freeze();
                                     match msg_type {
-                                        MessageType::Text => process_text(complete,pending,usersettings,user_data,ws).await,
-                                        MessageType::Binary => process_bin(complete, user_data).await,
+                                        MessageType::Text => process_text(complete,pending,usersettings,user_data,ws,&mut last_pong).await,
+                                        MessageType::Binary => process_bin(complete, user_data,&mut last_pong).await,
                                     }
                                 } else {
                                     eprintln!("Received LAST without FIRST. Dropping.");
@@ -186,20 +199,11 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
             Some((path, id, typ)) = rx.recv() => {
                 pending.add(path, id, typ);
             }
-            _ = sleep(Duration::from_secs(10)) => {
-                // Send ping every 10s
-                ws.send(Message::Ping(Vec::new().into())).await.ok();
 
-                // Check last pong
-                if last_pong.elapsed() > Duration::from_secs(15) {
-                    eprintln!("No pong in time. Disconnecting.");
-                    return Err("Server is out".into());
-                }
-            }
         }
 
         if !pending.is_empty() {
-            send_pending(ws, pending).await?;
+            send_pending(ws, pending, &mut last_pong).await?;
         }
 
         ws.send(ws::Message::Pong(Bytes::new())).await?;
@@ -209,6 +213,7 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
 async fn send_pending<T: AsyncRead + AsyncWrite + Unpin + 'static>(
     ws: &mut Framed<T, Codec>,
     pending: &mut Pending,
+    last_pong: &mut Instant,
 ) -> Result<(), Box<dyn Error>> {
     let pending_ids: Vec<String> = pending
         .get_pending()
@@ -244,6 +249,7 @@ async fn send_pending<T: AsyncRead + AsyncWrite + Unpin + 'static>(
             }
         }
     }
+    *last_pong = Instant::now();
     Ok(())
 }
 
@@ -253,6 +259,7 @@ async fn process_text<T: AsyncRead + AsyncWrite + Unpin + 'static>(
     usersettings: &UserSettings,
     user_data: &UserData,
     ws: &mut Framed<T, Codec>,
+    last_pong: &mut Instant,
 ) {
     let state: Resopnse = serde_json::from_slice(&bin).unwrap();
     match state {
@@ -277,9 +284,10 @@ async fn process_text<T: AsyncRead + AsyncWrite + Unpin + 'static>(
         }
         _ => {}
     }
+    *last_pong = Instant::now();
 }
 
-async fn process_bin(bin: Bytes, user_data: &UserData) {
+async fn process_bin(bin: Bytes, user_data: &UserData, last_pong: &mut Instant) {
     let val = extract_zip(bin).unwrap();
     if let Some(val) = val.last() {
         if *val > user_data.last_one() {
@@ -288,4 +296,5 @@ async fn process_bin(bin: Bytes, user_data: &UserData) {
     }
     user_data.add_vec(val);
     set_global_update_bool(true);
+    *last_pong = Instant::now();
 }
