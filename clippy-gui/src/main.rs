@@ -113,7 +113,7 @@ impl Clipboard {
                                 result.push((Thumbnail::Image(val), path.0.clone(), file, path.1));
                             }
                         } else {
-                            if let Some(val) = file.get_data() {
+                            if let Some(val) = file.get_meta_data() {
                                 result.push((Thumbnail::Text(val), path.0.clone(), file, path.1));
                             }
                         }
@@ -328,11 +328,14 @@ impl App for Clipboard {
                                         ui.style_mut().override_text_style =
                                             Some(TextStyle::Heading);
 
-                                        ui.add(
+                                        let response = ui.add(
                                             TextEdit::singleline(&mut self.newuser.user)
                                                 .vertical_align(Align::Center)
                                                 .hint_text("enter the username"),
                                         );
+
+                                        let enter_pressed = response.lost_focus()
+                                            && ui.input(|i| i.key_pressed(egui::Key::Enter));
 
                                         if let Some(val) = &self.warn {
                                             ui.colored_label(egui::Color32::RED, val);
@@ -362,6 +365,7 @@ impl App for Clipboard {
                                                     .min_size(button_size),
                                                 )
                                                 .clicked()
+                                                || enter_pressed
                                             {
                                                 let username = self.newuser.user.clone();
                                                 if is_valid_username(&username) {
@@ -409,15 +413,20 @@ impl App for Clipboard {
                                     );
                                     ui.add_space(8.0);
 
+                                    let mut enter_pressed = false;
+
                                     if let Some(email) = &mut self.newuser.email {
                                         ui.style_mut().override_text_style =
                                             Some(TextStyle::Heading);
 
-                                        ui.add(
+                                        let response = ui.add(
                                             TextEdit::singleline(email)
                                                 .vertical_align(Align::Center)
                                                 .hint_text("Enter the Email"),
                                         );
+
+                                        enter_pressed = response.lost_focus()
+                                            && ui.input(|i| i.key_pressed(egui::Key::Enter));
                                     }
                                     if let Some(val) = &self.warn {
                                         ui.colored_label(egui::Color32::RED, val);
@@ -446,6 +455,7 @@ impl App for Clipboard {
                                                 .min_size(button_size),
                                             )
                                             .clicked()
+                                            || enter_pressed
                                         {
                                             let user = self.newuser.clone();
                                             if is_valid_email(&self.newuser.email.as_ref().unwrap())
@@ -504,21 +514,32 @@ impl App for Clipboard {
 
                                     ui.style_mut().override_text_style = Some(TextStyle::Heading);
 
-                                    ui.add(
+                                    let response = ui.add(
                                         TextEdit::singleline(&mut self.otp)
                                             .vertical_align(Align::Center)
                                             .hint_text("enter the OTP")
                                             .min_size(button_size),
                                     );
 
+                                    let enter_pressed = response.lost_focus()
+                                        && ui.input(|i| i.key_pressed(egui::Key::Enter));
+
                                     ui.add_space(8.0);
 
-                                    ui.add(
+                                    let response = ui.add(
                                         TextEdit::singleline(&mut self.key)
                                             .vertical_align(Align::Center)
                                             .hint_text("enter the Password")
+                                            .password(true)
                                             .min_size(button_size),
                                     );
+
+                                    if enter_pressed {
+                                        response.request_focus();
+                                    }
+
+                                    let enter_pressed = response.lost_focus()
+                                        && ui.input(|i| i.key_pressed(egui::Key::Enter));
 
                                     ui.style_mut().override_text_style = None;
 
@@ -544,6 +565,7 @@ impl App for Clipboard {
                                                 .min_size(button_size),
                                             )
                                             .clicked()
+                                            || enter_pressed
                                         {
                                             let wait = self.waiting.clone();
                                             let user = NewUserOtp::new(
@@ -603,11 +625,14 @@ impl App for Clipboard {
 
                                         ui.add_space(8.0);
 
-                                        ui.add(
+                                        let response = ui.add(
                                             TextEdit::singleline(&mut self.key)
                                                 .vertical_align(Align::Center)
-                                                .hint_text("Enter the Password"),
+                                                .hint_text("Enter the Password")
+                                                .password(true),
                                         );
+                                        let enter_pressed = response.lost_focus()
+                                            && ui.input(|i| i.key_pressed(egui::Key::Enter));
 
                                         ui.style_mut().override_text_style = None;
 
@@ -634,6 +659,7 @@ impl App for Clipboard {
                                                     .min_size(button_size),
                                                 )
                                                 .clicked()
+                                                || enter_pressed
                                             {
                                                 let user = LoginUserCred::new(
                                                     self.newuser.user.clone(),

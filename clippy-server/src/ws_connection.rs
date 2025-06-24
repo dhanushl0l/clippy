@@ -158,6 +158,7 @@ pub async fn ws_connection(
                         break;
                     }
                 }
+                last_pong = Instant::now();
             }
             _ = sleep(Duration::from_secs(1)) => {
                 if last_pong.elapsed() > Duration::from_secs(15) {

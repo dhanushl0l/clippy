@@ -150,7 +150,9 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
                         process_bin(bin, user_data,&mut last_pong).await;
                     }
                     ws::Frame::Ping(p) => {
-                        ws.send(ws::Message::Pong(p)).await.unwrap();
+                        if ws.send(ws::Message::Pong(p)).await.is_err() {
+                            return Err("Unable to connect to server".into());
+                        }
                     }
                     ws::Frame::Pong(_) => {
                     }
@@ -204,7 +206,9 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
                                 let mut buffer = Vec::new();
                                 buffer.extend_from_slice(format!("{}\n{}\n", id,last).as_bytes());
                                 buffer.extend_from_slice(&file_data);
-                                ws.send(ws::Message::Binary(Bytes::from(buffer))).await?;
+                                if ws.send(ws::Message::Binary(Bytes::from(buffer))).await.is_err() {
+                                    return Err("Unable to connect to server".into());
+                                }
                                 pending.change_state(&id);
                                 last_pong = Instant::now();
                             }

@@ -156,21 +156,27 @@ impl Data {
         Ok(())
     }
 
-    pub fn get_meta_data(&self) -> Result<String, ()> {
-        let mut display_text = String::new();
-
-        if self.typ.starts_with("text") {
-            if let Some(truncated_text) = self.get_data() {
-                display_text = if truncated_text.len() > 30 {
-                    format!("{}...", &truncated_text[..30])
-                } else {
-                    truncated_text
-                }
-            }
-        } else {
-            return Err(());
+    pub fn get_meta_data(&self) -> Option<String> {
+        if !self.typ.starts_with("text") {
+            return None;
         }
-        Ok(display_text)
+
+        let Some(data) = self.get_data() else {
+            return Some(String::new());
+        };
+
+        let lines = data.lines().take(10).map(|line| {
+            let line = line.trim();
+            if line.len() > 100 {
+                format!("{}..", &line[..70])
+            } else {
+                line.trim().to_string()
+            }
+        });
+
+        let display_text = lines.collect::<Vec<_>>().join("\n");
+
+        Some(display_text)
     }
 }
 
