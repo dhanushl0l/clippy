@@ -34,7 +34,7 @@ pub async fn signin(data: NewUser) -> Result<bool, Error> {
     }
 }
 
-pub async fn signin_otp_auth(data: NewUserOtp) -> Result<UserCred, Error> {
+pub async fn signin_otp_auth(data: NewUserOtp) -> Result<UserCred, Box<dyn std::error::Error>> {
     let connection = Client::new();
     let response = connection
         .post(format!("{}/authotp", SERVER))
@@ -42,7 +42,14 @@ pub async fn signin_otp_auth(data: NewUserOtp) -> Result<UserCred, Error> {
         .send()
         .await?;
 
-    Ok(response.json().await?)
+    if response.status().is_success() {
+        let user = response.json::<UserCred>().await?;
+        Ok(user)
+    } else {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        Err(format!("Auth failed with status {}: {}", status, body).into())
+    }
 }
 
 pub async fn login(user: &LoginUserCred) -> Result<UserCred, String> {

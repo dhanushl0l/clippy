@@ -27,3 +27,9 @@ base64 = "0.22.1"
 sha2 = "0.10.9"
 tar = "0.4.44"
 actix-ws = "0.3.0"
+sqlx = { version = "0.8", features = [
+    "runtime-tokio",
+    "tls-rustls-ring-native-roots",
+    "postgres",
+    "chrono",
+] }

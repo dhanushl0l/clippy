@@ -1,132 +1,114 @@
-use actix_multipart::Multipart;
+mod db;
+mod email;
+
+use crate::{
+    db::{add_otp, check_otp, get_user, is_email_exists, is_user_exists},
+    email::send_otp,
+};
 use actix_web::{
     App, HttpRequest, HttpResponse, HttpServer, Responder,
     web::{self},
 };
 use actix_web_httpauth::extractors::bearer::BearerAuth;
-use chrono::Utc;
 use clippy::{LoginUserCred, NewUser, NewUserOtp};
 use clippy_server::{
-    CRED_PATH, EmailState, OTPState, RoomManager, UserCred, UserState, auth, gen_otp, get_auth,
-    hash_key, write_file,
+    CustomErr, DB, RoomManager, UserCred, UserState, auth, gen_otp, get_auth, hash_key,
 };
-use email::send_otp;
 use env_logger::{Builder, Env};
 use log::{debug, error};
-use std::{
-    fs::{self},
-    path::Path,
-};
-mod email;
+use sqlx::{PgPool, Pool, Postgres};
 
-async fn signin(
-    data: web::Json<NewUser>,
-    state: web::Data<UserState>,
-    emailstate: web::Data<EmailState>,
-    otp_state: web::Data<OTPState>,
-) -> impl Responder {
-    let username = &data.user;
-
-    if state.verify(username) {
-        return HttpResponse::Unauthorized().body("Failure: Username already exists");
-    } else if emailstate.check_email(data.email.clone().unwrap()) {
-        return HttpResponse::Unauthorized().body("Failure: Email already exists");
-    } else {
-        let otp = gen_otp();
-        otp_state.add_otp(username.to_string(), otp.clone());
-        match send_otp(&data, otp).await {
-            Ok(_) => HttpResponse::Ok().body("SURCESS"),
-            Err(err) => HttpResponse::InternalServerError().body(err.to_string()),
+async fn signin(new_user: web::Json<NewUser>, pool: web::Data<Pool<Postgres>>) -> impl Responder {
+    match is_user_exists(pool.as_ref(), &new_user.user).await {
+        Ok(true) => HttpResponse::Unauthorized().body("Failure: Username already exists"),
+        Ok(false) => match is_email_exists(pool.as_ref(), &new_user.email.clone().unwrap()).await {
+            Ok(true) => HttpResponse::Unauthorized().body("Failure: Email already exists"),
+            Ok(false) => {
+                let otp = gen_otp();
+                if let Err(e) = add_otp(&new_user, otp.clone(), pool.as_ref()).await {
+                    println!("{:?}", e);
+                    return HttpResponse::InternalServerError().body("Unable to retreve otp");
+                };
+                match send_otp(&new_user, otp).await {
+                    Ok(_) => HttpResponse::Ok().body("SURCESS"),
+                    Err(err) => HttpResponse::InternalServerError().body(err.to_string()),
+                }
+            }
+            Err(e) => {
+                debug!("{}", e);
+                HttpResponse::InternalServerError().body("Unable to check status")
+            }
+        },
+        Err(e) => {
+            debug!("{}", e);
+            HttpResponse::InternalServerError().body("Unable to check status")
         }
     }
 }
 
 async fn signin_auth(
     data: web::Json<NewUserOtp>,
-    state: web::Data<UserState>,
-    email_state: web::Data<EmailState>,
-    otp_state: web::Data<OTPState>,
+    pool: web::Data<Pool<Postgres>>,
 ) -> impl Responder {
     let username = &data.user;
 
-    if state.verify(username) {
-        return HttpResponse::Unauthorized().body("Failure: Username already exists");
-    } else {
-        match otp_state.check_otp(&data) {
-            Ok(_) => {
-                let password = hash_key(&data.key, &data.user);
-                if let Err(err) =
-                    UserCred::new(username.clone(), data.email.clone(), password).write()
-                {
-                    error!("Failure: failed to write credentials\n{}", err);
-                    return HttpResponse::InternalServerError()
-                        .body("Error: Failed to write credentials");
-                }
-
-                email_state.add(data.email.clone());
-
-                let file_path = Path::new(CRED_PATH).join(username).join("user.json");
-                match fs::read_to_string(&file_path) {
-                    Ok(content) => {
-                        if let Some(_) = state.entry_and_verify_user(username) {
-                            debug!("{:?}", state);
-                            HttpResponse::Ok()
-                                .content_type("application/json")
-                                .body(content)
-                        } else {
-                            HttpResponse::Unauthorized().body("Failure: Username already exists")
-                        }
-                    }
-                    Err(err) => {
-                        error!("Error reading user file: {}", err);
-                        HttpResponse::NotFound().body("Error: JSON file not found")
-                    }
-                }
+    match check_otp(&data, pool.as_ref()).await {
+        Ok(_) => {
+            let password = hash_key(&data.key, &data.user);
+            let user = UserCred::new(username.clone(), data.email.clone(), password);
+            if let Err(err) = db::write(&user, pool.as_ref()).await {
+                error!("Failure: failed to write credentials\n{}", err);
+                return HttpResponse::InternalServerError()
+                    .body("Error: Failed to write credentials");
             }
-            Err(err) => return HttpResponse::Unauthorized().body(err),
+
+            HttpResponse::Ok()
+                .content_type("application/json")
+                .body(serde_json::to_string(&user).unwrap())
         }
+        Err(err) => match err {
+            CustomErr::DBError(err) => {
+                debug!("{}", err);
+                return HttpResponse::Unauthorized().body("Unable to veriify otp");
+            }
+            CustomErr::Failed(er) => return HttpResponse::Unauthorized().body(er),
+        },
     }
 }
 
-async fn check_user(state: web::Data<UserState>, data: web::Json<NewUser>) -> impl Responder {
+async fn check_user(data: web::Json<NewUser>, pool: web::Data<Pool<Postgres>>) -> impl Responder {
     let username = &data.user;
 
-    if state.verify(username) {
-        HttpResponse::Ok().json(true)
-    } else {
-        HttpResponse::Ok().json(false)
+    match is_user_exists(pool.as_ref(), username).await {
+        Ok(val) => HttpResponse::Ok().json(val),
+        Err(err) => {
+            debug!("{}", err);
+            HttpResponse::InternalServerError().body("Unable to get proper response")
+        }
     }
 }
 
-async fn get_key(cred: web::Json<UserCred>, state: web::Data<UserState>) -> impl Responder {
-    if state.verify(&cred.username) {
-        let user_cred_db = match UserCred::read(&cred.username) {
-            Ok(val) => val,
-            Err(err) => {
-                return HttpResponse::Unauthorized()
-                    .body(format!("User not found: {}", err.to_string()));
-            }
-        };
-        if user_cred_db == *cred {
-            let key = match get_auth(&cred.username, 1) {
-                Ok(val) => val,
-                Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
-            };
-            HttpResponse::Ok().body(key)
-        } else {
-            HttpResponse::Unauthorized().body("User credentials do not match")
+async fn get_key(cred: web::Json<UserCred>, pool: web::Data<Pool<Postgres>>) -> impl Responder {
+    let user_cred_db = match get_user(pool.as_ref(), &cred.username).await {
+        Ok(val) => val,
+        Err(err) => {
+            return HttpResponse::Unauthorized()
+                .body(format!("User not found: {}", err.to_string()));
         }
+    };
+    if user_cred_db == *cred {
+        let key = match get_auth(&cred.username, 1) {
+            Ok(val) => val,
+            Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+        };
+        HttpResponse::Ok().body(key)
     } else {
         HttpResponse::Unauthorized().body("User credentials do not match")
     }
 }
 
-async fn login(cred: web::Json<LoginUserCred>, state: web::Data<UserState>) -> impl Responder {
-    if !state.verify(&cred.username) {
-        return HttpResponse::Unauthorized().body("Invalid credentials");
-    }
-
-    let user_cred_db = match UserCred::read(&cred.username) {
+async fn login(cred: web::Json<LoginUserCred>, pool: web::Data<Pool<Postgres>>) -> impl Responder {
+    let user_cred_db = match get_user(pool.get_ref(), &cred.username).await {
         Ok(val) => val,
         Err(_) => return HttpResponse::Unauthorized().body("Invalid credentials"),
     };
@@ -136,33 +118,6 @@ async fn login(cred: web::Json<LoginUserCred>, state: web::Data<UserState>) -> i
     } else {
         HttpResponse::Unauthorized().body("Invalid credentials")
     }
-}
-
-async fn update(
-    payload: Multipart,
-    auth_key: BearerAuth,
-    state: web::Data<UserState>,
-) -> impl Responder {
-    let key = auth_key.token();
-    let id = Utc::now().timestamp();
-
-    let username = match auth(key) {
-        Ok(val) => val,
-        Err(err) => return HttpResponse::Unauthorized().body(err.to_string()),
-    };
-
-    let file_name = match write_file(payload, &username, id).await {
-        Ok(name) => {
-            debug!("writing {}/{}", username, name);
-            name
-        }
-        Err(err) => {
-            return err.error_response();
-        }
-    };
-    state.update(&username, &file_name);
-
-    HttpResponse::Ok().body(file_name)
 }
 
 async fn health() -> impl Responder {
@@ -199,21 +154,16 @@ async fn handle_connection(
 async fn main() -> std::io::Result<()> {
     Builder::from_env(Env::default().filter_or("LOG", "info")).init();
 
-    // Instead of reading the email and user separately,implemented a single method where userstate::build creates and builds both the UserState and EmailState
-    let temp = UserState::build();
-    let user_state = web::Data::new(temp.0);
-    let email_state = web::Data::new(temp.1);
-    let otp_state = web::Data::new(OTPState::new());
+    let user_state = web::Data::new(UserState::new());
     let data = web::Data::new(RoomManager::new());
+    let pool = web::Data::new(PgPool::connect(DB.unwrap()).await.unwrap());
 
     HttpServer::new(move || {
         App::new()
             .app_data(user_state.clone())
-            .app_data(otp_state.clone())
-            .app_data(email_state.clone())
             .app_data(data.clone())
+            .app_data(pool.clone())
             .route("/connect", web::get().to(handle_connection))
-            .route("/update", web::post().to(update))
             .route("/signin", web::post().to(signin))
             .route("/authotp", web::post().to(signin_auth))
             .route("/login", web::get().to(login))

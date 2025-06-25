@@ -1,5 +1,5 @@
+mod email;
 mod ws_connection;
-
 use actix_multipart::Multipart;
 use actix_web::{HttpResponse, rt};
 use actix_ws::{MessageStream, Session};
@@ -13,6 +13,7 @@ use rand::seq::IteratorRandom;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
+use sqlx::prelude::FromRow;
 use std::{
     collections::{BTreeSet, HashMap, hash_map::Entry},
     fs::{self},
@@ -24,8 +25,8 @@ use tar::Builder;
 use tokio::sync::{self, broadcast::Sender};
 use ws_connection::ws_connection;
 
-pub const CRED_PATH: &str = "credentials/users";
 pub const DATABASE_PATH: &str = "data-base/users";
+pub const DB: Option<&str> = option_env!("DB_CONF");
 const MAX_SIZE: usize = 10 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
@@ -34,53 +35,10 @@ pub struct UserState {
 }
 
 impl UserState {
-    pub fn build() -> (Self, EmailState) {
-        let email = EmailState::new();
-        let op = Self {
+    pub fn new() -> Self {
+        Self {
             data: Arc::new(Mutex::new(HashMap::new())),
-        };
-
-        let base_path = Path::new(CRED_PATH);
-
-        if let Ok(users) = fs::read_dir(base_path) {
-            println!("{:?}", users);
-            for user in users.flatten() {
-                let path = user.path();
-
-                {
-                    let mut path = path.clone();
-                    path.push("user.json");
-                    let file = fs::read_to_string(path).unwrap();
-                    let user: UserCred = serde_json::from_str(&file).unwrap();
-                    email.data.lock().as_mut().unwrap().push(user.email);
-                }
-
-                if path.is_dir() && path.parent() == Some(base_path) {
-                    if let Some(folder_name) = user.file_name().to_str() {
-                        let mut files = BTreeSet::new();
-                        let base_path = user.path();
-                        let prefix = Path::new(CRED_PATH);
-
-                        let path = if let Ok(suffix) = base_path.strip_prefix(prefix) {
-                            Path::new(DATABASE_PATH).join(suffix)
-                        } else {
-                            panic!("path conflict on startup")
-                        };
-                        if let Ok(entries) = fs::read_dir(path) {
-                            for entry in entries.flatten() {
-                                if let Some(file_name) = entry.file_name().to_str() {
-                                    files.insert(file_name.to_string());
-                                }
-                            }
-                        }
-
-                        let mut temp = op.data.lock().unwrap();
-                        temp.insert(folder_name.to_string(), files);
-                    }
-                }
-            }
         }
-        (op, email)
     }
 
     pub fn entry_and_verify_user(&self, username: &str) -> Option<()> {
@@ -211,7 +169,12 @@ impl EmailState {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq)]
+pub enum CustomErr {
+    DBError(sqlx::Error),
+    Failed(String),
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, FromRow)]
 pub struct UserCred {
     pub username: String,
     pub email: String,
@@ -225,27 +188,6 @@ impl UserCred {
             email,
             key,
         }
-    }
-
-    pub fn write(&self) -> Result<(), std::io::Error> {
-        let path = Path::new(CRED_PATH).join(&self.username).join("user.json");
-
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        let data = serde_json::to_string_pretty(self)?;
-
-        let mut file = fs::File::create(path)?;
-        file.write_all(&data.as_bytes())?;
-
-        Ok(())
-    }
-
-    pub fn read(user: &str) -> Result<Self, Error> {
-        let path = Path::new(CRED_PATH).join(&user).join("user.json");
-        let file = fs::read_to_string(&path)?;
-        Ok(serde_json::from_str(&file)?)
     }
 
     pub fn authentication(&self, key: String) -> bool {
