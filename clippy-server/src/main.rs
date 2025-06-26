@@ -20,18 +20,21 @@ use sqlx::{PgPool, Pool, Postgres};
 
 async fn signin(new_user: web::Json<NewUser>, pool: web::Data<Pool<Postgres>>) -> impl Responder {
     match is_user_exists(pool.as_ref(), &new_user.user).await {
-        Ok(true) => HttpResponse::Unauthorized().body("Failure: Username already exists"),
+        Ok(true) => HttpResponse::Conflict().body("Failure: Username already exists"),
         Ok(false) => match is_email_exists(pool.as_ref(), &new_user.email.clone().unwrap()).await {
-            Ok(true) => HttpResponse::Unauthorized().body("Failure: Email already exists"),
+            Ok(true) => HttpResponse::Conflict().body("Failure: Email already exists"),
             Ok(false) => {
                 let otp = gen_otp();
                 if let Err(e) = add_otp(&new_user, otp.clone(), pool.as_ref()).await {
-                    println!("{:?}", e);
+                    debug!("{:?}", e);
                     return HttpResponse::InternalServerError().body("Unable to retreve otp");
                 };
                 match send_otp(&new_user, otp).await {
                     Ok(_) => HttpResponse::Ok().body("SURCESS"),
-                    Err(err) => HttpResponse::InternalServerError().body(err.to_string()),
+                    Err(e) => {
+                        debug!("{}", e);
+                        HttpResponse::InternalServerError().body("Unable to check status")
+                    }
                 }
             }
             Err(e) => {

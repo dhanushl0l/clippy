@@ -6,10 +6,10 @@ pub enum Thumbnail {
 }
 
 pub enum Waiting {
-    CheckUser(Option<bool>),
-    SigninOTP(Option<bool>),
-    Login(Option<UserCred>),
-    Signin(Option<UserCred>),
+    CheckUser(Result<bool, String>),
+    SigninOTP(Result<(), String>),
+    Login(Result<UserCred, String>),
+    Signin(Result<UserCred, String>),
     None,
 }
 

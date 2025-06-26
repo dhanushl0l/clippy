@@ -28,6 +28,8 @@ pub fn read_wayland_clipboard(tx: &Sender<(String, String, String)>) -> Result<(
     .map(|s| s.to_string())
     .collect();
 
+    set_global_bool(true);
+
     let mut stream = WlClipboardPasteStream::init(WlListenType::ListenOnCopy).unwrap();
     stream.set_priority(preferred_formats);
     for i in stream.paste_stream().flatten().flatten() {

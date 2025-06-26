@@ -101,7 +101,6 @@ impl Clipboard {
         page: &HashMap<u32, Vec<(PathBuf, bool)>>,
         page_num: u32,
     ) -> Option<Vec<(Thumbnail, PathBuf, Data, bool)>> {
-        println!("{:?}", page);
         let page = page.get(&page_num)?;
         let mut result = Vec::new();
         for path in page {
@@ -371,9 +370,8 @@ impl App for Clipboard {
                                                 if is_valid_username(&username) {
                                                     self.warn = None;
                                                     let wait = self.waiting.clone();
-
+                                                    let ctx = ctx.clone();
                                                     thread::spawn(move || {
-                                                        println!("started");
                                                         let async_runtime = Runtime::new().unwrap();
                                                         let status =
                                                             async_runtime.block_on(async {
@@ -381,6 +379,7 @@ impl App for Clipboard {
                                                             });
                                                         let mut wait_lock = wait.lock().unwrap();
                                                         *wait_lock = Waiting::CheckUser(status);
+                                                        ctx.request_repaint();
                                                     });
                                                 } else {
                                                     self.warn =
@@ -461,26 +460,15 @@ impl App for Clipboard {
                                             if is_valid_email(&self.newuser.email.as_ref().unwrap())
                                             {
                                                 let wait = self.waiting.clone();
-
+                                                let ctx = ctx.clone();
                                                 thread::spawn(move || {
                                                     let async_runtime = Runtime::new().unwrap();
 
                                                     let signin = async_runtime
                                                         .block_on(async { signin(user).await });
-                                                    match signin {
-                                                        Ok(val) => {
-                                                            let mut wait_lock =
-                                                                wait.lock().unwrap();
-                                                            *wait_lock =
-                                                                Waiting::SigninOTP(Some(val));
-                                                        }
-                                                        Err(err) => {
-                                                            eprintln!("{}", err);
-                                                            let mut wait_lock =
-                                                                wait.lock().unwrap();
-                                                            *wait_lock = Waiting::Signin(None);
-                                                        }
-                                                    }
+                                                    let mut wait_lock = wait.lock().unwrap();
+                                                    *wait_lock = Waiting::SigninOTP(signin);
+                                                    ctx.request_repaint();
                                                 });
                                             } else {
                                                 self.warn = Some(String::from("Invalid Email"))
@@ -574,23 +562,16 @@ impl App for Clipboard {
                                                 self.otp.clone(),
                                                 self.key.clone(),
                                             );
+                                            let ctx = ctx.clone();
                                             thread::spawn(move || {
                                                 let async_runtime = Runtime::new().unwrap();
 
                                                 let signin = async_runtime.block_on(async {
                                                     signin_otp_auth(user).await
                                                 });
-                                                match signin {
-                                                    Ok(val) => {
-                                                        let mut wait_lock = wait.lock().unwrap();
-                                                        *wait_lock = Waiting::Signin(Some(val));
-                                                    }
-                                                    Err(err) => {
-                                                        eprintln!("{}", err);
-                                                        let mut wait_lock = wait.lock().unwrap();
-                                                        *wait_lock = Waiting::Signin(None);
-                                                    }
-                                                }
+                                                let mut wait_lock = wait.lock().unwrap();
+                                                *wait_lock = Waiting::Signin(signin);
+                                                ctx.request_repaint();
                                             });
                                         }
                                         ui.add_space(20.0);
@@ -666,25 +647,16 @@ impl App for Clipboard {
                                                     self.key.clone(),
                                                 );
                                                 let wait = self.waiting.clone();
+                                                let ctx = ctx.clone();
                                                 thread::spawn(move || {
                                                     let async_runtime = Runtime::new().unwrap();
 
-                                                    let login_result = async_runtime
+                                                    let status = async_runtime
                                                         .block_on(async { login(&user).await });
 
-                                                    match login_result {
-                                                        Err(err) => {
-                                                            eprintln!("error logging in {}", err);
-                                                            let mut wait_lock =
-                                                                wait.lock().unwrap();
-                                                            *wait_lock = Waiting::Login(None);
-                                                        }
-                                                        Ok(val) => {
-                                                            let mut wait_lock =
-                                                                wait.lock().unwrap();
-                                                            *wait_lock = Waiting::Login(Some(val));
-                                                        }
-                                                    }
+                                                    let mut wait_lock = wait.lock().unwrap();
+                                                    *wait_lock = Waiting::Login(status);
+                                                    ctx.request_repaint();
                                                 });
                                             }
 
@@ -893,53 +865,48 @@ impl App for Clipboard {
                 if let Ok(mut val) = wait.try_lock() {
                     match &*val {
                         Waiting::None => (),
-                        Waiting::CheckUser(Some(true)) => {
+                        Waiting::CheckUser(Ok(true)) => {
                             self.show_signin_window = false;
                             self.show_login_window = true;
                             *val = Waiting::None;
                         }
-                        Waiting::CheckUser(Some(false)) => {
+                        Waiting::CheckUser(Ok(false)) => {
                             self.show_signin_window = false;
                             self.show_createuser_window = true;
                             *val = Waiting::None;
                         }
-                        Waiting::Login(Some(usercred)) => {
+                        Waiting::Login(Ok(usercred)) => {
                             self.settings.set_user(usercred.clone());
                             self.show_login_window = false;
                             log_eprintln!(self.settings.write());
                             *val = Waiting::None;
                         }
-                        Waiting::Login(None) => {
-                            self.show_error = (true, String::from("Authentication failed"));
+                        Waiting::Login(Err(e)) => {
+                            self.show_error = (true, e.to_string());
                             *val = Waiting::None;
                         }
-                        Waiting::CheckUser(None) => {
-                            self.show_error = (true, String::from("Problem connectiong to server"));
+                        Waiting::CheckUser(Err(e)) => {
+                            self.show_error = (true, e.to_string());
                             *val = Waiting::None;
                         }
-                        Waiting::Signin(None) => {
-                            self.show_error = (true, String::from("Invalid OTP or Network error"));
+                        Waiting::Signin(Err(e)) => {
+                            self.show_error = (true, e.into());
                             *val = Waiting::None;
                         }
-                        Waiting::Signin(Some(usercred)) => {
+                        Waiting::Signin(Ok(usercred)) => {
                             self.show_createuser_window = false;
                             self.show_createuser_auth_window = false;
                             self.settings.set_user(usercred.clone());
                             log_eprintln!(self.settings.write());
                             *val = Waiting::None;
                         }
-                        Waiting::SigninOTP(Some(true)) => {
+                        Waiting::SigninOTP(Ok(_)) => {
                             self.show_createuser_window = false;
                             self.show_createuser_auth_window = true;
                             *val = Waiting::None;
                         }
-                        Waiting::SigninOTP(Some(false)) => {
-                            self.show_error =
-                                (true, String::from("Invalid Email or Network error"));
-                            *val = Waiting::None;
-                        }
-                        Waiting::SigninOTP(None) => {
-                            self.show_error = (true, String::from("Network error"));
+                        Waiting::SigninOTP(Err(e)) => {
+                            self.show_error = (true, e.to_string());
                             *val = Waiting::None;
                         }
                     }
@@ -964,7 +931,6 @@ impl App for Clipboard {
         });
 
         if self.changed || get_global_update_bool() {
-            println!("chandge");
             self.refresh();
             self.changed = false;
             set_global_update_bool(false);

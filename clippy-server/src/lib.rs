@@ -1,4 +1,3 @@
-mod email;
 mod ws_connection;
 use actix_multipart::Multipart;
 use actix_web::{HttpResponse, rt};
