@@ -40,16 +40,19 @@ impl UserState {
         }
     }
 
-    pub fn entry_and_verify_user(&self, username: &str) -> Option<()> {
-        let mut map = self.data.lock().unwrap();
-        fs::create_dir_all(format!("{}/{}", DATABASE_PATH, username)).unwrap();
-        if map.contains_key(username) {
-            None
-        } else {
+    pub fn entry(&self, username: &str) -> Result<(), String> {
+        let mut map = self.data.lock().map_err(|_| "Mutex poisoned")?;
+
+        let dir_path = format!("{}/{}", DATABASE_PATH, username);
+        fs::create_dir_all(&dir_path)
+            .map_err(|e| format!("Failed to create dir {}: {}", dir_path, e))?;
+
+        if !map.contains_key(username) {
             map.insert(username.to_string(), BTreeSet::new());
             debug!("{:?}", self);
-            Some(())
         }
+
+        Ok(())
     }
 
     pub fn verify(&self, username: &str) -> bool {

@@ -144,6 +144,9 @@ async fn handle_connection(
             };
         }
     };
+    state
+        .entry(&username)
+        .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
 
     let (res, session, msg_stream) = actix_ws::handle(&req, stream)?;
     let msg_stream = msg_stream.max_frame_size(1024 * 1024 * 40);
