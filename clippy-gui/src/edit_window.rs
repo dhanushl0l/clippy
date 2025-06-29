@@ -1,6 +1,7 @@
 use std::{fs, io::Write, path::PathBuf};
 
 use clippy::Data;
+use clippy_gui::set_lock;
 use egui::ScrollArea;
 use egui::{
     self, Align, Button, CentralPanel, Color32, Layout, Margin, RichText, Stroke, TopBottomPanel,
@@ -34,8 +35,8 @@ impl Clipboard {
                             .on_hover_text("Close without saving")
                             .clicked()
                         {
-                            self.show_data_popup = (false, String::new(), PathBuf::new(), true);
-                            self.changed = true;
+                            self.show_data_popup = (false, String::new(), PathBuf::new(), false);
+                            set_lock!(self.changed, true);
                         }
 
                         let button = Button::new(RichText::new("💾").size(20.0))
@@ -57,8 +58,7 @@ impl Clipboard {
                                     }
                                 }
                             }
-                            self.changed = true;
-                            self.show_data_popup = (false, String::new(), PathBuf::new(), true);
+                            self.show_data_popup = (false, String::new(), PathBuf::new(), false);
                         }
                         let mut button = Button::new(RichText::new("📌").size(20.0))
                             .min_size(Vec2::new(30.0, 30.0))

@@ -36,3 +36,12 @@ pub fn str_formate(text: &str) -> String {
 
     result
 }
+
+#[macro_export]
+macro_rules! set_lock {
+    ($lock:expr, $value:expr) => {
+        if let Ok(mut val) = $lock.try_lock() {
+            *val = $value;
+        }
+    };
+}

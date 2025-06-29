@@ -10,7 +10,7 @@ use clippy::{
     get_global_update_bool, get_path, get_path_pending, is_valid_email, is_valid_username,
     log_eprintln, set_global_update_bool,
 };
-use clippy_gui::{Thumbnail, Waiting};
+use clippy_gui::{Thumbnail, Waiting, set_lock};
 use custom_egui_widget::toggle;
 use eframe::{
     App, NativeOptions,
@@ -31,6 +31,7 @@ use std::{
     process,
     sync::{Arc, Mutex},
     thread,
+    time::Duration,
 };
 use tokio::runtime::Runtime;
 mod clipboard_img_widget;
@@ -42,7 +43,8 @@ mod http;
 struct Clipboard {
     data: HashMap<u32, Vec<(PathBuf, bool)>>,
     page: (u32, Option<Vec<(Thumbnail, PathBuf, Data, bool)>>),
-    changed: bool,
+    changed: Arc<Mutex<bool>>,
+    first_run: bool,
     settings: UserSettings,
     show_settings: bool,
     show_signin_window: bool,
@@ -67,7 +69,8 @@ impl Clipboard {
         Self {
             data,
             page: (1, page),
-            changed: false,
+            changed: Arc::new(Mutex::new(false)),
+            first_run: true,
             settings: match UserSettings::build_user() {
                 Ok(val) => val,
                 Err(err) => {
@@ -182,7 +185,25 @@ impl Clipboard {
     }
 }
 impl App for Clipboard {
-    fn update(&mut self, ctx: &eframe::egui::Context, frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
+        //if this the furst frame create a thread and monitor the clipboard & state changes
+        if self.first_run {
+            let ctxc = ctx.clone();
+            let state = self.changed.clone();
+            std::thread::spawn(move || {
+                loop {
+                    thread::sleep(Duration::from_secs(1));
+                    if get_global_update_bool() {
+                        if let Ok(mut va) = state.try_lock() {
+                            *va = true;
+                        } else {
+                        }
+                        ctxc.request_repaint();
+                    }
+                }
+            });
+            self.first_run = false;
+        }
         let button_size = Vec2::new(100.0, 35.0);
         if !self.show_data_popup.0 {
             TopBottomPanel::top("header").show(ctx, |ui| {
@@ -942,10 +963,12 @@ impl App for Clipboard {
                 }
             });
 
-            if self.changed || get_global_update_bool() {
-                self.refresh();
-                self.changed = false;
-                set_global_update_bool(false);
+            if let Ok(va) = self.changed.clone().try_lock() {
+                if *va {
+                    self.refresh();
+                    set_lock!(self.changed, false);
+                    set_global_update_bool(false);
+                }
             }
 
             CentralPanel::default().show(ctx, |ui| {
@@ -970,7 +993,7 @@ impl App for Clipboard {
                                             &mut i.get_pined(),
                                             self.settings.click_on_quit,
                                             &mut self.show_data_popup,
-                                            &mut self.changed,
+                                            self.changed.clone(),
                                             path,
                                             ctx,
                                             sync,
@@ -995,7 +1018,7 @@ impl App for Clipboard {
                                             &texture,
                                             &mut i.get_pined(),
                                             self.settings.click_on_quit,
-                                            &mut self.changed,
+                                            self.changed.clone(),
                                             path,
                                             ctx,
                                             sync,
@@ -1010,14 +1033,12 @@ impl App for Clipboard {
             });
         } else {
             self.edit_window(ctx);
-            let esc_pressed = ctx.input(|i| i.key_pressed(egui::Key::Escape));
-            if esc_pressed {
-                self.show_data_popup = (false, String::new(), PathBuf::new(), true);
-            }
         }
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            if self.show_settings == true {
+            if self.show_settings {
                 self.show_settings = false;
+            } else if self.show_data_popup.0 {
+                self.show_data_popup = (false, String::new(), PathBuf::new(), false);
             } else {
                 process::exit(0)
             };
