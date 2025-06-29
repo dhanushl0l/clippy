@@ -55,7 +55,7 @@ struct Clipboard {
     show_createuser_auth_window: bool,
     show_error: (bool, String),
     warn: Option<String>,
-    show_data_popup: (bool, String, PathBuf),
+    show_data_popup: (bool, String, PathBuf, bool),
     scrool_to_top: bool,
 }
 
@@ -86,7 +86,7 @@ impl Clipboard {
             key: "".to_string(),
             otp: String::new(),
             waiting: Arc::new(Mutex::new(Waiting::None)),
-            show_data_popup: (false, String::new(), PathBuf::new()),
+            show_data_popup: (false, String::new(), PathBuf::new(), true),
             scrool_to_top: false,
         }
     }
@@ -182,175 +182,278 @@ impl Clipboard {
     }
 }
 impl App for Clipboard {
-    fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &eframe::egui::Context, frame: &mut eframe::Frame) {
         let button_size = Vec2::new(100.0, 35.0);
+        if !self.show_data_popup.0 {
+            TopBottomPanel::top("header").show(ctx, |ui| {
+                let available_width = ui.available_width();
 
-        TopBottomPanel::top("header").show(ctx, |ui| {
-            let available_width = ui.available_width();
-
-            ui.allocate_ui(Vec2::new(available_width, 0.0), |ui| {
-                ui.horizontal(|ui| {
-                    ui.add_space(10.0);
-
-                    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                        Frame::group(ui.style())
-                            .corner_radius(9)
-                            .outer_margin(Margin::same(4))
-                            .show(ui, |ui| {
-                                let button_next = Button::new(RichText::new("⬅").size(15.0))
-                                    .min_size(Vec2::new(20.0, 20.0))
-                                    .corner_radius(50.0)
-                                    .stroke(Stroke::new(
-                                        1.0,
-                                        ui.visuals().widgets.inactive.bg_fill,
-                                    ));
-
-                                if ui.add(button_next).on_hover_text("Previous page").clicked() {
-                                    if self.page.0 > 1 {
-                                        self.page.0 -= 1;
-                                        self.refresh();
-                                        self.scrool_to_top = true;
-                                    }
-                                }
-
-                                ui.label(self.page.0.to_string());
-
-                                let button_prev = Button::new(RichText::new("➡").size(15.0))
-                                    .min_size(Vec2::new(20.0, 20.0))
-                                    .corner_radius(50.0)
-                                    .stroke(Stroke::new(
-                                        1.0,
-                                        ui.visuals().widgets.inactive.bg_fill,
-                                    ));
-
-                                if ui.add(button_prev).on_hover_text("Next page").clicked() {
-                                    if self.data.contains_key(&(self.page.0 + 1)) {
-                                        self.page.0 += 1;
-                                        self.refresh();
-                                        self.scrool_to_top = true;
-                                    }
-                                }
-                            });
-                    });
-
-                    ui.add_space((available_width / 2.0) - 150.0);
-                    ui.label(RichText::new("Clippy").size(40.0));
-
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.allocate_ui(Vec2::new(available_width, 0.0), |ui| {
+                    ui.horizontal(|ui| {
                         ui.add_space(10.0);
 
-                        let button = Button::new(RichText::new("⚙").size(20.0))
-                            .min_size(Vec2::new(30.0, 30.0))
-                            .corner_radius(50.0)
-                            .stroke(Stroke::new(1.0, ui.visuals().widgets.inactive.bg_fill));
+                        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                            Frame::group(ui.style())
+                                .corner_radius(9)
+                                .outer_margin(Margin::same(4))
+                                .show(ui, |ui| {
+                                    let button_next = Button::new(RichText::new("⬅").size(15.0))
+                                        .min_size(Vec2::new(20.0, 20.0))
+                                        .corner_radius(50.0)
+                                        .stroke(Stroke::new(
+                                            1.0,
+                                            ui.visuals().widgets.inactive.bg_fill,
+                                        ));
 
-                        if ui.add(button).on_hover_text("Settings").clicked() {
-                            self.show_settings = true;
-                        }
+                                    if ui.add(button_next).on_hover_text("Previous page").clicked()
+                                    {
+                                        if self.page.0 > 1 {
+                                            self.page.0 -= 1;
+                                            self.refresh();
+                                            self.scrool_to_top = true;
+                                        }
+                                    }
 
-                        ui.add_space(10.0);
+                                    ui.label(self.page.0.to_string());
+
+                                    let button_prev = Button::new(RichText::new("➡").size(15.0))
+                                        .min_size(Vec2::new(20.0, 20.0))
+                                        .corner_radius(50.0)
+                                        .stroke(Stroke::new(
+                                            1.0,
+                                            ui.visuals().widgets.inactive.bg_fill,
+                                        ));
+
+                                    if ui.add(button_prev).on_hover_text("Next page").clicked() {
+                                        if self.data.contains_key(&(self.page.0 + 1)) {
+                                            self.page.0 += 1;
+                                            self.refresh();
+                                            self.scrool_to_top = true;
+                                        }
+                                    }
+                                });
+                        });
+
+                        ui.add_space((available_width / 2.0) - 150.0);
+                        ui.label(RichText::new("Clippy").size(40.0));
+
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            ui.add_space(10.0);
+
+                            let button = Button::new(RichText::new("⚙").size(20.0))
+                                .min_size(Vec2::new(30.0, 30.0))
+                                .corner_radius(50.0)
+                                .stroke(Stroke::new(1.0, ui.visuals().widgets.inactive.bg_fill));
+
+                            if ui.add(button).on_hover_text("Settings").clicked() {
+                                self.show_settings = true;
+                            }
+
+                            ui.add_space(10.0);
+                        });
                     });
                 });
-            });
 
-            if self.show_settings {
-                let mut open = true;
-                egui::Window::new("Settings")
-                    .open(&mut open)
-                    .resizable(false)
-                    .collapsible(false)
-                    .fixed_pos(ctx.screen_rect().center() - egui::vec2(170.0, 270.0))
-                    .show(ctx, |ui| {
-                        egui::Frame::group(ui.style()).show(ui, |ui| {
-                            ui.set_min_width(ui.available_width());
-                            ui.vertical_centered(|ui| {
-                                if let Some(user_data) = self.settings.get_sync() {
-                                    let user_data = user_data.clone();
-                                    ui.vertical_centered(|ui| {
+                if self.show_settings {
+                    let mut open = true;
+                    egui::Window::new("Settings")
+                        .open(&mut open)
+                        .resizable(false)
+                        .collapsible(false)
+                        .fixed_pos(ctx.screen_rect().center() - egui::vec2(170.0, 270.0))
+                        .show(ctx, |ui| {
+                            egui::Frame::group(ui.style()).show(ui, |ui| {
+                                ui.set_min_width(ui.available_width());
+                                ui.vertical_centered(|ui| {
+                                    if let Some(user_data) = self.settings.get_sync() {
+                                        let user_data = user_data.clone();
+                                        ui.vertical_centered(|ui| {
+                                            ui.label(RichText::new("😃").size(150.0).strong());
+
+                                            ui.label(
+                                                RichText::new("username:").size(12.3).strong(),
+                                            );
+                                            ui.label(RichText::new(user_data.username).size(15.0));
+
+                                            ui.add_space(10.0);
+
+                                            let button = ui.add(
+                                                egui::Button::new(
+                                                    RichText::new("Log out").size(16.0).strong(),
+                                                )
+                                                .min_size(button_size),
+                                            );
+                                            if button.clicked() {
+                                                self.settings.remove_user();
+                                                log_eprintln!(self.settings.write());
+                                            }
+
+                                            ui.add_space(10.0);
+                                        });
+                                    } else if self.show_error.0 {
+                                        ui.label(RichText::new("😢").size(150.0));
+
+                                        ui.label(
+                                            RichText::new(&self.show_error.1).size(20.0).strong(),
+                                        );
+                                        ui.add_space(10.0);
+                                        if ui
+                                            .add(
+                                                egui::Button::new(
+                                                    egui::RichText::new("Cancel")
+                                                        .size(16.0)
+                                                        .strong(),
+                                                )
+                                                .min_size(button_size),
+                                            )
+                                            .clicked()
+                                        {
+                                            self.show_error = (false, String::new())
+                                        }
+                                        ui.add_space(10.0);
+                                    } else if self.show_signin_window {
                                         ui.label(RichText::new("😃").size(150.0).strong());
 
-                                        ui.label(RichText::new("username:").size(12.3).strong());
-                                        ui.label(RichText::new(user_data.username).size(15.0));
+                                        ui.vertical_centered(|ui| {
+                                            ui.add_space(10.0);
 
-                                        ui.add_space(10.0);
+                                            ui.label(
+                                                RichText::new("Enter your details")
+                                                    .size(20.0)
+                                                    .strong(),
+                                            );
 
-                                        let button = ui.add(
-                                            egui::Button::new(
-                                                RichText::new("Log out").size(16.0).strong(),
-                                            )
-                                            .min_size(button_size),
-                                        );
-                                        if button.clicked() {
-                                            self.settings.remove_user();
-                                            log_eprintln!(self.settings.write());
-                                        }
+                                            ui.add_space(8.0);
 
-                                        ui.add_space(10.0);
-                                    });
-                                } else if self.show_error.0 {
-                                    ui.label(RichText::new("😢").size(150.0));
+                                            ui.label(RichText::new(
+                                                "Username must be 3–20 characters \
+                                                 long and contain only letters, numbers, \
+                                                or underscores (no spaces or special symbols).",
+                                            ));
 
-                                    ui.label(RichText::new(&self.show_error.1).size(20.0).strong());
-                                    ui.add_space(10.0);
-                                    if ui
-                                        .add(
-                                            egui::Button::new(
-                                                egui::RichText::new("Cancel").size(16.0).strong(),
-                                            )
-                                            .min_size(button_size),
-                                        )
-                                        .clicked()
-                                    {
-                                        self.show_error = (false, String::new())
-                                    }
-                                    ui.add_space(10.0);
-                                } else if self.show_signin_window {
-                                    ui.label(RichText::new("😃").size(150.0).strong());
+                                            ui.add_space(8.0);
 
-                                    ui.vertical_centered(|ui| {
-                                        ui.add_space(10.0);
+                                            ui.style_mut().override_text_style =
+                                                Some(TextStyle::Heading);
+
+                                            let response = ui.add(
+                                                TextEdit::singleline(&mut self.newuser.user)
+                                                    .vertical_align(Align::Center)
+                                                    .hint_text("enter the username"),
+                                            );
+
+                                            let enter_pressed = response.lost_focus()
+                                                && ui.input(|i| i.key_pressed(egui::Key::Enter));
+
+                                            if let Some(val) = &self.warn {
+                                                ui.colored_label(egui::Color32::RED, val);
+                                            }
+
+                                            ui.style_mut().override_text_style = None;
+
+                                            ui.add_space(10.0);
+
+                                            let total_button_width =
+                                                button_size.x * 2.0 + 20.0 + 2.0 * 35.0;
+                                            let available_width = ui.available_width();
+                                            let horizontal_padding =
+                                                (available_width - total_button_width).max(0.0)
+                                                    / 2.0;
+
+                                            ui.horizontal(|ui| {
+                                                ui.add_space(horizontal_padding);
+                                                ui.add_space(35.0);
+
+                                                if ui
+                                                    .add(
+                                                        egui::Button::new(
+                                                            egui::RichText::new("Sign in")
+                                                                .size(16.0)
+                                                                .strong(),
+                                                        )
+                                                        .min_size(button_size),
+                                                    )
+                                                    .clicked()
+                                                    || enter_pressed
+                                                {
+                                                    let username = self.newuser.user.clone();
+                                                    if is_valid_username(&username) {
+                                                        self.warn = None;
+                                                        let wait = self.waiting.clone();
+                                                        let ctx = ctx.clone();
+                                                        thread::spawn(move || {
+                                                            let async_runtime =
+                                                                Runtime::new().unwrap();
+                                                            let status =
+                                                                async_runtime.block_on(async {
+                                                                    check_user(username).await
+                                                                });
+                                                            let mut wait_lock =
+                                                                wait.lock().unwrap();
+                                                            *wait_lock = Waiting::CheckUser(status);
+                                                            ctx.request_repaint();
+                                                        });
+                                                    } else {
+                                                        self.warn =
+                                                            Some(String::from("Invalid username"));
+                                                    }
+                                                }
+                                                ui.add_space(20.0);
+
+                                                if ui
+                                                    .add(
+                                                        egui::Button::new(
+                                                            egui::RichText::new("Cancel")
+                                                                .size(16.0)
+                                                                .strong(),
+                                                        )
+                                                        .min_size(button_size),
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    self.show_signin_window = false;
+                                                }
+                                            });
+                                            ui.add_space(10.0);
+                                        });
+                                    } else if self.show_createuser_window {
+                                        ui.label(RichText::new("😃").size(150.0).strong());
 
                                         ui.label(
                                             RichText::new("Enter your details").size(20.0).strong(),
                                         );
-
                                         ui.add_space(8.0);
 
-                                        ui.label(RichText::new(
-                                            "Username must be 3–20 characters \
-                                                 long and contain only letters, numbers, \
-                                                or underscores (no spaces or special symbols).",
-                                        ));
+                                        let mut enter_pressed = false;
 
-                                        ui.add_space(8.0);
+                                        if let Some(email) = &mut self.newuser.email {
+                                            ui.style_mut().override_text_style =
+                                                Some(TextStyle::Heading);
 
-                                        ui.style_mut().override_text_style =
-                                            Some(TextStyle::Heading);
+                                            let response = ui.add(
+                                                TextEdit::singleline(email)
+                                                    .vertical_align(Align::Center)
+                                                    .hint_text("Enter the Email"),
+                                            );
 
-                                        let response = ui.add(
-                                            TextEdit::singleline(&mut self.newuser.user)
-                                                .vertical_align(Align::Center)
-                                                .hint_text("enter the username"),
-                                        );
-
-                                        let enter_pressed = response.lost_focus()
-                                            && ui.input(|i| i.key_pressed(egui::Key::Enter));
-
+                                            enter_pressed = response.lost_focus()
+                                                && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                                        }
                                         if let Some(val) = &self.warn {
                                             ui.colored_label(egui::Color32::RED, val);
                                         }
-
                                         ui.style_mut().override_text_style = None;
 
                                         ui.add_space(10.0);
 
-                                        let total_button_width =
-                                            button_size.x * 2.0 + 20.0 + 2.0 * 35.0;
-                                        let available_width = ui.available_width();
-                                        let horizontal_padding =
-                                            (available_width - total_button_width).max(0.0) / 2.0;
-
                                         ui.horizontal(|ui| {
+                                            let total_button_width =
+                                                button_size.x * 2.0 + 20.0 + 2.0 * 35.0;
+                                            let available_width = ui.available_width();
+                                            let horizontal_padding =
+                                                (available_width - total_button_width).max(0.0)
+                                                    / 2.0;
+
                                             ui.add_space(horizontal_padding);
                                             ui.add_space(35.0);
 
@@ -366,28 +469,27 @@ impl App for Clipboard {
                                                 .clicked()
                                                 || enter_pressed
                                             {
-                                                let username = self.newuser.user.clone();
-                                                if is_valid_username(&username) {
-                                                    self.warn = None;
+                                                let user = self.newuser.clone();
+                                                if is_valid_email(
+                                                    &self.newuser.email.as_ref().unwrap(),
+                                                ) {
                                                     let wait = self.waiting.clone();
                                                     let ctx = ctx.clone();
                                                     thread::spawn(move || {
                                                         let async_runtime = Runtime::new().unwrap();
-                                                        let status =
-                                                            async_runtime.block_on(async {
-                                                                check_user(username).await
-                                                            });
+
+                                                        let signin = async_runtime
+                                                            .block_on(async { signin(user).await });
                                                         let mut wait_lock = wait.lock().unwrap();
-                                                        *wait_lock = Waiting::CheckUser(status);
+                                                        *wait_lock = Waiting::SigninOTP(signin);
                                                         ctx.request_repaint();
                                                     });
                                                 } else {
-                                                    self.warn =
-                                                        Some(String::from("Invalid username"));
+                                                    self.warn = Some(String::from("Invalid Email"))
                                                 }
                                             }
-                                            ui.add_space(20.0);
 
+                                            ui.add_space(10.0);
                                             if ui
                                                 .add(
                                                     egui::Button::new(
@@ -399,199 +501,11 @@ impl App for Clipboard {
                                                 )
                                                 .clicked()
                                             {
-                                                self.show_signin_window = false;
+                                                self.show_createuser_window = false;
                                             }
                                         });
-                                        ui.add_space(10.0);
-                                    });
-                                } else if self.show_createuser_window {
-                                    ui.label(RichText::new("😃").size(150.0).strong());
-
-                                    ui.label(
-                                        RichText::new("Enter your details").size(20.0).strong(),
-                                    );
-                                    ui.add_space(8.0);
-
-                                    let mut enter_pressed = false;
-
-                                    if let Some(email) = &mut self.newuser.email {
-                                        ui.style_mut().override_text_style =
-                                            Some(TextStyle::Heading);
-
-                                        let response = ui.add(
-                                            TextEdit::singleline(email)
-                                                .vertical_align(Align::Center)
-                                                .hint_text("Enter the Email"),
-                                        );
-
-                                        enter_pressed = response.lost_focus()
-                                            && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                                    }
-                                    if let Some(val) = &self.warn {
-                                        ui.colored_label(egui::Color32::RED, val);
-                                    }
-                                    ui.style_mut().override_text_style = None;
-
-                                    ui.add_space(10.0);
-
-                                    ui.horizontal(|ui| {
-                                        let total_button_width =
-                                            button_size.x * 2.0 + 20.0 + 2.0 * 35.0;
-                                        let available_width = ui.available_width();
-                                        let horizontal_padding =
-                                            (available_width - total_button_width).max(0.0) / 2.0;
-
-                                        ui.add_space(horizontal_padding);
-                                        ui.add_space(35.0);
-
-                                        if ui
-                                            .add(
-                                                egui::Button::new(
-                                                    egui::RichText::new("Sign in")
-                                                        .size(16.0)
-                                                        .strong(),
-                                                )
-                                                .min_size(button_size),
-                                            )
-                                            .clicked()
-                                            || enter_pressed
-                                        {
-                                            let user = self.newuser.clone();
-                                            if is_valid_email(&self.newuser.email.as_ref().unwrap())
-                                            {
-                                                let wait = self.waiting.clone();
-                                                let ctx = ctx.clone();
-                                                thread::spawn(move || {
-                                                    let async_runtime = Runtime::new().unwrap();
-
-                                                    let signin = async_runtime
-                                                        .block_on(async { signin(user).await });
-                                                    let mut wait_lock = wait.lock().unwrap();
-                                                    *wait_lock = Waiting::SigninOTP(signin);
-                                                    ctx.request_repaint();
-                                                });
-                                            } else {
-                                                self.warn = Some(String::from("Invalid Email"))
-                                            }
-                                        }
-
-                                        ui.add_space(10.0);
-                                        if ui
-                                            .add(
-                                                egui::Button::new(
-                                                    egui::RichText::new("Cancel")
-                                                        .size(16.0)
-                                                        .strong(),
-                                                )
-                                                .min_size(button_size),
-                                            )
-                                            .clicked()
-                                        {
-                                            self.show_createuser_window = false;
-                                        }
-                                    });
-                                    ui.add_space(20.0);
-                                } else if self.show_createuser_auth_window {
-                                    ui.label(RichText::new("😃").size(150.0).strong());
-
-                                    ui.label(
-                                        RichText::new("Enter your details").size(20.0).strong(),
-                                    );
-
-                                    ui.add_space(8.0);
-
-                                    ui.style_mut().override_text_style = Some(TextStyle::Heading);
-
-                                    let response = ui.add(
-                                        TextEdit::singleline(&mut self.otp)
-                                            .vertical_align(Align::Center)
-                                            .hint_text("enter the OTP")
-                                            .min_size(button_size),
-                                    );
-
-                                    let enter_pressed = response.lost_focus()
-                                        && ui.input(|i| i.key_pressed(egui::Key::Enter));
-
-                                    ui.add_space(8.0);
-
-                                    let response = ui.add(
-                                        TextEdit::singleline(&mut self.key)
-                                            .vertical_align(Align::Center)
-                                            .hint_text("enter the Password")
-                                            .password(true)
-                                            .min_size(button_size),
-                                    );
-
-                                    if enter_pressed {
-                                        response.request_focus();
-                                    }
-
-                                    let enter_pressed = response.lost_focus()
-                                        && ui.input(|i| i.key_pressed(egui::Key::Enter));
-
-                                    ui.style_mut().override_text_style = None;
-
-                                    ui.add_space(10.0);
-
-                                    ui.horizontal(|ui| {
-                                        let total_button_width =
-                                            button_size.x * 2.0 + 20.0 + 2.0 * 35.0;
-                                        let available_width = ui.available_width();
-                                        let horizontal_padding =
-                                            (available_width - total_button_width).max(0.0) / 2.0;
-
-                                        ui.add_space(horizontal_padding);
-                                        ui.add_space(35.0);
-
-                                        if ui
-                                            .add(
-                                                egui::Button::new(
-                                                    egui::RichText::new("Sign in")
-                                                        .size(16.0)
-                                                        .strong(),
-                                                )
-                                                .min_size(button_size),
-                                            )
-                                            .clicked()
-                                            || enter_pressed
-                                        {
-                                            let wait = self.waiting.clone();
-                                            let user = NewUserOtp::new(
-                                                self.newuser.user.clone(),
-                                                self.newuser.email.clone().unwrap(),
-                                                self.otp.clone(),
-                                                self.key.clone(),
-                                            );
-                                            let ctx = ctx.clone();
-                                            thread::spawn(move || {
-                                                let async_runtime = Runtime::new().unwrap();
-
-                                                let signin = async_runtime.block_on(async {
-                                                    signin_otp_auth(user).await
-                                                });
-                                                let mut wait_lock = wait.lock().unwrap();
-                                                *wait_lock = Waiting::Signin(signin);
-                                                ctx.request_repaint();
-                                            });
-                                        }
                                         ui.add_space(20.0);
-                                        if ui
-                                            .add(
-                                                egui::Button::new(
-                                                    egui::RichText::new("Cancel")
-                                                        .size(16.0)
-                                                        .strong(),
-                                                )
-                                                .min_size(button_size),
-                                            )
-                                            .clicked()
-                                        {
-                                            self.show_createuser_auth_window = false;
-                                        }
-                                        ui.add_space(20.0);
-                                    });
-                                } else if self.show_login_window {
-                                    ui.vertical_centered(|ui| {
+                                    } else if self.show_createuser_auth_window {
                                         ui.label(RichText::new("😃").size(150.0).strong());
 
                                         ui.label(
@@ -599,19 +513,34 @@ impl App for Clipboard {
                                         );
 
                                         ui.add_space(8.0);
-                                        ui.label(RichText::new("Password:").size(15.0).strong());
 
                                         ui.style_mut().override_text_style =
                                             Some(TextStyle::Heading);
+
+                                        let response = ui.add(
+                                            TextEdit::singleline(&mut self.otp)
+                                                .vertical_align(Align::Center)
+                                                .hint_text("enter the OTP")
+                                                .min_size(button_size),
+                                        );
+
+                                        let enter_pressed = response.lost_focus()
+                                            && ui.input(|i| i.key_pressed(egui::Key::Enter));
 
                                         ui.add_space(8.0);
 
                                         let response = ui.add(
                                             TextEdit::singleline(&mut self.key)
                                                 .vertical_align(Align::Center)
-                                                .hint_text("Enter the Password")
-                                                .password(true),
+                                                .hint_text("enter the Password")
+                                                .password(true)
+                                                .min_size(button_size),
                                         );
+
+                                        if enter_pressed {
+                                            response.request_focus();
+                                        }
+
                                         let enter_pressed = response.lost_focus()
                                             && ui.input(|i| i.key_pressed(egui::Key::Enter));
 
@@ -633,7 +562,7 @@ impl App for Clipboard {
                                             if ui
                                                 .add(
                                                     egui::Button::new(
-                                                        egui::RichText::new("Login")
+                                                        egui::RichText::new("Sign in")
                                                             .size(16.0)
                                                             .strong(),
                                                     )
@@ -642,26 +571,26 @@ impl App for Clipboard {
                                                 .clicked()
                                                 || enter_pressed
                                             {
-                                                let user = LoginUserCred::new(
+                                                let wait = self.waiting.clone();
+                                                let user = NewUserOtp::new(
                                                     self.newuser.user.clone(),
+                                                    self.newuser.email.clone().unwrap(),
+                                                    self.otp.clone(),
                                                     self.key.clone(),
                                                 );
-                                                let wait = self.waiting.clone();
                                                 let ctx = ctx.clone();
                                                 thread::spawn(move || {
                                                     let async_runtime = Runtime::new().unwrap();
 
-                                                    let status = async_runtime
-                                                        .block_on(async { login(&user).await });
-
+                                                    let signin = async_runtime.block_on(async {
+                                                        signin_otp_auth(user).await
+                                                    });
                                                     let mut wait_lock = wait.lock().unwrap();
-                                                    *wait_lock = Waiting::Login(status);
+                                                    *wait_lock = Waiting::Signin(signin);
                                                     ctx.request_repaint();
                                                 });
                                             }
-
                                             ui.add_space(20.0);
-
                                             if ui
                                                 .add(
                                                     egui::Button::new(
@@ -673,30 +602,121 @@ impl App for Clipboard {
                                                 )
                                                 .clicked()
                                             {
-                                                self.show_login_window = false;
+                                                self.show_createuser_auth_window = false;
                                             }
-
-                                            ui.add_space(35.0);
+                                            ui.add_space(20.0);
                                         });
-                                        ui.add_space(10.0);
-                                    });
-                                } else {
-                                    ui.label(RichText::new("😃").size(150.0).strong());
-                                    let signin_button = ui.add(
-                                        Button::new(
-                                            RichText::new("Enabel Sync").size(24.0).strong(),
-                                        )
-                                        .min_size(Vec2::new(100.0, 40.0)),
-                                    );
+                                    } else if self.show_login_window {
+                                        ui.vertical_centered(|ui| {
+                                            ui.label(RichText::new("😃").size(150.0).strong());
 
-                                    if signin_button.clicked() {
-                                        self.show_signin_window = true;
+                                            ui.label(
+                                                RichText::new("Enter your details")
+                                                    .size(20.0)
+                                                    .strong(),
+                                            );
+
+                                            ui.add_space(8.0);
+                                            ui.label(
+                                                RichText::new("Password:").size(15.0).strong(),
+                                            );
+
+                                            ui.style_mut().override_text_style =
+                                                Some(TextStyle::Heading);
+
+                                            ui.add_space(8.0);
+
+                                            let response = ui.add(
+                                                TextEdit::singleline(&mut self.key)
+                                                    .vertical_align(Align::Center)
+                                                    .hint_text("Enter the Password")
+                                                    .password(true),
+                                            );
+                                            let enter_pressed = response.lost_focus()
+                                                && ui.input(|i| i.key_pressed(egui::Key::Enter));
+
+                                            ui.style_mut().override_text_style = None;
+
+                                            ui.add_space(10.0);
+
+                                            ui.horizontal(|ui| {
+                                                let total_button_width =
+                                                    button_size.x * 2.0 + 20.0 + 2.0 * 35.0;
+                                                let available_width = ui.available_width();
+                                                let horizontal_padding =
+                                                    (available_width - total_button_width).max(0.0)
+                                                        / 2.0;
+
+                                                ui.add_space(horizontal_padding);
+                                                ui.add_space(35.0);
+
+                                                if ui
+                                                    .add(
+                                                        egui::Button::new(
+                                                            egui::RichText::new("Login")
+                                                                .size(16.0)
+                                                                .strong(),
+                                                        )
+                                                        .min_size(button_size),
+                                                    )
+                                                    .clicked()
+                                                    || enter_pressed
+                                                {
+                                                    let user = LoginUserCred::new(
+                                                        self.newuser.user.clone(),
+                                                        self.key.clone(),
+                                                    );
+                                                    let wait = self.waiting.clone();
+                                                    let ctx = ctx.clone();
+                                                    thread::spawn(move || {
+                                                        let async_runtime = Runtime::new().unwrap();
+
+                                                        let status = async_runtime
+                                                            .block_on(async { login(&user).await });
+
+                                                        let mut wait_lock = wait.lock().unwrap();
+                                                        *wait_lock = Waiting::Login(status);
+                                                        ctx.request_repaint();
+                                                    });
+                                                }
+
+                                                ui.add_space(20.0);
+
+                                                if ui
+                                                    .add(
+                                                        egui::Button::new(
+                                                            egui::RichText::new("Cancel")
+                                                                .size(16.0)
+                                                                .strong(),
+                                                        )
+                                                        .min_size(button_size),
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    self.show_login_window = false;
+                                                }
+
+                                                ui.add_space(35.0);
+                                            });
+                                            ui.add_space(10.0);
+                                        });
+                                    } else {
+                                        ui.label(RichText::new("😃").size(150.0).strong());
+                                        let signin_button = ui.add(
+                                            Button::new(
+                                                RichText::new("Enabel Sync").size(24.0).strong(),
+                                            )
+                                            .min_size(Vec2::new(100.0, 40.0)),
+                                        );
+
+                                        if signin_button.clicked() {
+                                            self.show_signin_window = true;
+                                        }
+                                        ui.add_space(10.0);
                                     }
-                                    ui.add_space(10.0);
-                                }
+                                });
                             });
-                        });
-                        egui::Frame::group(ui.style()).show(ui, |ui| {
+                            egui::Frame::group(ui.style()).show(ui, |ui| {
                             ui.set_min_width(ui.available_width());
                             ui.horizontal(|ui| {
                                 ui.label("Theme");
@@ -849,153 +869,152 @@ impl App for Clipboard {
                             }
                         });
 
-                        ui.separator();
+                            ui.separator();
 
-                        ui.vertical_centered(|ui| {
-                            ui.label("Thanks for using the app!");
+                            ui.vertical_centered(|ui| {
+                                ui.label("Thanks for using the app!");
 
-                            ui.hyperlink_to(
-                                "Project Repository",
-                                "https://github.com/dhanushl0l/clippy",
-                            );
+                                ui.hyperlink_to(
+                                    "Project Repository",
+                                    "https://github.com/dhanushl0l/clippy",
+                                );
+                            });
                         });
-                    });
 
-                let wait: Arc<Mutex<Waiting>> = self.waiting.clone();
-                if let Ok(mut val) = wait.try_lock() {
-                    match &*val {
-                        Waiting::None => (),
-                        Waiting::CheckUser(Ok(true)) => {
-                            self.show_signin_window = false;
-                            self.show_login_window = true;
-                            *val = Waiting::None;
-                        }
-                        Waiting::CheckUser(Ok(false)) => {
-                            self.show_signin_window = false;
-                            self.show_createuser_window = true;
-                            *val = Waiting::None;
-                        }
-                        Waiting::Login(Ok(usercred)) => {
-                            self.settings.set_user(usercred.clone());
-                            self.show_login_window = false;
-                            log_eprintln!(self.settings.write());
-                            *val = Waiting::None;
-                        }
-                        Waiting::Login(Err(e)) => {
-                            self.show_error = (true, e.to_string());
-                            *val = Waiting::None;
-                        }
-                        Waiting::CheckUser(Err(e)) => {
-                            self.show_error = (true, e.to_string());
-                            *val = Waiting::None;
-                        }
-                        Waiting::Signin(Err(e)) => {
-                            self.show_error = (true, e.into());
-                            *val = Waiting::None;
-                        }
-                        Waiting::Signin(Ok(usercred)) => {
-                            self.show_createuser_window = false;
-                            self.show_createuser_auth_window = false;
-                            self.settings.set_user(usercred.clone());
-                            log_eprintln!(self.settings.write());
-                            *val = Waiting::None;
-                        }
-                        Waiting::SigninOTP(Ok(_)) => {
-                            self.show_createuser_window = false;
-                            self.show_createuser_auth_window = true;
-                            *val = Waiting::None;
-                        }
-                        Waiting::SigninOTP(Err(e)) => {
-                            self.show_error = (true, e.to_string());
-                            *val = Waiting::None;
-                        }
-                    }
-                }
-
-                if !open {
-                    self.show_settings = false;
-                    self.show_login_window = false;
-                    self.show_createuser_window = false;
-                    self.show_error = (false, "".to_string());
-                    self.show_signin_window = false;
-                }
-            }
-
-            if self.show_data_popup.0 {
-                self.edit_window(ctx);
-                let esc_pressed = ctx.input(|i| i.key_pressed(egui::Key::Escape));
-                if esc_pressed {
-                    self.show_data_popup = (false, String::new(), PathBuf::new());
-                }
-            }
-        });
-
-        if self.changed || get_global_update_bool() {
-            self.refresh();
-            self.changed = false;
-            set_global_update_bool(false);
-        }
-
-        CentralPanel::default().show(ctx, |ui| {
-            ui.vertical_centered(|ui| {
-                ScrollArea::vertical().show(ui, |ui| {
-                    if self.scrool_to_top {
-                        let top_rect = ui.allocate_response(Vec2::ZERO, Sense::hover()).rect;
-                        ui.scroll_to_rect(top_rect, Some(Align::TOP));
-                        self.scrool_to_top = false;
-                    }
-
-                    let data = &self.page.1;
-
-                    if let Some(data) = data {
-                        for (thumbnail, path, i, sync) in data {
-                            if let Some(dat) = i.get_data() {
-                                ui.add_enabled_ui(true, |ui| {
-                                    item_card(
-                                        ui,
-                                        &dat,
-                                        thumbnail,
-                                        &mut i.get_pined(),
-                                        self.settings.click_on_quit,
-                                        &mut self.show_data_popup,
-                                        &mut self.changed,
-                                        path,
-                                        ctx,
-                                        sync,
-                                    )
-                                });
-                            } else if let Thumbnail::Image((image_data, (width, height))) =
-                                thumbnail
-                            {
-                                let color_image = egui::ColorImage::from_rgba_unmultiplied(
-                                    [*width as usize, *height as usize],
-                                    &image_data,
-                                );
-
-                                let texture: egui::TextureHandle = ctx.load_texture(
-                                    "thumbnail",
-                                    color_image,
-                                    egui::TextureOptions::LINEAR,
-                                );
-                                ui.add_enabled_ui(true, |ui| {
-                                    item_card_image(
-                                        ui,
-                                        &texture,
-                                        &mut i.get_pined(),
-                                        self.settings.click_on_quit,
-                                        &mut self.changed,
-                                        path,
-                                        ctx,
-                                        sync,
-                                    )
-                                });
+                    let wait: Arc<Mutex<Waiting>> = self.waiting.clone();
+                    if let Ok(mut val) = wait.try_lock() {
+                        match &*val {
+                            Waiting::None => (),
+                            Waiting::CheckUser(Ok(true)) => {
+                                self.show_signin_window = false;
+                                self.show_login_window = true;
+                                *val = Waiting::None;
+                            }
+                            Waiting::CheckUser(Ok(false)) => {
+                                self.show_signin_window = false;
+                                self.show_createuser_window = true;
+                                *val = Waiting::None;
+                            }
+                            Waiting::Login(Ok(usercred)) => {
+                                self.settings.set_user(usercred.clone());
+                                self.show_login_window = false;
+                                log_eprintln!(self.settings.write());
+                                *val = Waiting::None;
+                            }
+                            Waiting::Login(Err(e)) => {
+                                self.show_error = (true, e.to_string());
+                                *val = Waiting::None;
+                            }
+                            Waiting::CheckUser(Err(e)) => {
+                                self.show_error = (true, e.to_string());
+                                *val = Waiting::None;
+                            }
+                            Waiting::Signin(Err(e)) => {
+                                self.show_error = (true, e.into());
+                                *val = Waiting::None;
+                            }
+                            Waiting::Signin(Ok(usercred)) => {
+                                self.show_createuser_window = false;
+                                self.show_createuser_auth_window = false;
+                                self.settings.set_user(usercred.clone());
+                                log_eprintln!(self.settings.write());
+                                *val = Waiting::None;
+                            }
+                            Waiting::SigninOTP(Ok(_)) => {
+                                self.show_createuser_window = false;
+                                self.show_createuser_auth_window = true;
+                                *val = Waiting::None;
+                            }
+                            Waiting::SigninOTP(Err(e)) => {
+                                self.show_error = (true, e.to_string());
+                                *val = Waiting::None;
                             }
                         }
                     }
-                    ui.label("");
+
+                    if !open {
+                        self.show_settings = false;
+                        self.show_login_window = false;
+                        self.show_createuser_window = false;
+                        self.show_error = (false, "".to_string());
+                        self.show_signin_window = false;
+                    }
+                }
+            });
+
+            if self.changed || get_global_update_bool() {
+                self.refresh();
+                self.changed = false;
+                set_global_update_bool(false);
+            }
+
+            CentralPanel::default().show(ctx, |ui| {
+                ui.vertical_centered(|ui| {
+                    ScrollArea::vertical().show(ui, |ui| {
+                        if self.scrool_to_top {
+                            let top_rect = ui.allocate_response(Vec2::ZERO, Sense::hover()).rect;
+                            ui.scroll_to_rect(top_rect, Some(Align::TOP));
+                            self.scrool_to_top = false;
+                        }
+
+                        let data = &self.page.1;
+
+                        if let Some(data) = data {
+                            for (thumbnail, path, i, sync) in data {
+                                if let Some(dat) = i.get_data() {
+                                    ui.add_enabled_ui(true, |ui| {
+                                        item_card(
+                                            ui,
+                                            &dat,
+                                            thumbnail,
+                                            &mut i.get_pined(),
+                                            self.settings.click_on_quit,
+                                            &mut self.show_data_popup,
+                                            &mut self.changed,
+                                            path,
+                                            ctx,
+                                            sync,
+                                        )
+                                    });
+                                } else if let Thumbnail::Image((image_data, (width, height))) =
+                                    thumbnail
+                                {
+                                    let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                                        [*width as usize, *height as usize],
+                                        &image_data,
+                                    );
+
+                                    let texture: egui::TextureHandle = ctx.load_texture(
+                                        "thumbnail",
+                                        color_image,
+                                        egui::TextureOptions::LINEAR,
+                                    );
+                                    ui.add_enabled_ui(true, |ui| {
+                                        item_card_image(
+                                            ui,
+                                            &texture,
+                                            &mut i.get_pined(),
+                                            self.settings.click_on_quit,
+                                            &mut self.changed,
+                                            path,
+                                            ctx,
+                                            sync,
+                                        )
+                                    });
+                                }
+                            }
+                        }
+                        ui.label("");
+                    });
                 });
             });
-        });
+        } else {
+            self.edit_window(ctx);
+            let esc_pressed = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+            if esc_pressed {
+                self.show_data_popup = (false, String::new(), PathBuf::new(), true);
+            }
+        }
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             if self.show_settings == true {
                 self.show_settings = false;

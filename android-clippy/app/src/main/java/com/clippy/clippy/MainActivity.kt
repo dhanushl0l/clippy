@@ -1,18 +1,17 @@
 package com.clippy.clippy
 
+import android.Manifest
+import android.app.ActivityManager
+import android.content.Context
+import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.annotation.RequiresApi
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
-import com.clippy.clippy.ui.theme.ClippyTheme
-import androidx.compose.runtime.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Notifications
@@ -21,53 +20,79 @@ import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
+import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.core.app.ActivityCompat
 import androidx.navigation.NavController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.clippy.clippy.ui.theme.ClippyTheme
 
 class MainActivity : ComponentActivity() {
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        ActivityCompat.requestPermissions(
+            this,
+            arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+            0,
+        )
+
         enableEdgeToEdge()
+
+        if (!isServiceRunning(RunningServ::class.java)) {
+            Intent(applicationContext, RunningServ::class.java).also {
+                it.action = RunningServ.Service.START.toString()
+                startService(it)
+            }
+        }
+
         setContent {
             val navigation = rememberNavController()
             ClippyTheme {
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
-                    bottomBar = { Navbar(navigation) }
+                    bottomBar = { navbar(navigation) },
                 ) { innerPadding ->
                     NavHost(
                         navController = navigation,
                         startDestination = "Clipboard",
-                        modifier = Modifier.padding(innerPadding)
+                        modifier = Modifier.padding(innerPadding),
                     ) {
-                        composable("Notifications") {
-                            Notification()
-                        }
-                        composable("Clipboard") {
-                            Clipboard()
-                        }
-                        composable("Settings") {
-                            Settings()
-                        }
+                        composable("Notifications") { notification() }
+                        composable("Clipboard") { clipboard() }
+                        composable("Settings") { settings() }
                     }
                 }
             }
         }
     }
+
+    private fun isServiceRunning(serviceClass: Class<*>): Boolean {
+        val manager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        @Suppress("DEPRECATION")
+        for (service in manager.getRunningServices(Int.MAX_VALUE)) {
+            if (serviceClass.name == service.service.className) return true
+        }
+        return false
+    }
 }
 
 @Composable
-fun Navbar(navController: NavController) {
+fun navbar(navController: NavController) {
     val items = listOf("Clipboard", "Notifications", "Settings")
     val selectedIcons = listOf(Icons.Filled.Email, Icons.Filled.Notifications, Icons.Filled.Settings)
     val unselectedIcons = listOf(Icons.Outlined.Email, Icons.Outlined.Notifications, Icons.Outlined.Settings)
 
-    val navBackStackEntry by navController.currentBackStackEntryAsState()
-    val currentRoute = navBackStackEntry?.destination?.route
+    val navBackStackEntry = navController.currentBackStackEntryAsState()
+    val currentRoute = navBackStackEntry.value?.destination?.route
     val selectedIndex = items.indexOf(currentRoute)
 
     NavigationBar {
@@ -76,7 +101,7 @@ fun Navbar(navController: NavController) {
                 icon = {
                     Icon(
                         if (selectedIndex == index) selectedIcons[index] else unselectedIcons[index],
-                        contentDescription = item
+                        contentDescription = item,
                     )
                 },
                 label = { Text(item) },
@@ -91,7 +116,7 @@ fun Navbar(navController: NavController) {
                             restoreState = true
                         }
                     }
-                }
+                },
             )
         }
     }

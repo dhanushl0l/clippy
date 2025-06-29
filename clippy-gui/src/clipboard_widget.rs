@@ -10,7 +10,7 @@ pub fn item_card(
     text_label: &Thumbnail,
     pinned: &mut bool,
     click_on_quit: bool,
-    show_data_popup: &mut (bool, String, PathBuf),
+    show_data_popup: &mut (bool, String, PathBuf, bool),
     changed: &mut bool,
     path: &PathBuf,
     ctx: &Context,
@@ -84,7 +84,7 @@ pub fn item_card(
                         let view_all = ui.selectable_label(false, "💬");
 
                         if view_all.clicked() {
-                            *show_data_popup = (true, text.to_string(), path.clone());
+                            *show_data_popup = (true, text.to_string(), path.clone(), *pinned);
                         }
 
                         if *sync {

@@ -24,29 +24,29 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
 
 @Composable
-fun Settings(){
+fun notification() {
     var text by remember { mutableStateOf("") }
     var text_ls by remember { mutableStateOf(listOf<String>()) }
-    Column (
+    Column(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier
-            .background(MaterialTheme.colorScheme.background)
-            .fillMaxSize()
+        modifier =
+            Modifier
+                .background(MaterialTheme.colorScheme.background)
+                .fillMaxSize(),
     ) {
         val count = remember { mutableIntStateOf(0) }
         Text(
             text = count.intValue.toString(),
             color = Color.Red,
             fontSize = 30.sp,
-            textAlign = TextAlign.Left
+            textAlign = TextAlign.Left,
         )
-
 
         TextField(
             value = text,
             onValueChange = { text = it },
-            label = { Text("Settbitch") }
+            label = { Text("Notifications") },
         )
         Button(onClick = {
             if (text.isNotBlank()) {

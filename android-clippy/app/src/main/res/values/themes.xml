@@ -2,4 +2,5 @@
 <resources>
 
     <style name="Theme.Clippy" parent="android:Theme.Material.Light.NoActionBar" />
+
 </resources>
