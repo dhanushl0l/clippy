@@ -105,7 +105,7 @@ pub async fn health(
 
         match response.await {
             Ok(response) => {
-                if response.status().as_u16() == 100 {
+                if response.status().as_u16() == 200 {
                     break;
                 } else {
                     if log {

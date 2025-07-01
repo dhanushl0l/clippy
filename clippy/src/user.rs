@@ -1,4 +1,3 @@
-#[cfg(target_os = "linux")]
 use crate::write_clipboard;
 use crate::{
     MessageType, Pending, Resopnse, UserCred, UserData, UserSettings, extract_zip,
@@ -243,7 +242,15 @@ async fn process_text<T: AsyncRead + AsyncWrite + Unpin + 'static>(
     let state: Resopnse = serde_json::from_slice(&bin).unwrap();
     match state {
         Resopnse::Success { old, new } => {
-            let value = pending.remove(&old).unwrap();
+            let value = match pending.remove(&old) {
+                Some(v) => v,
+                None => {
+                    debug!("Error removing pending data");
+                    debug!("{:?}", pending);
+                    return;
+                }
+            };
+
             remove(value.path, value.typ, &new, usersettings.store_image);
             user_data.add(new, usersettings.max_clipboard);
             info!("Surcess sending new data");

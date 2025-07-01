@@ -110,6 +110,7 @@ fn setup(file: &File) -> Result<(), Box<dyn Error>> {
 }
 
 fn main() {
+    println!("q");
     let mut path = get_path_local();
     path.push("CLIPPY.LOCK");
 

@@ -1,7 +1,18 @@
 ﻿<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
-  <Package Id="clippy.clippy" Name="clippy" Manufacturer="clippy" Version="1.0.2.2" UpgradeCode="76afa0e9-3c34-40ca-8092-b3f673a50d13">
+  <Package
+    Name="clippy"
+    Manufacturer="clippy"
+    Version="1.0.3.9"
+    UpgradeCode="76afa0e9-3c34-40ca-8092-b3f673a50d13"
+    InstallerVersion="500"
+    Compressed="yes">
+
     <MediaTemplate EmbedCab="yes" />
-    <MajorUpgrade DowngradeErrorMessage="!(loc.DowngradeError)" />
+
+    <MajorUpgrade
+      DowngradeErrorMessage="A newer version of clippy is already installed."
+      Schedule="afterInstallInitialize"
+      AllowSameVersionUpgrades="yes" />
 
     <Feature Id="Main">
       <ComponentGroupRef Id="$(var.ClippyGroup)" />

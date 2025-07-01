@@ -1,5 +1,6 @@
 use clippy::UserCred;
 
+#[derive(Debug)]
 pub enum Thumbnail {
     Image((Vec<u8>, (u32, u32))),
     Text(String),

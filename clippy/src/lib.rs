@@ -168,10 +168,6 @@ impl Data {
     }
 
     pub fn get_meta_data(&self) -> Option<String> {
-        if !self.typ.starts_with("text") {
-            return None;
-        }
-
         let Some(data) = self.get_data() else {
             return Some(String::new());
         };
@@ -898,7 +894,6 @@ pub fn extract_zip(data: Bytes) -> Result<Vec<String>, Box<dyn Error>> {
     }
 
     info!("Extraction done, total files: {}", id.len());
-    println!("{:?}", id);
     Ok(id)
 }
 
