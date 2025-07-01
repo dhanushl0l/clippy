@@ -1,6 +1,6 @@
 [package]
 name = "clippy-server"
-version = "0.1.0"
+version = "0.1.2"
 edition = "2024"
 
 [dependencies]
@@ -13,7 +13,8 @@ rand = "0.9.0"
 uuid = { version = "1.16.0", features = ["serde", "v4"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
-clippy = { path = "../clippy" }
+tokio = { workspace = true }
+clippy = { path = "../clippy", default-features = false, features = ["server"] }
 chrono = "0.4.40"
 jsonwebtoken = "9.3.1"
 lettre = { version = "0.11", default-features = false, features = [
@@ -25,3 +26,10 @@ actix-web-httpauth = "0.8.2"
 base64 = "0.22.1"
 sha2 = "0.10.9"
 tar = "0.4.44"
+actix-ws = "0.3.0"
+sqlx = { version = "0.8", features = [
+    "runtime-tokio",
+    "tls-rustls-ring-native-roots",
+    "postgres",
+    "chrono",
+] }

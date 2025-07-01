@@ -1,7 +1,7 @@
 use crate::{Data, set_global_bool};
 use base64::{Engine, engine::general_purpose};
 use clipboard_rs::{Clipboard, ClipboardContext, RustImageData, common::RustImage};
-use std::error::Error;
+use std::{error::Error, thread, time::Duration};
 
 #[cfg(target_os = "linux")]
 pub fn copy_to_linux(data: Data) -> Result<(), String> {
@@ -17,32 +17,35 @@ pub fn copy_to_linux(data: Data) -> Result<(), String> {
 #[cfg(target_os = "linux")]
 fn copy_to_clipboard_wl(data: Data) -> Result<(), String> {
     set_global_bool(true);
-    push_to_clipboard_wl(data, false)
+    push_to_clipboard_wl(data, false, false)
 }
 
 #[cfg(target_os = "linux")]
-pub fn push_to_clipboard_wl(data: Data, forground: bool) -> Result<(), String> {
-    use base64::{Engine, engine::general_purpose};
-    use wl_clipboard_rs::copy::{ClipboardType, MimeType, Options, Source};
+pub fn push_to_clipboard_wl(
+    data: Data,
+    _forground: bool,
+    paste_on_click: bool,
+) -> Result<(), String> {
+    use wayland_clipboard_listener::WlClipboardCopyStream;
 
-    let mut opts = Options::new();
-    opts.clipboard(ClipboardType::Regular);
-    opts.foreground(forground);
+    thread::spawn(move || {
+        let context = if data.typ.starts_with("text") {
+            data.data.into_bytes()
+        } else {
+            string_to_vecu8(data.data)
+        };
 
-    Ok(if data.typ.starts_with("image/") {
-        let data = general_purpose::STANDARD.decode(data.data).unwrap();
-        opts.copy(
-            Source::Bytes(data.into_boxed_slice()),
-            MimeType::Specific("image/png".to_string()),
-        )
-        .map_err(|err| format!("{}", err))?
-    } else {
-        opts.copy(
-            Source::Bytes(data.data.into_bytes().into_boxed_slice()),
-            MimeType::Text,
-        )
-        .map_err(|err| format!("{}", err))?
-    })
+        let mut stream = WlClipboardCopyStream::init().unwrap();
+        stream
+            .copy_to_clipboard(context, vec![&data.typ], false)
+            .unwrap();
+    });
+    #[cfg(feature = "default")]
+    if paste_on_click {
+        ctrl_v();
+    }
+
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]
@@ -76,10 +79,13 @@ pub fn push_to_clipboard_wl_command(data: Data) -> Result<(), String> {
 
 pub fn copy_to_clipboard(data: Data) -> Result<(), Box<dyn Error + Send + Sync>> {
     set_global_bool(true);
-    push_to_clipboard(data)
+    push_to_clipboard(data, false)
 }
 
-pub fn push_to_clipboard(data: Data) -> Result<(), Box<dyn Error + Send + Sync>> {
+pub fn push_to_clipboard(
+    data: Data,
+    paste_on_click: bool,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     let ctx = ClipboardContext::new()?;
 
     if data.typ.starts_with("image/") {
@@ -87,26 +93,40 @@ pub fn push_to_clipboard(data: Data) -> Result<(), Box<dyn Error + Send + Sync>>
     } else {
         ctx.set_text(data.data)?;
     }
-
+    #[cfg(feature = "default")]
+    if paste_on_click {
+        ctrl_v();
+    }
     Ok(())
 }
 
-// fn read_data(file: String) -> Data {
-//     let target = get_path().join(file);
-//     let mut file = File::open(target).unwrap();
+#[cfg(feature = "default")]
+fn ctrl_v() {
+    thread::sleep(Duration::from_millis(500));
+    {
+        use enigo::{
+            Direction::{Click, Press, Release},
+            Enigo, Key, Keyboard, Settings,
+        };
+        let mut enigo = Enigo::new(&Settings::default()).unwrap();
 
-//     let mut contents = String::new();
-//     file.read_to_string(&mut contents).unwrap_or(0);
+        let key = {
+            #[cfg(target_os = "macos")]
+            {
+                Key::Meta
+            }
 
-//     let data: Data = serde_json::from_str(&contents).unwrap_or(Data::new(
-//         String::new(),
-//         "empty".to_string(),
-//         "os".to_string(),
-//         true,
-//     ));
+            #[cfg(not(target_os = "macos"))]
+            {
+                Key::Control
+            }
+        };
 
-//     data
-// }
+        enigo.key(key, Press).unwrap();
+        enigo.key(Key::Unicode('v'), Click).unwrap();
+        enigo.key(key, Release).unwrap();
+    }
+}
 
 pub fn string_to_vecu8(data: String) -> Vec<u8> {
     general_purpose::STANDARD.decode(data).unwrap()

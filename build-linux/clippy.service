@@ -6,6 +6,7 @@ After=network.target
 ExecStart=/usr/local/bin/clippy
 Restart=always
 RestartSec=5
+Environment="LOG=debug"
 
 [Install]
 WantedBy=default.target

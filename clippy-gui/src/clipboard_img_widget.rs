@@ -1,13 +1,19 @@
 use clippy::{Data, create_past_lock, log_eprintln, set_global_bool};
+use clippy_gui::set_lock;
 use egui::{self, *};
-use std::{fs, io::Write, path::PathBuf};
+use std::{
+    fs,
+    io::Write,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 
 pub fn item_card_image(
     ui: &mut Ui,
     texture: &egui::TextureHandle,
     pinned: &mut bool,
     click_on_quit: bool,
-    changed: &mut bool,
+    changed: Arc<Mutex<bool>>,
     path: &PathBuf,
     ctx: &Context,
     sync: &bool,
@@ -56,13 +62,13 @@ pub fn item_card_image(
                                     }
                                 }
                             }
-                            *changed = true;
+                            set_lock!(changed, true);
                         }
 
                         let delete_response = ui.selectable_label(false, "🗑");
                         if delete_response.clicked() {
                             log_eprintln!(fs::remove_file(path));
-                            *changed = true;
+                            set_lock!(changed, true);
                         }
 
                         if *sync {

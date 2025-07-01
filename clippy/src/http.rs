@@ -1,25 +1,22 @@
-use crate::{
-    UserCred, UserData, UserSettings, extract_zip, read_data_by_id, set_global_update_bool,
-    write_clipboard::{self},
-};
+use crate::{Pending, UserCred, UserSettings};
 use core::time;
 use log::{debug, error, warn};
 use once_cell::sync::Lazy;
 use reqwest::{self, Client, multipart};
-use std::{
-    error::{self, Error},
-    process,
-    sync::Mutex,
-    thread,
-    time::Duration,
-};
-use tokio::{fs::File, io::AsyncReadExt};
+use std::{error::Error, process, sync::Mutex, thread, time::Duration};
+use tokio::{fs::File, io::AsyncReadExt, sync::mpsc::Receiver};
 
 #[cfg(debug_assertions)]
 pub const SERVER: &str = "http://127.0.0.1:7777";
 
 #[cfg(not(debug_assertions))]
 pub const SERVER: &str = "https://clippy.dhanu.cloud";
+
+#[cfg(debug_assertions)]
+pub const SERVER_WS: &str = "ws://0.0.0.0:7777/connect";
+
+#[cfg(not(debug_assertions))]
+pub const SERVER_WS: &str = "wss://clippy.dhanu.cloud/connect";
 
 static TOKEN: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new(String::new()));
 
@@ -28,7 +25,7 @@ pub fn update_token(new_data: String) {
     *key = new_data;
 }
 
-fn get_token() -> String {
+pub fn get_token() -> String {
     let key = TOKEN.lock().unwrap();
     key.clone()
 }
@@ -37,7 +34,7 @@ pub async fn send(
     file_path: &str,
     usercred: &UserCred,
     client: &Client,
-) -> Result<String, Box<dyn error::Error>> {
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let mut file = File::open(file_path).await?;
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer).await?;
@@ -53,20 +50,20 @@ pub async fn send(
         .await?;
 
     if response.status().is_success() {
-        Ok(response.text().await.unwrap())
-    } else if response.status() == reqwest::StatusCode::UNAUTHORIZED {
-        warn!("Token expired");
-        match get_token_serv(usercred, client).await {
-            Ok(_) => debug!("Fetched a new authentication token"),
-            Err(err) => {
-                warn!("Unable to fetch authentication token");
-                debug!("{}", err);
-            }
-        };
-
-        Err(response.text().await.unwrap().into())
+        Ok(response.text().await?)
     } else {
-        Err(response.text().await.unwrap().into())
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            warn!("Token expired");
+
+            match get_token_serv(usercred, client).await {
+                Ok(_) => debug!("Fetched a new authentication token"),
+                Err(err) => {
+                    warn!("Unable to fetch authentication token");
+                    debug!("{}", err);
+                }
+            }
+        }
+        Err(response.text().await?.into())
     }
 }
 
@@ -82,7 +79,7 @@ pub async fn get_token_serv(user: &UserCred, client: &Client) -> Result<(), Box<
         update_token(token);
         Ok(())
     } else {
-        if response.status().as_u16() == 401 {
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
             let mut user = UserSettings::build_user().unwrap();
             user.remove_user();
             user.write().unwrap();
@@ -94,72 +91,11 @@ pub async fn get_token_serv(user: &UserCred, client: &Client) -> Result<(), Box<
     }
 }
 
-pub async fn state(userdata: &UserData, client: &Client, user: &UserCred) -> Result<bool, String> {
-    let response = client
-        .get(&format!("{}/state/{}", SERVER, user.username))
-        .query(&[("id", userdata.last_one())])
-        .send()
-        .await
-        .map_err(|e| format!("Request error: {}", e))?;
-
-    let body = match response.text().await {
-        Ok(text) => text,
-        Err(e) => format!("Failed to read body: {}", e),
-    };
-
-    match body.as_str() {
-        "OUTDATED" => Ok(false),
-        "UPDATED" => Ok(true),
-        _ => Err("Failed to read body: {}".to_string()),
-    }
-}
-
-pub async fn download(userdata: &UserData, client: &Client) -> Result<(), Box<dyn error::Error>> {
-    let response = client
-        .get(&format!("{}/get", SERVER))
-        .bearer_auth(get_token())
-        .query(&[("current", userdata.last_one())])
-        .send()
-        .await?;
-
-    let body = if response.status().is_success() {
-        response.bytes().await?
-    } else {
-        if response.status() == 401 {
-            get_token();
-            return Err(format!("Auth token expired").into());
-        }
-        return Err(format!("{}", response.status()).into());
-    };
-
-    set_global_update_bool(true);
-
-    let val = extract_zip(body)?;
-    if let Some(last) = val.last() {
-        let data = read_data_by_id(last);
-
-        match data {
-            Ok(val) => {
-                #[cfg(not(target_os = "linux"))]
-                write_clipboard::copy_to_clipboard(val).unwrap();
-
-                #[cfg(target_os = "linux")]
-                write_clipboard::copy_to_linux(val)?;
-            }
-            Err(err) => {
-                warn!("{}", err)
-            }
-        }
-    } else {
-        error!("Unable to read last value in tar")
-    }
-
-    userdata.add_vec(val);
-
-    Ok(())
-}
-
-pub async fn health(client: &Client) {
+pub async fn health(
+    client: &Client,
+    rx: &mut Receiver<(String, String, String)>,
+    pending: &mut Pending,
+) {
     let mut log = true;
     loop {
         let response = client
@@ -169,19 +105,33 @@ pub async fn health(client: &Client) {
 
         match response.await {
             Ok(response) => {
-                if response.status().is_success() {
-                    break;
+                if response.status().is_success() && response.status().as_u16() == 200 {
+                    if let Ok(text) = response.text().await {
+                        if text == "SERVER_ACTIVE" {
+                            break;
+                        }
+                    } else {
+                        warn!("Server is out");
+                        thread::sleep(time::Duration::from_secs(5));
+                    }
                 } else {
                     if log {
                         warn!("Server is out");
                         log = false
                     }
+                    thread::sleep(time::Duration::from_secs(5));
                 }
             }
             Err(err) => {
-                debug!("{}", err);
+                while let Ok((path, id, typ)) = rx.try_recv() {
+                    pending.add(path, id, typ);
+                }
+                debug!("ubale to connect :{:?}|{}", client, err);
                 thread::sleep(time::Duration::from_secs(5));
             }
+        }
+        while let Ok((path, id, typ)) = rx.try_recv() {
+            pending.add(path, id, typ);
         }
     }
 }
