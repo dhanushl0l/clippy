@@ -3,7 +3,7 @@
 # Defaults
 MODE="release"
 NAME="clippy-release.tar.xz"
-KEY="$KEY"
+KEY=$(head -c 32 /dev/urandom | base64 | head -c 32)
 
 # Files to include
 FILES=("build-linux/clippy.desktop" "build-linux/clippy.service")
@@ -14,10 +14,19 @@ DIR=("assets")
 # Parse flags
 while getopts "rvd" opt; do
   case "$opt" in
-    r) MODE="release"; NAME="clippy-release.tar.xz" ;;
-    v) MODE="version" ;;
-    d) MODE="debug"; NAME="clippy-debug.tar.xz" ;;
-    *) echo "Usage: $0 [-r] [-v] [-d]"; exit 1 ;;
+  r)
+    MODE="release"
+    NAME="clippy-release.tar.xz"
+    ;;
+  v) MODE="version" ;;
+  d)
+    MODE="debug"
+    NAME="clippy-debug.tar.xz"
+    ;;
+  *)
+    echo "Usage: $0 [-r] [-v] [-d]"
+    exit 1
+    ;;
   esac
 done
 

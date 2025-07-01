@@ -1,26 +1,32 @@
+mod ws_connection;
 use actix_multipart::Multipart;
-use actix_web::HttpResponse;
+use actix_web::{HttpResponse, rt};
+use actix_ws::{MessageStream, Session};
 use base64::{Engine, engine::general_purpose};
 use chrono::{Duration, Utc};
 use clippy::{LoginUserCred, NewUserOtp};
+use futures_util::StreamExt;
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use log::{debug, error};
 use rand::seq::IteratorRandom;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
+use sqlx::prelude::FromRow;
 use std::{
-    collections::{BTreeSet, HashMap},
-    fs::{self, File},
+    collections::{BTreeSet, HashMap, hash_map::Entry},
+    fs::{self},
     io::{Error, Write},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
 use tar::Builder;
+use tokio::sync::{self, broadcast::Sender};
+use ws_connection::ws_connection;
 
-pub const CRED_PATH: &str = "credentials/users";
-const DATABASE_PATH: &str = "data-base/users";
-const MAX_SIZE: usize = 100 * 1024 * 1024;
+pub const DATABASE_PATH: &str = "data-base/users";
+pub const DB: Option<&str> = option_env!("DB_CONF");
+const MAX_SIZE: usize = 10 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct UserState {
@@ -28,76 +34,37 @@ pub struct UserState {
 }
 
 impl UserState {
-    pub fn build() -> (Self, EmailState) {
-        let email = EmailState::new();
-        let op = Self {
+    pub fn new() -> Self {
+        Self {
             data: Arc::new(Mutex::new(HashMap::new())),
-        };
-
-        let base_path = Path::new(CRED_PATH);
-
-        if let Ok(users) = fs::read_dir(base_path) {
-            for user in users.flatten() {
-                let path = user.path();
-
-                {
-                    let mut path = path.clone();
-                    path.push("user.json");
-                    let file = fs::read_to_string(path).unwrap();
-                    let user: UserCred = serde_json::from_str(&file).unwrap();
-                    email.data.lock().as_mut().unwrap().push(user.email);
-                }
-
-                if path.is_dir() && path.parent() == Some(base_path) {
-                    if let Some(folder_name) = user.file_name().to_str() {
-                        let mut files = BTreeSet::new();
-                        let base_path = user.path();
-                        let prefix = Path::new(CRED_PATH);
-
-                        let path = if let Ok(suffix) = base_path.strip_prefix(prefix) {
-                            Path::new(DATABASE_PATH).join(suffix)
-                        } else {
-                            panic!("path conflict on startup")
-                        };
-                        if let Ok(entries) = fs::read_dir(path) {
-                            for entry in entries.flatten() {
-                                if let Some(file_name) = entry.file_name().to_str() {
-                                    files.insert(file_name.to_string());
-                                }
-                            }
-                        }
-
-                        let mut temp = op.data.lock().unwrap();
-                        temp.insert(folder_name.to_string(), files);
-                    }
-                }
-            }
         }
-        (op, email)
     }
 
-    pub fn entry_and_verify_user(&self, username: &str) -> Option<()> {
-        let mut map = self.data.lock().unwrap();
-        fs::create_dir_all(format!("{}/{}", DATABASE_PATH, username)).unwrap();
-        if map.contains_key(username) {
-            None
-        } else {
+    pub fn entry(&self, username: &str) -> Result<(), String> {
+        let mut map = self.data.lock().map_err(|_| "Mutex poisoned")?;
+
+        let dir_path = format!("{}/{}", DATABASE_PATH, username);
+        fs::create_dir_all(&dir_path)
+            .map_err(|e| format!("Failed to create dir {}: {}", dir_path, e))?;
+
+        if !map.contains_key(username) {
             map.insert(username.to_string(), BTreeSet::new());
             debug!("{:?}", self);
-            Some(())
         }
+
+        Ok(())
     }
 
     pub fn verify(&self, username: &str) -> bool {
         self.data.lock().unwrap().contains_key(username)
     }
 
-    pub fn update(&self, username: &str, id: i64) {
+    pub fn update(&self, username: &str, id: &str) {
         let mut map = self.data.lock().unwrap();
         if let Some(set) = map.get_mut(username) {
             let len = set.len();
-            if len > 30 {
-                let remove_count = len - 30;
+            if len > 29 {
+                let remove_count = len - 29;
                 let to_remove: Vec<_> = set.iter().take(remove_count).cloned().collect();
                 for val in to_remove {
                     debug!("removing {:?}", val);
@@ -165,6 +132,22 @@ impl UserState {
             }
         }
     }
+
+    pub fn get(&self, username: &str, id: &[String]) -> Option<Vec<String>> {
+        let map = self.data.lock().unwrap();
+
+        let tree = map.get(username)?;
+
+        let mut temp = Vec::new();
+
+        for i in tree {
+            if !id.contains(i) {
+                temp.push(format!("{}/{}/{}", DATABASE_PATH, username, i));
+            }
+        }
+
+        Some(temp)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -188,7 +171,12 @@ impl EmailState {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq)]
+pub enum CustomErr {
+    DBError(sqlx::Error),
+    Failed(String),
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, FromRow)]
 pub struct UserCred {
     pub username: String,
     pub email: String,
@@ -202,27 +190,6 @@ impl UserCred {
             email,
             key,
         }
-    }
-
-    pub fn write(&self) -> Result<(), std::io::Error> {
-        let path = Path::new(CRED_PATH).join(&self.username).join("user.json");
-
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        let data = serde_json::to_string_pretty(self)?;
-
-        let mut file = fs::File::create(path)?;
-        file.write_all(&data.as_bytes())?;
-
-        Ok(())
-    }
-
-    pub fn read(user: &str) -> Result<Self, Error> {
-        let path = Path::new(CRED_PATH).join(&user).join("user.json");
-        let file = fs::read_to_string(&path)?;
-        Ok(serde_json::from_str(&file)?)
     }
 
     pub fn authentication(&self, key: String) -> bool {
@@ -278,14 +245,15 @@ pub fn gen_otp() -> String {
     otp
 }
 
-use futures_util::StreamExt;
-
 pub async fn write_file(
     mut data: Multipart,
     username: &str,
-    id: String,
-) -> Result<(), actix_web::Error> {
-    let path: PathBuf = Path::new(DATABASE_PATH).join(username).join(id);
+    id: i64,
+) -> Result<String, actix_web::Error> {
+    let mut path: PathBuf = PathBuf::new().join(format!("{}/{}", DATABASE_PATH, username));
+
+    let file_name = get_filename(id, path.clone());
+    path.push(&file_name);
 
     // Ensure parent directory exists
     if let Some(parent) = path.parent() {
@@ -311,10 +279,30 @@ pub async fn write_file(
         }
     }
 
-    Ok(())
+    Ok(file_name)
 }
 
-pub fn to_zip(files: Vec<String>) -> Result<HttpResponse, Error> {
+pub fn get_filename(id: i64, mut path: PathBuf) -> String {
+    let mut file_name = id.to_string();
+    let mut cont = 10;
+    file_name.push('-');
+    file_name.push_str(&cont.to_string());
+
+    path.push(&file_name);
+
+    let len = file_name.len();
+
+    while path.exists() {
+        cont += 1;
+        path.pop();
+        file_name.truncate(len - 2);
+        file_name.push_str(&cont.to_string());
+        path.push(&file_name);
+    }
+    file_name
+}
+
+pub fn to_zip(files: Vec<String>) -> Result<Vec<u8>, Error> {
     let mut buffer = Vec::new();
     {
         let mut tar = Builder::new(&mut buffer);
@@ -326,7 +314,7 @@ pub fn to_zip(files: Vec<String>) -> Result<HttpResponse, Error> {
 
         tar.finish()?;
     }
-    Ok(HttpResponse::Ok().body(buffer))
+    Ok(buffer)
 }
 
 const SECRET_KEY: Option<&str> = option_env!("KEY");
@@ -368,6 +356,14 @@ impl OTPState {
             .lock()
             .unwrap()
             .insert(user, (otp, expiry_time.timestamp(), 0));
+
+        self.remove_expired();
+    }
+
+    pub fn remove_expired(&self) {
+        let now = Utc::now().timestamp();
+        let mut map = self.data.lock().unwrap();
+        map.retain(|_, (_, expiry, _)| *expiry > now);
     }
 
     pub fn check_otp(&self, user_otp: &NewUserOtp) -> Result<(), String> {
@@ -388,18 +384,92 @@ impl OTPState {
                     "This code has expired. Please request a new one.",
                 ));
             }
+        } else {
+            return Err(String::from("Invalid User"));
         };
         Ok(())
     }
 }
 
+pub struct RoomManager {
+    room: sync::Mutex<HashMap<String, Room>>,
+}
+pub struct Room {
+    clients: sync::Mutex<Vec<rt::task::JoinHandle<()>>>,
+    tx: Sender<ServResopnse>,
+}
+
+impl RoomManager {
+    pub fn new() -> Self {
+        Self {
+            room: sync::Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub async fn add_task(
+        &self,
+        user: String,
+        session: Session,
+        msg_stream: MessageStream,
+        state: actix_web::web::Data<UserState>,
+    ) {
+        let mut rooms = self.room.lock().await;
+        match rooms.entry(user.clone()) {
+            Entry::Occupied(mut entry) => {
+                let a = entry.get_mut();
+                let tx = a.tx.clone();
+                a.add(session, msg_stream, tx, state, user).await;
+            }
+            Entry::Vacant(entry) => {
+                let mut room = Room::new();
+                let tx = room.tx.clone();
+                room.add(session, msg_stream, tx, state, user).await;
+                entry.insert(room);
+            }
+        }
+    }
+}
+
+impl Room {
+    fn new() -> Self {
+        let (tx, _) = tokio::sync::broadcast::channel(100);
+        Self {
+            clients: sync::Mutex::new(Vec::new()),
+            tx,
+        }
+    }
+
+    async fn add(
+        &mut self,
+        session: Session,
+        msg_stream: MessageStream,
+        tx: Sender<ServResopnse>,
+        state: actix_web::web::Data<UserState>,
+        user: String,
+    ) {
+        let val = self.clients.get_mut();
+        // val.retain(|x| {
+        //     println!("removing{:?}", x);
+        //     !x.is_finished()
+        // });
+        val.push(rt::spawn(ws_connection(
+            session, msg_stream, tx, state, user,
+        )));
+        println!("total threads {}", val.len());
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum ServResopnse {
+    New(String),
+}
 pub fn get_auth(username: &str, exp: i64) -> Result<String, jsonwebtoken::errors::Error> {
     let now = Utc::now();
     let time = now.to_rfc3339();
     let expiry_time = now + Duration::hours(exp);
 
     let claims = json!({
-        "iss": "https://clippy.dhanu.cloud", //plasholder
+        "iss": "https://clippy.dhanu.cloud",
         "aud": "clippy",
         "user": username,
         "iat": now.timestamp(),

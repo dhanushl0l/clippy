@@ -1,7 +1,12 @@
-use std::{fs, io::Write, path::PathBuf};
+use std::{
+    fs,
+    io::Write,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 
 use clippy::{Data, create_past_lock, log_eprintln, set_global_bool};
-use clippy_gui::Thumbnail;
+use clippy_gui::{Thumbnail, set_lock};
 use egui::{self, *};
 
 pub fn item_card(
@@ -10,8 +15,8 @@ pub fn item_card(
     text_label: &Thumbnail,
     pinned: &mut bool,
     click_on_quit: bool,
-    show_data_popup: &mut (bool, String, PathBuf),
-    changed: &mut bool,
+    show_data_popup: &mut (bool, String, PathBuf, bool),
+    changed: Arc<Mutex<bool>>,
     path: &PathBuf,
     ctx: &Context,
     sync: &bool,
@@ -72,19 +77,19 @@ pub fn item_card(
                                     }
                                 }
                             }
-                            *changed = true;
+                            set_lock!(changed, true);
                         }
 
                         let delete_response = ui.selectable_label(false, "🗑");
                         if delete_response.clicked() {
                             log_eprintln!(fs::remove_file(path));
-                            *changed = true;
+                            set_lock!(changed, true);
                         }
 
                         let view_all = ui.selectable_label(false, "💬");
 
                         if view_all.clicked() {
-                            *show_data_popup = (true, text.to_string(), path.clone());
+                            *show_data_popup = (true, text.to_string(), path.clone(), *pinned);
                         }
 
                         if *sync {

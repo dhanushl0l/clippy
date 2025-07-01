@@ -1,6 +1,6 @@
 [package]
 name = "clippy"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 
 [dependencies]
@@ -12,14 +12,29 @@ bytes = "1.10.1"
 env_logger = "0.11.8"
 base64 = "0.22.1"
 log = "0.4.27"
-aes-gcm = "0.10.3"
 image = "0.25.6"
 once_cell = "1.21.3"
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 fs4 = "0.13.1"
+rand = "0.9.1"
+aes-gcm = "0.10.3"
+awc = { version = "3", features = ["rustls"] }
+futures-util = "0.3.31"
+actix-rt = "2.10.0"
+actix-codec = "0.5.2"
+actix-http = "3.11.0"
+
 
 [target.'cfg(target_os = "linux")'.dependencies]
-wayland-clipboard-listener = "0.2.6"
-wl-clipboard-rs = "0.9.1"
+wayland-clipboard-listener = "0.3.1"
+enigo = { version = "0.5.0", features = ["wayland"], optional = true }
+
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+enigo = "0.5.0"
+
+[features]
+default = ["enigo"]
+server = []

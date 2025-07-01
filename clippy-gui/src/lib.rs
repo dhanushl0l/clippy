@@ -1,15 +1,16 @@
 use clippy::UserCred;
 
+#[derive(Debug)]
 pub enum Thumbnail {
     Image((Vec<u8>, (u32, u32))),
     Text(String),
 }
 
 pub enum Waiting {
-    CheckUser(Option<bool>),
-    SigninOTP(Option<bool>),
-    Login(Option<UserCred>),
-    Signin(Option<UserCred>),
+    CheckUser(Result<bool, String>),
+    SigninOTP(Result<(), String>),
+    Login(Result<UserCred, String>),
+    Signin(Result<UserCred, String>),
     None,
 }
 
@@ -35,4 +36,13 @@ pub fn str_formate(text: &str) -> String {
     }
 
     result
+}
+
+#[macro_export]
+macro_rules! set_lock {
+    ($lock:expr, $value:expr) => {
+        if let Ok(mut val) = $lock.try_lock() {
+            *val = $value;
+        }
+    };
 }

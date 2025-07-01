@@ -12,6 +12,7 @@ use log::debug;
 use log::{error, info, warn};
 use std::error::Error;
 use std::fs::File;
+use std::time::Duration;
 use std::{process, thread};
 use tokio::sync::mpsc::Sender;
 
@@ -104,10 +105,12 @@ fn setup(file: &File) -> Result<(), Box<dyn Error>> {
             process::exit(1);
         }
     }
+
     Ok(())
 }
 
 fn main() {
+    println!("q");
     let mut path = get_path_local();
     path.push("CLIPPY.LOCK");
 
@@ -127,8 +130,10 @@ fn main() {
 
     let (tx, rx) = tokio::sync::mpsc::channel::<(String, String, String)>(30);
 
+    let mut paste_on_click = false;
     match UserSettings::build_user() {
         Ok(usersettings) => {
+            paste_on_click = usersettings.paste_on_click && usersettings.click_on_quit;
             if !usersettings.disable_sync {
                 if let Some(sync) = usersettings.get_sync() {
                     start_cloud(rx, sync.clone(), usersettings);
@@ -144,9 +149,10 @@ fn main() {
 
     // this thread reads the gui clipboard entry && settings change
     {
+        thread::sleep(Duration::from_secs(1));
         let path = get_path_local();
-        thread::spawn(|| {
-            watch_for_next_clip_write(path);
+        thread::spawn(move || {
+            watch_for_next_clip_write(path, paste_on_click);
         });
     }
 
