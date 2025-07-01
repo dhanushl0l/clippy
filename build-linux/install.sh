@@ -57,14 +57,13 @@ sudo cp "$SOURCE_DIR/clippy-gui" "$BIN_DIR/clippy-gui"
 
 sudo cp "$BUILD_LINUX/clippy.service" "$SERVICE_DIR/$SERVICE_NAME"
 
-for f in "$ASSTS"/icons/clippy-*.png; do
+for f in "$BUILD_ASSETS"/icons/clippy-*.png; do
   [[ -e "$f" ]] || continue # skip if no file matched
 
   base=$(basename "$f")
   size=$(echo "$base" | sed -E 's/clippy-([0-9]+)-([0-9]+)(@2)?\.png/\1x\2/')
   folder=$(echo "$size" | sed 's/@2//')
   target="/usr/share/icons/hicolor/${folder}/apps"
-
   sudo mkdir -p "$target"
   sudo cp "$f" "$target/clippy.png"
   echo "Copied $f -> $target/clippy.png"

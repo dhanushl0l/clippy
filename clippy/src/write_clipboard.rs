@@ -128,23 +128,6 @@ fn ctrl_v() {
     }
 }
 
-// fn read_data(file: String) -> Data {
-//     let target = get_path().join(file);
-//     let mut file = File::open(target).unwrap();
-
-//     let mut contents = String::new();
-//     file.read_to_string(&mut contents).unwrap_or(0);
-
-//     let data: Data = serde_json::from_str(&contents).unwrap_or(Data::new(
-//         String::new(),
-//         "empty".to_string(),
-//         "os".to_string(),
-//         true,
-//     ));
-
-//     data
-// }
-
 pub fn string_to_vecu8(data: String) -> Vec<u8> {
     general_purpose::STANDARD.decode(data).unwrap()
 }

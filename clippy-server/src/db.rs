@@ -88,7 +88,9 @@ pub async fn check_otp(user: &NewUserOtp, pool: &Pool<Postgres>) -> Result<(), C
         if let Err(e) = increment_attempt(pool, &user.email).await {
             return Err(CustomErr::DBError(e));
         };
-        return Err(CustomErr::Failed("invalid OTP".to_string()));
+        return Err(CustomErr::Failed(
+            "Invalid OTP. Please check your registered email for the correct code.".to_string(),
+        ));
     }
 
     let username: String = row.get("username");

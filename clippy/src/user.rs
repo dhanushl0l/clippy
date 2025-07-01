@@ -133,7 +133,7 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
         select! {
             _ = sleep(Duration::from_secs(1)) => {
                 if last_pong.elapsed() > Duration::from_secs(15) {
-                    eprintln!("No pong in time. Disconnecting.");
+                    error!("No pong in time. Disconnecting.");
                     return Err("Server is out".into());
                 } else if last_pong.elapsed() > Duration::from_secs(5) {
                     let _ = ws.send(Message::Ping(Bytes::new())).await;
@@ -173,7 +173,7 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
                                 if let Some(buf) = &mut buffer {
                                     buf.extend_from_slice(&data);
                                 } else {
-                                    eprintln!("Received CONTINUE without FIRST. Dropping.");
+                                    error!("Received CONTINUE without FIRST. Dropping.");
                                     buffer = None;
                                     current_type = None;
                                 }
@@ -188,7 +188,7 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
                                         MessageType::Binary => process_bin(complete, user_data,&mut last_pong).await,
                                     }
                                 } else {
-                                    eprintln!("Received LAST without FIRST. Dropping.");
+                                    error!("Received LAST without FIRST. Dropping.");
                                 }
                             }
                         }

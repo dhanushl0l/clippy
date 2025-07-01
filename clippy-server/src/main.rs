@@ -10,7 +10,10 @@ use actix_web::{
     web::{self},
 };
 use actix_web_httpauth::extractors::bearer::BearerAuth;
-use clippy::{LoginUserCred, NewUser, NewUserOtp};
+use clippy::{
+    LoginUserCred, NewUser, NewUserOtp, is_valid_email, is_valid_otp, is_valid_password,
+    is_valid_username,
+};
 use clippy_server::{
     CustomErr, DB, RoomManager, UserCred, UserState, auth, gen_otp, get_auth, hash_key,
 };
@@ -19,6 +22,15 @@ use log::{debug, error};
 use sqlx::{PgPool, Pool, Postgres};
 
 async fn signin(new_user: web::Json<NewUser>, pool: web::Data<Pool<Postgres>>) -> impl Responder {
+    if new_user
+        .email
+        .as_ref()
+        .map_or(true, |va| !is_valid_email(va))
+        || !is_valid_username(&new_user.user)
+    {
+        return HttpResponse::Unauthorized().body("Failure: Invalid credentials");
+    }
+
     match is_user_exists(pool.as_ref(), &new_user.user).await {
         Ok(true) => HttpResponse::Conflict().body("Failure: Username already exists"),
         Ok(false) => match is_email_exists(pool.as_ref(), &new_user.email.clone().unwrap()).await {
@@ -54,6 +66,13 @@ async fn signin_auth(
     pool: web::Data<Pool<Postgres>>,
 ) -> impl Responder {
     let username = &data.user;
+    if !is_valid_username(&data.user)
+        || !is_valid_email(&data.email)
+        || !is_valid_password(&data.key)
+        || !is_valid_otp(&data.otp)
+    {
+        return HttpResponse::Unauthorized().body("Failure: Invalid credentials");
+    }
 
     match check_otp(&data, pool.as_ref()).await {
         Ok(_) => {
@@ -81,6 +100,9 @@ async fn signin_auth(
 
 async fn check_user(data: web::Json<NewUser>, pool: web::Data<Pool<Postgres>>) -> impl Responder {
     let username = &data.user;
+    if !is_valid_username(username) {
+        return HttpResponse::Unauthorized().body("Failure: Invalid credentials");
+    }
 
     match is_user_exists(pool.as_ref(), username).await {
         Ok(val) => HttpResponse::Ok().json(val),
@@ -92,6 +114,12 @@ async fn check_user(data: web::Json<NewUser>, pool: web::Data<Pool<Postgres>>) -
 }
 
 async fn get_key(cred: web::Json<UserCred>, pool: web::Data<Pool<Postgres>>) -> impl Responder {
+    if !is_valid_username(&cred.username)
+        || !is_valid_email(&cred.email)
+        || !is_valid_password(&cred.key)
+    {
+        return HttpResponse::Unauthorized().body("Failure: Invalid credentials");
+    }
     let user_cred_db = match get_user(pool.as_ref(), &cred.username).await {
         Ok(val) => val,
         Err(err) => {
@@ -111,20 +139,23 @@ async fn get_key(cred: web::Json<UserCred>, pool: web::Data<Pool<Postgres>>) -> 
 }
 
 async fn login(cred: web::Json<LoginUserCred>, pool: web::Data<Pool<Postgres>>) -> impl Responder {
+    if !is_valid_username(&cred.username) || !is_valid_password(&cred.key) {
+        return HttpResponse::Unauthorized().body("Failure: Invalid credentials");
+    }
     let user_cred_db = match get_user(pool.get_ref(), &cred.username).await {
         Ok(val) => val,
-        Err(_) => return HttpResponse::Unauthorized().body("Invalid credentials"),
+        Err(_) => return HttpResponse::Unauthorized().body("Failure: Invalid credentials"),
     };
 
     if user_cred_db.verify(&cred) {
         HttpResponse::Ok().json(user_cred_db)
     } else {
-        HttpResponse::Unauthorized().body("Invalid credentials")
+        HttpResponse::Unauthorized().body("Failure: Invalid credentials")
     }
 }
 
 async fn health() -> impl Responder {
-    HttpResponse::Ok()
+    HttpResponse::Continue()
 }
 
 async fn handle_connection(

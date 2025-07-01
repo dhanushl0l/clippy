@@ -7,8 +7,8 @@ use clipboard_img_widget::item_card_image;
 use clipboard_widget::item_card;
 use clippy::{
     APP_ID, Data, LoginUserCred, NewUser, NewUserOtp, SystemTheam, UserSettings,
-    get_global_update_bool, get_path, get_path_pending, is_valid_email, is_valid_username,
-    log_eprintln, set_global_update_bool,
+    get_global_update_bool, get_path, get_path_pending, is_valid_email, is_valid_otp,
+    is_valid_password, is_valid_username, log_eprintln, set_global_update_bool,
 };
 use clippy_gui::{Thumbnail, Waiting, set_lock};
 use custom_egui_widget::toggle;
@@ -30,7 +30,7 @@ use std::{
     path::PathBuf,
     process,
     sync::{Arc, Mutex},
-    thread,
+    thread::{self, JoinHandle},
     time::Duration,
 };
 use tokio::runtime::Runtime;
@@ -51,6 +51,7 @@ struct Clipboard {
     newuser: NewUser,
     key: String,
     otp: String,
+    thread: Option<JoinHandle<()>>,
     waiting: Arc<Mutex<Waiting>>,
     show_login_window: bool,
     show_createuser_window: bool,
@@ -88,6 +89,7 @@ impl Clipboard {
             newuser: NewUser::new_signin(String::new(), String::new()),
             key: "".to_string(),
             otp: String::new(),
+            thread: None,
             waiting: Arc::new(Mutex::new(Waiting::None)),
             show_data_popup: (false, String::new(), PathBuf::new(), true),
             scrool_to_top: false,
@@ -321,7 +323,7 @@ impl App for Clipboard {
                                         if ui
                                             .add(
                                                 egui::Button::new(
-                                                    egui::RichText::new("Cancel")
+                                                    egui::RichText::new("Close")
                                                         .size(16.0)
                                                         .strong(),
                                                 )
@@ -329,6 +331,7 @@ impl App for Clipboard {
                                             )
                                             .clicked()
                                         {
+                                            self.warn = None;
                                             self.show_error = (false, String::new())
                                         }
                                         ui.add_space(10.0);
@@ -349,10 +352,18 @@ impl App for Clipboard {
                                             ui.label(RichText::new(
                                                 "Username must be 3–20 characters \
                                                  long and contain only letters, numbers, \
-                                                or underscores (no spaces or special symbols).",
+                                                or underscores (no spaces,\
+                                                 no uppercase letters or special symbols).",
                                             ));
 
                                             ui.add_space(8.0);
+                                            if let Some(va) = &self.thread {
+                                                if va.is_finished() {
+                                                    self.thread = None
+                                                } else {
+                                                    ui.disable();
+                                                }
+                                            }
 
                                             ui.style_mut().override_text_style =
                                                 Some(TextStyle::Heading);
@@ -402,7 +413,7 @@ impl App for Clipboard {
                                                         self.warn = None;
                                                         let wait = self.waiting.clone();
                                                         let ctx = ctx.clone();
-                                                        thread::spawn(move || {
+                                                        let thread = thread::spawn(move || {
                                                             let async_runtime =
                                                                 Runtime::new().unwrap();
                                                             let status =
@@ -414,6 +425,7 @@ impl App for Clipboard {
                                                             *wait_lock = Waiting::CheckUser(status);
                                                             ctx.request_repaint();
                                                         });
+                                                        self.thread = Some(thread)
                                                     } else {
                                                         self.warn =
                                                             Some(String::from("Invalid username"));
@@ -432,6 +444,7 @@ impl App for Clipboard {
                                                     )
                                                     .clicked()
                                                 {
+                                                    self.warn = None;
                                                     self.show_signin_window = false;
                                                 }
                                             });
@@ -446,6 +459,13 @@ impl App for Clipboard {
                                         ui.add_space(8.0);
 
                                         let mut enter_pressed = false;
+                                        if let Some(va) = &self.thread {
+                                            if va.is_finished() {
+                                                self.thread = None
+                                            } else {
+                                                ui.disable();
+                                            }
+                                        }
 
                                         if let Some(email) = &mut self.newuser.email {
                                             ui.style_mut().override_text_style =
@@ -496,7 +516,7 @@ impl App for Clipboard {
                                                 ) {
                                                     let wait = self.waiting.clone();
                                                     let ctx = ctx.clone();
-                                                    thread::spawn(move || {
+                                                    let thread = thread::spawn(move || {
                                                         let async_runtime = Runtime::new().unwrap();
 
                                                         let signin = async_runtime
@@ -505,11 +525,11 @@ impl App for Clipboard {
                                                         *wait_lock = Waiting::SigninOTP(signin);
                                                         ctx.request_repaint();
                                                     });
+                                                    self.thread = Some(thread)
                                                 } else {
                                                     self.warn = Some(String::from("Invalid Email"))
                                                 }
                                             }
-
                                             ui.add_space(10.0);
                                             if ui
                                                 .add(
@@ -522,10 +542,11 @@ impl App for Clipboard {
                                                 )
                                                 .clicked()
                                             {
+                                                self.warn = None;
                                                 self.show_createuser_window = false;
                                             }
                                         });
-                                        ui.add_space(20.0);
+                                        ui.add_space(10.0);
                                     } else if self.show_createuser_auth_window {
                                         ui.label(RichText::new("😃").size(150.0).strong());
 
@@ -534,6 +555,22 @@ impl App for Clipboard {
                                         );
 
                                         ui.add_space(8.0);
+
+                                        ui.label(RichText::new(
+                                            "Password must be 6–32 characters long,\
+                                                and include at least one number, one symbol\
+                                                and one uppercase letter.",
+                                        ));
+
+                                        ui.add_space(8.0);
+
+                                        if let Some(va) = &self.thread {
+                                            if va.is_finished() {
+                                                self.thread = None
+                                            } else {
+                                                ui.disable();
+                                            }
+                                        }
 
                                         ui.style_mut().override_text_style =
                                             Some(TextStyle::Heading);
@@ -557,13 +594,12 @@ impl App for Clipboard {
                                                 .password(true)
                                                 .min_size(button_size),
                                         );
-
                                         if enter_pressed {
                                             response.request_focus();
                                         }
-
-                                        let enter_pressed = response.lost_focus()
-                                            && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                                        if let Some(val) = &self.warn {
+                                            ui.colored_label(egui::Color32::RED, val);
+                                        }
 
                                         ui.style_mut().override_text_style = None;
 
@@ -592,24 +628,39 @@ impl App for Clipboard {
                                                 .clicked()
                                                 || enter_pressed
                                             {
-                                                let wait = self.waiting.clone();
-                                                let user = NewUserOtp::new(
-                                                    self.newuser.user.clone(),
-                                                    self.newuser.email.clone().unwrap(),
-                                                    self.otp.clone(),
-                                                    self.key.clone(),
-                                                );
-                                                let ctx = ctx.clone();
-                                                thread::spawn(move || {
-                                                    let async_runtime = Runtime::new().unwrap();
+                                                let key = self.key.clone();
+                                                let otp = self.otp.clone();
+                                                if is_valid_otp(&key) {
+                                                    if is_valid_password(&key) {
+                                                        let wait = self.waiting.clone();
+                                                        let user = NewUserOtp::new(
+                                                            self.newuser.user.clone(),
+                                                            self.newuser.email.clone().unwrap(),
+                                                            otp,
+                                                            key,
+                                                        );
+                                                        let ctx = ctx.clone();
+                                                        let thread = thread::spawn(move || {
+                                                            let async_runtime =
+                                                                Runtime::new().unwrap();
 
-                                                    let signin = async_runtime.block_on(async {
-                                                        signin_otp_auth(user).await
-                                                    });
-                                                    let mut wait_lock = wait.lock().unwrap();
-                                                    *wait_lock = Waiting::Signin(signin);
-                                                    ctx.request_repaint();
-                                                });
+                                                            let signin =
+                                                                async_runtime.block_on(async {
+                                                                    signin_otp_auth(user).await
+                                                                });
+                                                            let mut wait_lock =
+                                                                wait.lock().unwrap();
+                                                            *wait_lock = Waiting::Signin(signin);
+                                                            ctx.request_repaint();
+                                                        });
+                                                        self.thread = Some(thread)
+                                                    } else {
+                                                        self.warn =
+                                                            Some(String::from("Invalid password"));
+                                                    }
+                                                } else {
+                                                    self.warn = Some(String::from("Invalid otp"));
+                                                }
                                             }
                                             ui.add_space(20.0);
                                             if ui
@@ -623,10 +674,12 @@ impl App for Clipboard {
                                                 )
                                                 .clicked()
                                             {
+                                                self.warn = None;
                                                 self.show_createuser_auth_window = false;
                                             }
                                             ui.add_space(20.0);
                                         });
+                                        ui.add_space(10.0);
                                     } else if self.show_login_window {
                                         ui.vertical_centered(|ui| {
                                             ui.label(RichText::new("😃").size(150.0).strong());
@@ -646,6 +699,13 @@ impl App for Clipboard {
                                                 Some(TextStyle::Heading);
 
                                             ui.add_space(8.0);
+                                            if let Some(va) = &self.thread {
+                                                if va.is_finished() {
+                                                    self.thread = None
+                                                } else {
+                                                    ui.disable();
+                                                }
+                                            }
 
                                             let response = ui.add(
                                                 TextEdit::singleline(&mut self.key)
@@ -655,7 +715,9 @@ impl App for Clipboard {
                                             );
                                             let enter_pressed = response.lost_focus()
                                                 && ui.input(|i| i.key_pressed(egui::Key::Enter));
-
+                                            if let Some(val) = &self.warn {
+                                                ui.colored_label(egui::Color32::RED, val);
+                                            }
                                             ui.style_mut().override_text_style = None;
 
                                             ui.add_space(10.0);
@@ -683,22 +745,33 @@ impl App for Clipboard {
                                                     .clicked()
                                                     || enter_pressed
                                                 {
-                                                    let user = LoginUserCred::new(
-                                                        self.newuser.user.clone(),
-                                                        self.key.clone(),
-                                                    );
-                                                    let wait = self.waiting.clone();
-                                                    let ctx = ctx.clone();
-                                                    thread::spawn(move || {
-                                                        let async_runtime = Runtime::new().unwrap();
+                                                    let key = self.key.clone();
+                                                    if is_valid_password(&key) {
+                                                        let user = LoginUserCred::new(
+                                                            self.newuser.user.clone(),
+                                                            key,
+                                                        );
+                                                        let wait = self.waiting.clone();
+                                                        let ctx = ctx.clone();
+                                                        let thread = thread::spawn(move || {
+                                                            let async_runtime =
+                                                                Runtime::new().unwrap();
 
-                                                        let status = async_runtime
-                                                            .block_on(async { login(&user).await });
+                                                            let status =
+                                                                async_runtime.block_on(async {
+                                                                    login(&user).await
+                                                                });
 
-                                                        let mut wait_lock = wait.lock().unwrap();
-                                                        *wait_lock = Waiting::Login(status);
-                                                        ctx.request_repaint();
-                                                    });
+                                                            let mut wait_lock =
+                                                                wait.lock().unwrap();
+                                                            *wait_lock = Waiting::Login(status);
+                                                            ctx.request_repaint();
+                                                        });
+                                                        self.thread = Some(thread)
+                                                    } else {
+                                                        self.warn =
+                                                            Some(String::from("Invalid password"));
+                                                    }
                                                 }
 
                                                 ui.add_space(20.0);
@@ -714,6 +787,7 @@ impl App for Clipboard {
                                                     )
                                                     .clicked()
                                                 {
+                                                    self.warn = None;
                                                     self.show_login_window = false;
                                                 }
 
@@ -725,11 +799,10 @@ impl App for Clipboard {
                                         ui.label(RichText::new("😃").size(150.0).strong());
                                         let signin_button = ui.add(
                                             Button::new(
-                                                RichText::new("Enabel Sync").size(24.0).strong(),
+                                                RichText::new("Enable Sync").size(24.0).strong(),
                                             )
                                             .min_size(Vec2::new(100.0, 40.0)),
                                         );
-
                                         if signin_button.clicked() {
                                             self.show_signin_window = true;
                                         }

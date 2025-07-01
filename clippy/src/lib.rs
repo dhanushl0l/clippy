@@ -10,7 +10,7 @@ use base64::engine::general_purpose;
 use bytes::Bytes;
 use chrono::prelude::Utc;
 use encryption_decryption::{decrypt_file, encrept_file};
-use image::ImageReader;
+use image::{ImageReader, load_from_memory};
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -35,6 +35,8 @@ use tokio::sync::mpsc::Sender;
 
 pub const APP_ID: &str = "org.clippy.clippy";
 pub const API_KEY: Option<&str> = option_env!("KEY");
+pub static SETTINGS: Mutex<Option<UserSettings>> = Mutex::new(None);
+const IMAGE_DATA: &[u8] = include_bytes!("../../assets/gui_icons/image.png");
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Data {
@@ -60,7 +62,12 @@ impl Data {
         fs::create_dir_all(&path)?;
         let file_path = &path.join(&time);
 
-        if self.typ.starts_with("image/") {
+        let store_image = match SETTINGS.lock() {
+            Ok(guard) => guard.as_ref().map_or(true, |va| va.store_image),
+            Err(_) => true,
+        };
+
+        if self.typ.starts_with("image/") && store_image {
             self.save_image(&time)?;
         }
 
@@ -92,8 +99,12 @@ impl Data {
     }
 
     pub fn get_image_thumbnail(&self, id: &PathBuf) -> Option<(Vec<u8>, (u32, u32))> {
-        let image = ImageReader::open(get_image_path(id)).ok()?.decode().ok()?;
-
+        let path = get_image_path(id);
+        let image = if path.is_file() {
+            ImageReader::open(path).ok()?.decode().ok()?
+        } else {
+            load_from_memory(IMAGE_DATA).ok().unwrap()
+        };
         let rgba = image.to_rgba8();
 
         let size = (rgba.width(), rgba.height());
@@ -369,9 +380,21 @@ impl UserSettings {
             None
         };
         if let Some(file) = file {
-            let file = decrypt_file(API_KEY.unwrap().as_bytes(), &file).unwrap();
-            let data: UserCred = serde_json::from_str(&String::from_utf8(file).unwrap()).unwrap();
-            settings.sync = Some(data);
+            match decrypt_file(API_KEY.unwrap().as_bytes(), &file) {
+                Ok(va) => {
+                    let data: UserCred =
+                        serde_json::from_str(&String::from_utf8(va).unwrap()).unwrap();
+                    settings.sync = Some(data);
+                }
+                Err(e) => {
+                    error!("Unable to get read user");
+                    debug!("{}", e);
+                    fs::remove_file(user_config)?;
+                }
+            };
+        }
+        if let Ok(mut va) = SETTINGS.lock() {
+            *va = Some(settings.clone());
         }
         Ok(settings)
     }
@@ -1058,22 +1081,68 @@ pub fn is_valid_username(username: &str) -> bool {
     let len_ok = username.len() >= 3 && username.len() <= 20;
     let chars_ok = username
         .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '_');
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
     len_ok && chars_ok
 }
 
-pub fn is_valid_email(email: &str) -> bool {
-    let parts: Vec<&str> = email.split('@').collect();
-    if parts.len() != 2 {
+pub fn is_valid_password(password: &str) -> bool {
+    let len = password.len();
+    if len <= 6 || len >= 32 {
         return false;
     }
 
-    let (local, domain) = (parts[0], parts[1]);
-    if local.is_empty() || domain.is_empty() || !domain.contains('.') {
+    let mut has_upper = false;
+    let mut has_lower = false;
+    let mut has_digit = false;
+    let mut has_symbol = false;
+
+    for c in password.chars() {
+        if c.is_ascii_uppercase() {
+            has_upper = true;
+        } else if c.is_ascii_lowercase() {
+            has_lower = true;
+        } else if c.is_ascii_digit() {
+            has_digit = true;
+        } else if c.is_ascii_punctuation() || c.is_ascii_graphic() && !c.is_alphanumeric() {
+            has_symbol = true;
+        }
+    }
+
+    has_upper && has_lower && has_digit && has_symbol
+}
+
+pub fn is_valid_email(email: &str) -> bool {
+    if email.contains(char::is_whitespace) {
+        return false;
+    }
+
+    let mut parts = email.split('@');
+    let local = parts.next();
+    let domain = parts.next();
+
+    if parts.next().is_some() || local.is_none() || domain.is_none() {
+        return false;
+    }
+
+    let (local, domain) = (local.unwrap(), domain.unwrap());
+
+    if local.is_empty() || domain.is_empty() {
+        return false;
+    }
+
+    if !domain.contains('.') || domain.starts_with('.') || domain.ends_with('.') {
         return false;
     }
 
     true
+}
+
+pub fn is_valid_otp(otp: &str) -> bool {
+    if otp.len() == 6 && otp.chars().all(|x| x.is_ascii_digit()) {
+        true
+    } else {
+        true
+    }
 }
 
 pub fn remove(mut path: PathBuf, typ: String, time: &str, thumbnail: bool) {
