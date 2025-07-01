@@ -155,7 +155,7 @@ async fn login(cred: web::Json<LoginUserCred>, pool: web::Data<Pool<Postgres>>) 
 }
 
 async fn health() -> impl Responder {
-    HttpResponse::Continue()
+    HttpResponse::Ok().body("SERVER_ACTIVE")
 }
 
 async fn handle_connection(

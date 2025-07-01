@@ -1,9 +1,11 @@
 ﻿<Project Sdk="WixToolset.Sdk/6.0.0">
 
   <PropertyGroup>
-    <ClippyGroup Condition="'$(Platform)' == 'x64'">clippy</ClippyGroup>
-    <ClippyGroup Condition="'$(Platform)' != 'x64'">clippy32</ClippyGroup>
+    <ClippyGroup Condition="'$(Platform)' == 'x64'">clippyX64</ClippyGroup>
+    <ClippyGroup Condition="'$(Platform)' == 'x86'">clippyX86</ClippyGroup>
+    <ClippyGroup Condition="'$(Platform)' == 'arm64'">clippyARM64</ClippyGroup>
     <DefineConstants>$(DefineConstants);ClippyGroup=$(ClippyGroup)</DefineConstants>
+    <SuppressIces>ICE61</SuppressIces>
   </PropertyGroup>
 
 </Project>

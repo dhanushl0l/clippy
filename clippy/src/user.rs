@@ -1,4 +1,3 @@
-#[cfg(target_os = "linux")]
 use crate::write_clipboard;
 use crate::{
     MessageType, Pending, Resopnse, UserCred, UserData, UserSettings, extract_zip,
@@ -36,11 +35,11 @@ pub fn start_cloud(
             Pending::new()
         });
         let user_data = UserData::build();
+        let client = Arc::new(Client::new());
 
         actix_rt::System::new().block_on(async {
             loop {
                 log::debug!("starting WebSocket client");
-                let client = Arc::new(Client::new());
                 health(&client, &mut rx, &mut pending).await;
                 if let Err(e) = get_token_serv(&usercred, &client).await {
                     error!("unable to connect to server");
@@ -62,7 +61,7 @@ pub fn start_cloud(
                 let (_res, mut ws) = match result {
                     Ok((resp, conn)) => (resp, conn),
                     Err(e) => {
-                        eprintln!("Client connect error: {e:?}");
+                        error!("Client connect error: {e:?}");
                         health(&client, &mut rx, &mut pending).await;
                         continue;
                     }
@@ -243,7 +242,15 @@ async fn process_text<T: AsyncRead + AsyncWrite + Unpin + 'static>(
     let state: Resopnse = serde_json::from_slice(&bin).unwrap();
     match state {
         Resopnse::Success { old, new } => {
-            let value = pending.remove(&old).unwrap();
+            let value = match pending.remove(&old) {
+                Some(v) => v,
+                None => {
+                    debug!("Error removing pending data");
+                    debug!("{:?}", pending);
+                    return;
+                }
+            };
+
             remove(value.path, value.typ, &new, usersettings.store_image);
             user_data.add(new, usersettings.max_clipboard);
             info!("Surcess sending new data");

@@ -122,7 +122,10 @@ impl Clipboard {
                             }
                         }
                     }
-                    Err(err) => eprintln!("{:?}", err),
+                    Err(err) => {
+                        eprintln!("json: {:?}", content);
+                        eprintln!("{:?}", err)
+                    }
                 }
             }
         }

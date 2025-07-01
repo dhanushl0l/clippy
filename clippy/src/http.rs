@@ -105,8 +105,15 @@ pub async fn health(
 
         match response.await {
             Ok(response) => {
-                if response.status().as_u16() == 100 {
-                    break;
+                if response.status().is_success() && response.status().as_u16() == 200 {
+                    if let Ok(text) = response.text().await {
+                        if text == "SERVER_ACTIVE" {
+                            break;
+                        }
+                    } else {
+                        warn!("Server is out");
+                        thread::sleep(time::Duration::from_secs(5));
+                    }
                 } else {
                     if log {
                         warn!("Server is out");
@@ -119,7 +126,7 @@ pub async fn health(
                 while let Ok((path, id, typ)) = rx.try_recv() {
                     pending.add(path, id, typ);
                 }
-                debug!("{}", err);
+                debug!("ubale to connect :{:?}|{}", client, err);
                 thread::sleep(time::Duration::from_secs(5));
             }
         }

@@ -9,6 +9,10 @@
 			<Directory Id="INSTALLFOLDER32" Name="!(bind.Property.ProductName)" />
 		</StandardDirectory>
 
+		<StandardDirectory Id="ProgramFiles64Folder">
+			<Directory Id="INSTALLFOLDERARM64" Name="!(bind.Property.ProductName)" />
+		</StandardDirectory>
+
 		<!-- Shortcut directory under Start Menu -->
 		<StandardDirectory Id="ProgramMenuFolder">
 			<Directory Id="ApplicationProgramsFolder" Name="!(bind.Property.ProductName)" />
