@@ -114,11 +114,9 @@ async fn check_user(data: web::Json<NewUser>, pool: web::Data<Pool<Postgres>>) -
 }
 
 async fn get_key(cred: web::Json<UserCred>, pool: web::Data<Pool<Postgres>>) -> impl Responder {
-    if !is_valid_username(&cred.username)
-        || !is_valid_email(&cred.email)
-        || !is_valid_password(&cred.key)
-    {
-        return HttpResponse::Unauthorized().body("Failure: Invalid credentials");
+    if !is_valid_username(&cred.username) {
+        return HttpResponse::Unauthorized()
+            .body("Failure: Invalid credentials, Try updating the app");
     }
     let user_cred_db = match get_user(pool.as_ref(), &cred.username).await {
         Ok(val) => val,

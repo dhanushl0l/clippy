@@ -83,7 +83,10 @@ pub async fn get_token_serv(user: &UserCred, client: &Client) -> Result<(), Box<
             let mut user = UserSettings::build_user().unwrap();
             user.remove_user();
             user.write().unwrap();
-            error!("Unable to verify credentials, logging out.");
+            error!(
+                "Unable to verify credentials, logging out. {:?}",
+                response.text().await
+            );
             process::exit(1);
         }
         let err_msg = response.text().await?;
