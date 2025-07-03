@@ -1039,11 +1039,12 @@ impl App for Clipboard {
                 }
             });
 
-            if let Ok(va) = self.changed.clone().try_lock() {
+            if let Ok(mut va) = self.changed.clone().try_lock() {
                 if *va {
                     self.refresh();
                     set_lock!(self.changed, false);
                     set_global_update_bool(false);
+                    *va = false;
                 }
             }
 

@@ -178,7 +178,10 @@ async fn handle_connection(
         .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
 
     let (res, session, msg_stream) = actix_ws::handle(&req, stream)?;
-    let msg_stream = msg_stream.max_frame_size(1024 * 1024 * 40);
+    let msg_stream = msg_stream
+        .max_frame_size(30 * 1024 * 1024)
+        .aggregate_continuations()
+        .max_continuation_size(30 * 1024 * 1024);
 
     room.add_task(username, session, msg_stream, state.clone())
         .await;

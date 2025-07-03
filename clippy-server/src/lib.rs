@@ -1,7 +1,7 @@
 mod ws_connection;
 use actix_multipart::Multipart;
 use actix_web::{HttpResponse, rt};
-use actix_ws::{MessageStream, Session};
+use actix_ws::{AggregatedMessageStream, MessageStream, Session};
 use base64::{Engine, engine::general_purpose};
 use chrono::{Duration, Utc};
 use clippy::{LoginUserCred, NewUserOtp};
@@ -410,7 +410,7 @@ impl RoomManager {
         &self,
         user: String,
         session: Session,
-        msg_stream: MessageStream,
+        msg_stream: AggregatedMessageStream,
         state: actix_web::web::Data<UserState>,
     ) {
         let mut rooms = self.room.lock().await;
@@ -442,7 +442,7 @@ impl Room {
     async fn add(
         &mut self,
         session: Session,
-        msg_stream: MessageStream,
+        msg_stream: AggregatedMessageStream,
         tx: Sender<ServResopnse>,
         state: actix_web::web::Data<UserState>,
         user: String,
