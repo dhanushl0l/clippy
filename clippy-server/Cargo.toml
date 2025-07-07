@@ -33,3 +33,4 @@ sqlx = { version = "0.8", features = [
     "postgres",
     "chrono",
 ] }
+bytestring = { version = "1.4.0", features = ["serde"] }

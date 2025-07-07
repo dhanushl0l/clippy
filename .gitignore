@@ -5,3 +5,4 @@ clippy-server/credentials/
 data-base/
 credentials/
 log.log
+.env

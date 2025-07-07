@@ -1,7 +1,8 @@
 use std::{fs::File, io::Write, path::PathBuf, time::Duration};
 
-use actix_web::web::{Bytes, BytesMut};
-use actix_ws::{Item, Message, MessageStream, Session};
+use actix_web::web::Bytes;
+use actix_ws::{AggregatedMessage, AggregatedMessageStream, Session};
+use bytestring::ByteString;
 use chrono::Utc;
 use clippy::Resopnse;
 use futures_util::StreamExt;
@@ -16,14 +17,13 @@ use crate::{DATABASE_PATH, ServResopnse, UserState, get_filename, to_zip};
 
 pub async fn ws_connection(
     mut session: Session,
-    mut msg_stream: MessageStream,
+    mut msg_stream: AggregatedMessageStream,
     tx: Sender<ServResopnse>,
     state: actix_web::web::Data<UserState>,
     user: String,
 ) {
     let mut last_pong = Instant::now();
     let mut rx = tx.subscribe();
-    let mut buffer: Option<BytesMut> = None;
     let mut old = String::new();
 
     loop {
@@ -31,13 +31,14 @@ pub async fn ws_connection(
             msg = msg_stream.next() => {
                 match msg {
                     Some(Ok(msg)) => match msg {
-                        Message::Ping(ping) => {
+                        AggregatedMessage::Ping(ping) => {
                             let _ = session.pong(&ping).await;
                         }
-                        Message::Pong(_) => {
+                        AggregatedMessage::Pong(_) => {
                             last_pong = Instant::now();
                         }
-                        Message::Text(txt) => {
+                        AggregatedMessage::Text(txt) => {
+                            debug!("len of the file in text {}",txt.len()); //test
                             if let Ok(parsed) = serde_json::from_str::<Resopnse>(&txt) {
                                 match parsed {
                                     Resopnse::CheckVersion(version) =>{
@@ -86,54 +87,34 @@ pub async fn ws_connection(
                                             },
                                         };
                                     }
+                                    Resopnse::Data{data,id,last,} => {
+                                        handle_bin(&user,&state,&tx,&mut session,data,id,last,&mut old).await;
+                                    }
                                     _ => {}
                                 }
                             }
                             last_pong = Instant::now();
                         }
-                        Message::Binary(bin) => {
-                            handle_bin(&user,&state,&tx,&mut session,bin,&mut old).await;
-                            last_pong = Instant::now();
+                        // AggregatedMessage::Text(bin) => {
+                        //     handle_bin(&user,&state,&tx,&mut session,bin,&mut old).await;
+                        //     last_pong = Instant::now();
+                        // },
+                        AggregatedMessage::Binary(bin) => {
+                            debug!("len of the file in bin {}",bin.len());
+                            // handle_bin(&user,&state,&tx,&mut session,bin,&mut old).await;
+                            // last_pong = Instant::now();
                         },
-                        Message::Continuation(item) => {
-                            match item {
-                            Item::FirstBinary(data) => {
-                                buffer = Some(BytesMut::from(&data[..]));
-                            }
-
-                            Item::Continue(data) => {
-                                if let Some(buf) = &mut buffer {
-                                    buf.extend_from_slice(&data);
-                                } else {
-                                    eprintln!("Received CONTINUE without FIRST. Dropping.");
-                                    buffer = None;
-                                }
-                            }
-
-                            Item::Last(data) => {
-                                if let Some(mut buf) = buffer.take() {
-                                    buf.extend_from_slice(&data);
-                                    handle_bin(&user,&state,&tx,&mut session,buf.freeze(),&mut old).await;
-                                } else {
-                                    eprintln!("Received LAST without FIRST. Dropping.");
-                                }
-                            }
-                            _ => {}
-                        }
-                        last_pong = Instant::now();
-                        }
-                        Message::Close(reason) => {
-                            println!("Client closed: {:?}", reason);
+                        AggregatedMessage::Close(reason) => {
+                            debug!("Client closed: {:?}", reason);
                             break;
                         }
-                        Message::Nop => {},
                     }
                     Some(Err(e)) => {
-                        eprintln!("Stream error: {e}");
+                        error!("Stream error: {e}");
                         break;
                     }
                     None => {
-                        eprintln!("Client disconnected");
+                        error!("Client disconnected");
                         break;
                     }
                 }
@@ -154,15 +135,15 @@ pub async fn ws_connection(
                         }
                     }
                     Err(e) => {
-                        eprintln!("Broadcast receive error: {e}");
+                        error!("Broadcast receive error: {e}");
                         break;
                     }
                 }
                 last_pong = Instant::now();
             }
             _ = sleep(Duration::from_secs(1)) => {
-                if last_pong.elapsed() > Duration::from_secs(15) {
-                    eprintln!("No pong in time. Disconnecting.");
+                if last_pong.elapsed() > Duration::from_secs(300) {
+                    error!("No pong in time. Disconnecting.");
                     return;
                 } else if last_pong.elapsed() > Duration::from_secs(5) {
                     let _ = session.ping(&Bytes::new()).await;
@@ -178,7 +159,9 @@ async fn handle_bin(
     state: &actix_web::web::Data<UserState>,
     tx: &Sender<ServResopnse>,
     session: &mut Session,
-    bin: Bytes,
+    data: String,
+    id: String,
+    last: bool,
     old: &mut String,
 ) {
     let mut path: PathBuf = PathBuf::new().join(format!("{}/{}/", DATABASE_PATH, user));
@@ -189,39 +172,20 @@ async fn handle_bin(
 
     let file_name = get_filename(Utc::now().timestamp(), path.clone());
     path.push(&file_name);
-    let bin = bin.to_vec();
-
-    let mut iter = bin.iter().enumerate().filter(|&(_, &b)| b == b'\n');
-
-    let pos1 = iter.next().map(|(i, _)| i);
-    let pos2 = iter.next().map(|(i, _)| i);
-
-    if let (Some(pos1), Some(pos2)) = (pos1, pos2) {
-        let header = &bin[..pos1];
-        let is_last = &bin[pos1 + 1..pos2];
-
-        let file_data = &bin[pos2 + 1..];
-
-        let name = String::from_utf8_lossy(header);
-        let is_last: bool = String::from_utf8_lossy(is_last).parse().unwrap();
-
-        let mut file = File::create(&path).unwrap();
-        file.write_all(file_data).unwrap();
-        state.update(&user, &file_name);
-        debug!("Saved file: {name}");
-        if is_last {
-            if let Err(e) = tx.send(ServResopnse::New(file_name.clone())) {
-                error!("error sending state: {}", e);
-            };
-            *old = file_name.clone();
-        }
-        let file: Resopnse = Resopnse::Success {
-            old: name.to_string(),
-            new: file_name.clone(),
+    let mut file = File::create(&path).unwrap();
+    file.write_all(data.as_bytes()).unwrap();
+    state.update(&user, &file_name);
+    debug!("Saved file: {id}");
+    if last {
+        if let Err(e) = tx.send(ServResopnse::New(file_name.clone())) {
+            error!("error sending state: {}", e);
         };
-        let file_str = serde_json::to_string(&file).unwrap();
-        session.text(file_str).await.unwrap();
-    } else {
-        error!("No header found");
+        *old = file_name.clone();
     }
+    let file: Resopnse = Resopnse::Success {
+        old: id.to_string(),
+        new: file_name.clone(),
+    };
+    let file_str = serde_json::to_string(&file).unwrap();
+    session.text(file_str).await.unwrap();
 }

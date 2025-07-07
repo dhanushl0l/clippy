@@ -1,15 +1,13 @@
 use clippy::NewUser;
+use clippy_server::{SMTP_PASSWORD, SMTP_USERNAME, get_oncelock};
 use lettre::message::header::ContentType;
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 use std::error::Error;
 
-const SMTP_USERNAME: Option<&str> = option_env!("SMTP_USERNAME");
-const SMTP_PASSWORD: Option<&str> = option_env!("SMTP_PASSWORD");
-
 pub async fn send_otp(user: &NewUser, otp: String) -> Result<(), Box<dyn Error>> {
     let email = Message::builder()
-        .from(format!("Clippy <{}>",SMTP_USERNAME.unwrap()).parse()?)
+        .from(format!("Clippy <{}>", get_oncelock(&SMTP_USERNAME)).parse()?)
         .to(format!("{} <{}>", user.user, user.email.as_ref().unwrap()).parse()?)
         .subject("Welcome to Clippy Community – Here's Your OTP")
         .header(ContentType::TEXT_PLAIN)
@@ -19,8 +17,8 @@ pub async fn send_otp(user: &NewUser, otp: String) -> Result<(), Box<dyn Error>>
         ))?;
 
     let creds = Credentials::new(
-        SMTP_USERNAME.unwrap().to_owned(),
-        SMTP_PASSWORD.unwrap().to_owned(),
+        get_oncelock(&SMTP_USERNAME).to_string(),
+        get_oncelock(&SMTP_PASSWORD).to_string(),
     );
 
     let mailer: AsyncSmtpTransport<Tokio1Executor> =

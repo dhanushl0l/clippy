@@ -1,7 +1,7 @@
 mod ws_connection;
 use actix_multipart::Multipart;
 use actix_web::{HttpResponse, rt};
-use actix_ws::{MessageStream, Session};
+use actix_ws::{AggregatedMessageStream, MessageStream, Session};
 use base64::{Engine, engine::general_purpose};
 use chrono::{Duration, Utc};
 use clippy::{LoginUserCred, NewUserOtp};
@@ -15,18 +15,21 @@ use sha2::{Digest, Sha256};
 use sqlx::prelude::FromRow;
 use std::{
     collections::{BTreeSet, HashMap, hash_map::Entry},
+    env,
     fs::{self},
     io::{Error, Write},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, OnceLock},
 };
 use tar::Builder;
 use tokio::sync::{self, broadcast::Sender};
 use ws_connection::ws_connection;
 
 pub const DATABASE_PATH: &str = "data-base/users";
-pub const DB: Option<&str> = option_env!("DB_CONF");
 const MAX_SIZE: usize = 10 * 1024 * 1024;
+pub static SMTP_USERNAME: OnceLock<String> = OnceLock::new();
+pub static SMTP_PASSWORD: OnceLock<String> = OnceLock::new();
+pub static SECRET_KEY: OnceLock<String> = OnceLock::new();
 
 #[derive(Debug, Clone)]
 pub struct UserState {
@@ -317,8 +320,6 @@ pub fn to_zip(files: Vec<String>) -> Result<Vec<u8>, Error> {
     Ok(buffer)
 }
 
-const SECRET_KEY: Option<&str> = option_env!("KEY");
-
 #[derive(Deserialize)]
 pub struct Claims {
     user: String,
@@ -331,7 +332,7 @@ pub fn auth(key: &str) -> Result<String, jsonwebtoken::errors::Error> {
 
     let token = decode::<Claims>(
         &key,
-        &DecodingKey::from_secret(SECRET_KEY.unwrap().as_ref()),
+        &DecodingKey::from_secret(get_oncelock(&SECRET_KEY).as_ref()),
         &validation,
     )?;
 
@@ -410,7 +411,7 @@ impl RoomManager {
         &self,
         user: String,
         session: Session,
-        msg_stream: MessageStream,
+        msg_stream: AggregatedMessageStream,
         state: actix_web::web::Data<UserState>,
     ) {
         let mut rooms = self.room.lock().await;
@@ -442,7 +443,7 @@ impl Room {
     async fn add(
         &mut self,
         session: Session,
-        msg_stream: MessageStream,
+        msg_stream: AggregatedMessageStream,
         tx: Sender<ServResopnse>,
         state: actix_web::web::Data<UserState>,
         user: String,
@@ -480,7 +481,7 @@ pub fn get_auth(username: &str, exp: i64) -> Result<String, jsonwebtoken::errors
     let token = encode(
         &Header::default(),
         &claims,
-        &EncodingKey::from_secret(SECRET_KEY.unwrap().as_ref()),
+        &EncodingKey::from_secret(get_oncelock(&SECRET_KEY).as_ref()),
     )?;
 
     Ok(token)
@@ -505,4 +506,8 @@ pub fn hash_key(key: &str, user: &str) -> String {
     hasher.update(user);
     let result = hasher.finalize();
     general_purpose::STANDARD.encode(result)
+}
+
+pub fn get_oncelock(key: &OnceLock<String>) -> &str {
+    key.get().expect("not initialized")
 }

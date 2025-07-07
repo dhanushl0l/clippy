@@ -7,15 +7,18 @@ use crate::{
 use actix_codec::Framed;
 use actix_codec::{AsyncRead, AsyncWrite};
 use actix_http::ws::Item;
+use awc::ws::Frame;
 use awc::{
     http::header,
     ws::{self, Codec, Message},
 };
 use bytes::{Bytes, BytesMut};
+use bytestring::ByteString;
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, error, info, warn};
 use reqwest::{self, Client};
-use std::{error::Error, sync::Arc, thread, time::Duration};
+use std::{error::Error, fmt::Write, sync::Arc, thread, time::Duration};
+use tokio::io::AsyncSeekExt;
 use tokio::{
     fs::File,
     io::AsyncReadExt,
@@ -54,7 +57,6 @@ pub fn start_cloud(
                 let result = config_ws
                     .ws(SERVER_WS)
                     .set_header(header::AUTHORIZATION, format!("Bearer {}", token))
-                    .max_frame_size(20 * 1024 * 1024) // 20 MB
                     .connect()
                     .await;
 
@@ -131,7 +133,7 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
     loop {
         select! {
             _ = sleep(Duration::from_secs(1)) => {
-                if last_pong.elapsed() > Duration::from_secs(15) {
+                if last_pong.elapsed() > Duration::from_secs(300) {
                     error!("No pong in time. Disconnecting.");
                     return Err("Server is out".into());
                 } else if last_pong.elapsed() > Duration::from_secs(5) {
@@ -141,71 +143,26 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
 
             Some(msg) = ws.next() => {
                 last_pong = Instant::now();
-                match msg? {
-                    ws::Frame::Text(txt) => {
-                        process_text(txt,pending,usersettings,user_data,ws,&mut last_pong).await;
-                    }
-                    ws::Frame::Binary(bin) => {
-                        process_bin(bin, user_data,&mut last_pong).await;
-                    }
-                    ws::Frame::Ping(p) => {
-                        if ws.send(ws::Message::Pong(p)).await.is_err() {
-                            return Err("Unable to connect to server".into());
-                        }
-                    }
-                    ws::Frame::Pong(_) => {
-                    }
-
-                    ws::Frame::Continuation(bin) => {
-                        match bin {
-                            Item::FirstText(data) => {
-                                buffer = Some(BytesMut::from(&data[..]));
-                                current_type = Some(MessageType::Text);
-                            }
-
-                            Item::FirstBinary(data) => {
-                                buffer = Some(BytesMut::from(&data[..]));
-                                current_type = Some(MessageType::Binary);
-                            }
-
-                            Item::Continue(data) => {
-                                if let Some(buf) = &mut buffer {
-                                    buf.extend_from_slice(&data);
-                                } else {
-                                    error!("Received CONTINUE without FIRST. Dropping.");
-                                    buffer = None;
-                                    current_type = None;
-                                }
-                            }
-
-                            Item::Last(data) => {
-                                if let (Some(mut buf), Some(msg_type)) = (buffer.take(), current_type.take()) {
-                                    buf.extend_from_slice(&data);
-                                    let complete = buf.freeze();
-                                    match msg_type {
-                                        MessageType::Text => process_text(complete,pending,usersettings,user_data,ws,&mut last_pong).await,
-                                        MessageType::Binary => process_bin(complete, user_data,&mut last_pong).await,
-                                    }
-                                } else {
-                                    error!("Received LAST without FIRST. Dropping.");
-                                }
-                            }
-                        }
-                    }
-                    _ => {}
-                }
+                if let Err(e) = handle_mag(msg?, pending, usersettings, user_data, ws, &mut last_pong, &mut buffer, &mut current_type).await{
+                    error!("{}",e);
+                };
             }
 
             Some((last,id, value)) = pending.next() => {
                 match File::open(&value.path).await {
                     Ok(mut file) => {
-                        let mut file_data = Vec::new();
-                        match file.read_to_end(&mut file_data).await {
+                        let mut file_data = String::new();
+                        match file.read_to_string(&mut file_data).await {
                             Ok(_) => {
-                                let mut buffer = Vec::new();
-                                buffer.extend_from_slice(format!("{}\n{}\n", id,last).as_bytes());
-                                buffer.extend_from_slice(&file_data);
-                                if ws.send(ws::Message::Binary(Bytes::from(buffer))).await.is_err() {
+                                //test
+                                file.seek(std::io::SeekFrom::Start(0)).await?;
+                                let mut buf_temp = Vec::new();
+                                file.read_to_end(&mut buf_temp).await.unwrap();
+                                println!("{}",buf_temp.len());
+                                ws.send(ws::Message::Binary(Bytes::from(buf_temp))).await;
+                                //
+                                let  buffer = Resopnse::Data { data: file_data, id: id.clone(), last };
+                                if ws.send(ws::Message::Text(buffer.to_bytestring().unwrap())).await.is_err() {
                                     return Err("Unable to connect to server".into());
                                 }
                                 pending.change_state(&id);
@@ -283,4 +240,70 @@ async fn process_bin(bin: Bytes, user_data: &UserData, last_pong: &mut Instant) 
     user_data.add_vec(val);
     set_global_update_bool(true);
     *last_pong = Instant::now();
+}
+
+async fn handle_mag<T: AsyncRead + AsyncWrite + Unpin + 'static>(
+    msg: Frame,
+    pending: &mut Pending,
+    usersettings: &UserSettings,
+    user_data: &UserData,
+    ws: &mut Framed<T, Codec>,
+    last_pong: &mut Instant,
+    buffer: &mut Option<BytesMut>,
+    current_type: &mut Option<MessageType>,
+) -> Result<(), String> {
+    match msg {
+        ws::Frame::Text(txt) => {
+            process_text(txt, pending, usersettings, user_data, ws, last_pong).await;
+        }
+        ws::Frame::Binary(bin) => {
+            process_bin(bin, user_data, last_pong).await;
+        }
+        ws::Frame::Ping(p) => {
+            if ws.send(ws::Message::Pong(p)).await.is_err() {
+                return Err("Unable to connect to server".into());
+            }
+        }
+        ws::Frame::Pong(_) => {}
+
+        ws::Frame::Continuation(bin) => match bin {
+            Item::FirstText(data) => {
+                *buffer = Some(BytesMut::from(&data[..]));
+                *current_type = Some(MessageType::Text);
+            }
+
+            Item::FirstBinary(data) => {
+                *buffer = Some(BytesMut::from(&data[..]));
+                *current_type = Some(MessageType::Binary);
+            }
+
+            Item::Continue(data) => {
+                if let Some(buf) = buffer {
+                    buf.extend_from_slice(&data);
+                } else {
+                    error!("Received CONTINUE without FIRST. Dropping.");
+                    *buffer = None;
+                    *current_type = None;
+                }
+            }
+
+            Item::Last(data) => {
+                if let (Some(mut buf), Some(msg_type)) = (buffer.take(), current_type.take()) {
+                    buf.extend_from_slice(&data);
+                    let complete = buf.freeze();
+                    match msg_type {
+                        MessageType::Text => {
+                            process_text(complete, pending, usersettings, user_data, ws, last_pong)
+                                .await
+                        }
+                        MessageType::Binary => process_bin(complete, user_data, last_pong).await,
+                    }
+                } else {
+                    error!("Received LAST without FIRST. Dropping.");
+                }
+            }
+        },
+        _ => {}
+    }
+    Ok(())
 }

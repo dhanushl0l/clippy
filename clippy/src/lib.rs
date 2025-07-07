@@ -8,6 +8,7 @@ pub mod write_clipboard;
 use base64::Engine;
 use base64::engine::general_purpose;
 use bytes::Bytes;
+use bytestring::ByteString;
 use chrono::prelude::Utc;
 use encryption_decryption::{decrypt_file, encrept_file};
 use image::{ImageReader, load_from_memory};
@@ -68,7 +69,10 @@ impl Data {
         };
 
         if self.typ.starts_with("image/") && store_image {
-            self.save_image(&time)?;
+            if let Err(e) = self.save_image(&time) {
+                error!("Unable to write thumbnail");
+                debug!("{e}")
+            };
         }
 
         let json_data = serde_json::to_string_pretty(self)?;
@@ -619,8 +623,23 @@ pub enum Resopnse {
     Outdated,
     CheckVersion(String),
     CheckVersionArr(Vec<String>),
-    Success { old: String, new: String },
+    Success {
+        old: String,
+        new: String,
+    },
     Error(String),
+    Data {
+        data: String,
+        id: String,
+        last: bool,
+    },
+}
+
+impl Resopnse {
+    pub fn to_bytestring(&self) -> Result<ByteString, serde_json::Error> {
+        let json = serde_json::to_string(self)?;
+        Ok(ByteString::from(json))
+    }
 }
 
 pub enum MessageType {
