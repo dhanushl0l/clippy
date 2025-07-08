@@ -17,8 +17,8 @@ use clippy::{
     is_valid_username,
 };
 use clippy_server::{
-    CustomErr, RoomManager, SECRET_KEY, SMTP_PASSWORD, SMTP_USERNAME, UserCred, UserState, auth,
-    gen_otp, get_auth, hash_key,
+    CustomErr, DB_CONF, RoomManager, SECRET_KEY, SMTP_PASSWORD, SMTP_USERNAME, UserCred, UserState,
+    auth, gen_otp, get_auth, get_oncelock, hash_key,
 };
 use env_logger::{Builder, Env};
 use log::{debug, error};
@@ -186,7 +186,7 @@ async fn handle_connection(
         .aggregate_continuations()
         .max_continuation_size(30 * 1024 * 1024);
 
-    room.add_task(username, session, msg_stream, state.clone())
+    room.add_task(username, session, msg_stream, room.clone(), state.clone())
         .await;
     Ok(res)
 }
@@ -198,9 +198,8 @@ pub fn init_env() {
     SMTP_PASSWORD
         .set(env::var("SMTP_PASSWORD").expect("SMTP_PASSWORD not set"))
         .ok();
-    SECRET_KEY
-        .set(env::var("SMTP_PASSWORD").expect("SMTP_PASSWORD not set"))
-        .ok();
+    SECRET_KEY.set(env::var("KEY").expect("KEY not set")).ok();
+    DB_CONF.set(env::var("DB_CONF").expect("KEY not set")).ok();
 }
 
 #[actix_web::main]
@@ -209,17 +208,13 @@ async fn main() -> std::io::Result<()> {
     init_env();
 
     let user_state = web::Data::new(UserState::new());
-    let data = web::Data::new(RoomManager::new());
-    let pool = web::Data::new(
-        PgPool::connect(&env::var("DB_CONF").expect("DB_CONF is not set"))
-            .await
-            .unwrap(),
-    );
+    let room = web::Data::new(RoomManager::new());
+    let pool = web::Data::new(PgPool::connect(get_oncelock(&DB_CONF)).await.unwrap());
 
     HttpServer::new(move || {
         App::new()
             .app_data(user_state.clone())
-            .app_data(data.clone())
+            .app_data(room.clone())
             .app_data(pool.clone())
             .route("/connect", web::get().to(handle_connection))
             .route("/signin", web::post().to(signin))

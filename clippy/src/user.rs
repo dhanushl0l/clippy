@@ -13,12 +13,10 @@ use awc::{
     ws::{self, Codec, Message},
 };
 use bytes::{Bytes, BytesMut};
-use bytestring::ByteString;
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, error, info, warn};
 use reqwest::{self, Client};
-use std::{error::Error, fmt::Write, sync::Arc, thread, time::Duration};
-use tokio::io::AsyncSeekExt;
+use std::{error::Error, sync::Arc, thread, time::Duration};
 use tokio::{
     fs::File,
     io::AsyncReadExt,
@@ -133,7 +131,7 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
     loop {
         select! {
             _ = sleep(Duration::from_secs(1)) => {
-                if last_pong.elapsed() > Duration::from_secs(300) {
+                if last_pong.elapsed() > Duration::from_secs(30) {
                     error!("No pong in time. Disconnecting.");
                     return Err("Server is out".into());
                 } else if last_pong.elapsed() > Duration::from_secs(5) {
@@ -154,13 +152,6 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
                         let mut file_data = String::new();
                         match file.read_to_string(&mut file_data).await {
                             Ok(_) => {
-                                //test
-                                file.seek(std::io::SeekFrom::Start(0)).await?;
-                                let mut buf_temp = Vec::new();
-                                file.read_to_end(&mut buf_temp).await.unwrap();
-                                println!("{}",buf_temp.len());
-                                ws.send(ws::Message::Binary(Bytes::from(buf_temp))).await;
-                                //
                                 let  buffer = Resopnse::Data { data: file_data, id: id.clone(), last };
                                 if ws.send(ws::Message::Text(buffer.to_bytestring().unwrap())).await.is_err() {
                                     return Err("Unable to connect to server".into());

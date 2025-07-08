@@ -1,7 +1,7 @@
 mod ws_connection;
 use actix_multipart::Multipart;
-use actix_web::{HttpResponse, rt};
-use actix_ws::{AggregatedMessageStream, MessageStream, Session};
+use actix_web::{HttpResponse, rt, web};
+use actix_ws::{AggregatedMessageStream, Session};
 use base64::{Engine, engine::general_purpose};
 use chrono::{Duration, Utc};
 use clippy::{LoginUserCred, NewUserOtp};
@@ -15,7 +15,6 @@ use sha2::{Digest, Sha256};
 use sqlx::prelude::FromRow;
 use std::{
     collections::{BTreeSet, HashMap, hash_map::Entry},
-    env,
     fs::{self},
     io::{Error, Write},
     path::{Path, PathBuf},
@@ -30,6 +29,7 @@ const MAX_SIZE: usize = 10 * 1024 * 1024;
 pub static SMTP_USERNAME: OnceLock<String> = OnceLock::new();
 pub static SMTP_PASSWORD: OnceLock<String> = OnceLock::new();
 pub static SECRET_KEY: OnceLock<String> = OnceLock::new();
+pub static DB_CONF: OnceLock<String> = OnceLock::new();
 
 #[derive(Debug, Clone)]
 pub struct UserState {
@@ -395,6 +395,7 @@ impl OTPState {
 pub struct RoomManager {
     room: sync::Mutex<HashMap<String, Room>>,
 }
+#[derive(Debug)]
 pub struct Room {
     clients: sync::Mutex<Vec<rt::task::JoinHandle<()>>>,
     tx: Sender<ServResopnse>,
@@ -412,6 +413,7 @@ impl RoomManager {
         user: String,
         session: Session,
         msg_stream: AggregatedMessageStream,
+        room: web::Data<RoomManager>,
         state: actix_web::web::Data<UserState>,
     ) {
         let mut rooms = self.room.lock().await;
@@ -419,14 +421,40 @@ impl RoomManager {
             Entry::Occupied(mut entry) => {
                 let a = entry.get_mut();
                 let tx = a.tx.clone();
-                a.add(session, msg_stream, tx, state, user).await;
+                a.add(session, msg_stream, tx, state, user, room).await;
             }
             Entry::Vacant(entry) => {
-                let mut room = Room::new();
-                let tx = room.tx.clone();
-                room.add(session, msg_stream, tx, state, user).await;
-                entry.insert(room);
+                let mut new_room = Room::new();
+                let tx = new_room.tx.clone();
+                new_room
+                    .add(session, msg_stream, tx, state, user, room)
+                    .await;
+                entry.insert(new_room);
             }
+        }
+    }
+
+    pub async fn remove(&self, user: String, pos: usize) {
+        let rooms = self.room.lock().await;
+        if let Some(room) = &mut rooms.get(&user) {
+            let mut coll = room.clients.lock().await;
+            coll.remove(pos);
+        }
+    }
+
+    pub async fn remove_inactive(&self) {
+        let mut room = self.room.lock().await;
+        let mut remove_room = Vec::new();
+        for (k, v) in room.iter_mut() {
+            let client = v.clients.get_mut();
+            if client.is_empty() {
+                remove_room.push(k.clone());
+            } else {
+                client.retain(|x| !x.is_finished());
+            }
+        }
+        for i in remove_room {
+            room.remove(&i);
         }
     }
 }
@@ -447,16 +475,14 @@ impl Room {
         tx: Sender<ServResopnse>,
         state: actix_web::web::Data<UserState>,
         user: String,
+        room: web::Data<RoomManager>,
     ) {
         let val = self.clients.get_mut();
-        // val.retain(|x| {
-        //     println!("removing{:?}", x);
-        //     !x.is_finished()
-        // });
+        let pos = val.len();
         val.push(rt::spawn(ws_connection(
-            session, msg_stream, tx, state, user,
+            session, msg_stream, tx, state, user, room, pos,
         )));
-        println!("total threads {}", val.len());
+        debug!("total threads {}", val.len());
     }
 }
 

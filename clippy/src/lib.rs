@@ -9,7 +9,6 @@ use base64::Engine;
 use base64::engine::general_purpose;
 use bytes::Bytes;
 use bytestring::ByteString;
-use chrono::prelude::Utc;
 use encryption_decryption::{decrypt_file, encrept_file};
 use image::{ImageReader, load_from_memory};
 use log::{debug, error, info, warn};
@@ -57,23 +56,14 @@ impl Data {
         }
     }
 
-    pub fn write_to_json(&self, tx: &Sender<(String, String, String)>) -> Result<(), io::Error> {
-        let time = Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
+    pub fn write_to_json(
+        &self,
+        tx: &Sender<(String, String, String)>,
+        time: String,
+    ) -> Result<(), io::Error> {
         let path = get_path_pending();
         fs::create_dir_all(&path)?;
         let file_path = &path.join(&time);
-
-        let store_image = match SETTINGS.lock() {
-            Ok(guard) => guard.as_ref().map_or(true, |va| va.store_image),
-            Err(_) => true,
-        };
-
-        if self.typ.starts_with("image/") && store_image {
-            if let Err(e) = self.save_image(&time) {
-                error!("Unable to write thumbnail");
-                debug!("{e}")
-            };
-        }
 
         let json_data = serde_json::to_string_pretty(self)?;
 
@@ -141,34 +131,6 @@ impl Data {
 
     pub fn change_data(&mut self, data: &str) {
         self.data = data.to_string()
-    }
-
-    pub fn save_image(&self, time: &str) -> Result<(), io::Error> {
-        let path: PathBuf = crate::get_path_image();
-
-        fs::create_dir_all(&path)?;
-
-        let img_path = path.join(format!("{}.png", time));
-        let mut img_file = File::create(img_path)?;
-
-        let data: Vec<u8> = self
-            .get_image()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Failed to get image data"))?;
-
-        let image = image::load_from_memory(&data).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("Image decode error: {e}"),
-            )
-        })?;
-
-        let resized = image.thumbnail(128, 128);
-
-        resized
-            .write_to(&mut img_file, image::ImageFormat::Png)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Image write error: {e}")))?;
-
-        Ok(())
     }
 
     pub fn get_meta_data(&self) -> Option<String> {
@@ -924,8 +886,8 @@ pub fn store_image(id: &[String], target_dir: PathBuf) -> Result<(), Box<dyn Err
         let file = fs::read_to_string(path)?;
         let data: Data = serde_json::from_str(&file)?;
 
-        if data.typ.starts_with("image/") {
-            data.save_image(i)?;
+        if let Some(val) = data.get_image() {
+            save_image(i, &val)?;
         }
     }
     Ok(())
@@ -1182,4 +1144,28 @@ pub fn remove(mut path: PathBuf, typ: String, time: &str, thumbnail: bool) {
             fs::rename(path, get_path_image().join(format!("{}.png", time))).unwrap();
         }
     }
+}
+
+pub fn save_image(time: &str, data: &[u8]) -> Result<(), io::Error> {
+    let path: PathBuf = crate::get_path_image();
+
+    fs::create_dir_all(&path)?;
+
+    let img_path = path.join(format!("{}.png", time));
+    let mut img_file = File::create(img_path)?;
+
+    let image = image::load_from_memory(&data).map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Image decode error: {e}"),
+        )
+    })?;
+
+    let resized = image.thumbnail(128, 128);
+
+    resized
+        .write_to(&mut img_file, image::ImageFormat::Png)
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Image write error: {e}")))?;
+
+    Ok(())
 }

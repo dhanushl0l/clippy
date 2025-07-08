@@ -1,8 +1,7 @@
 use std::{fs::File, io::Write, path::PathBuf, time::Duration};
 
-use actix_web::web::Bytes;
+use actix_web::web::{self, Bytes};
 use actix_ws::{AggregatedMessage, AggregatedMessageStream, Session};
-use bytestring::ByteString;
 use chrono::Utc;
 use clippy::Resopnse;
 use futures_util::StreamExt;
@@ -13,7 +12,7 @@ use tokio::{
     time::{Instant, sleep},
 };
 
-use crate::{DATABASE_PATH, ServResopnse, UserState, get_filename, to_zip};
+use crate::{DATABASE_PATH, RoomManager, ServResopnse, UserState, get_filename, to_zip};
 
 pub async fn ws_connection(
     mut session: Session,
@@ -21,6 +20,8 @@ pub async fn ws_connection(
     tx: Sender<ServResopnse>,
     state: actix_web::web::Data<UserState>,
     user: String,
+    room: web::Data<RoomManager>,
+    pos: usize,
 ) {
     let mut last_pong = Instant::now();
     let mut rx = tx.subscribe();
@@ -38,7 +39,6 @@ pub async fn ws_connection(
                             last_pong = Instant::now();
                         }
                         AggregatedMessage::Text(txt) => {
-                            debug!("len of the file in text {}",txt.len()); //test
                             if let Ok(parsed) = serde_json::from_str::<Resopnse>(&txt) {
                                 match parsed {
                                     Resopnse::CheckVersion(version) =>{
@@ -95,14 +95,8 @@ pub async fn ws_connection(
                             }
                             last_pong = Instant::now();
                         }
-                        // AggregatedMessage::Text(bin) => {
-                        //     handle_bin(&user,&state,&tx,&mut session,bin,&mut old).await;
-                        //     last_pong = Instant::now();
-                        // },
-                        AggregatedMessage::Binary(bin) => {
-                            debug!("len of the file in bin {}",bin.len());
-                            // handle_bin(&user,&state,&tx,&mut session,bin,&mut old).await;
-                            // last_pong = Instant::now();
+                        AggregatedMessage::Binary(_bin) => {
+                            continue;
                         },
                         AggregatedMessage::Close(reason) => {
                             debug!("Client closed: {:?}", reason);
@@ -151,6 +145,7 @@ pub async fn ws_connection(
             }
         }
     }
+    room.remove(user, pos).await;
     error!("WebSocket session closed");
 }
 
