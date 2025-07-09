@@ -1,4 +1,4 @@
-use clippy::{Data, create_past_lock, log_eprintln, set_global_bool};
+use clippy::{Data, log_eprintln, send_process, set_global_bool};
 use clippy_gui::set_lock;
 use egui::{self, *};
 use std::{
@@ -36,10 +36,7 @@ pub fn item_card_image(
                 if ui.add(egui::ImageButton::new(texture)).clicked() {
                     set_global_bool(true);
 
-                    match create_past_lock(path) {
-                        Ok(_) => (),
-                        Err(err) => eprintln!("{err}"),
-                    };
+                    send_process(clippy::MessageIPC::Paste(path.clone()));
 
                     if click_on_quit {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);

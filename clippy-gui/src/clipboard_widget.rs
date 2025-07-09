@@ -5,7 +5,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use clippy::{Data, create_past_lock, log_eprintln, set_global_bool};
+use clippy::{Data, log_eprintln, send_process, set_global_bool};
 use clippy_gui::{Thumbnail, set_lock};
 use egui::{self, *};
 
@@ -15,7 +15,7 @@ pub fn item_card(
     text_label: &Thumbnail,
     pinned: &mut bool,
     click_on_quit: bool,
-    show_data_popup: &mut (bool, String, PathBuf, bool),
+    show_data_popup: &mut (bool, String, Option<PathBuf>, bool),
     changed: Arc<Mutex<bool>>,
     path: &PathBuf,
     ctx: &Context,
@@ -51,10 +51,7 @@ pub fn item_card(
                 {
                     set_global_bool(true);
 
-                    match create_past_lock(path) {
-                        Ok(_) => (),
-                        Err(err) => eprintln!("{err}"),
-                    };
+                    send_process(clippy::MessageIPC::Paste(path.clone()));
 
                     if click_on_quit {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -89,7 +86,8 @@ pub fn item_card(
                         let view_all = ui.selectable_label(false, "💬");
 
                         if view_all.clicked() {
-                            *show_data_popup = (true, text.to_string(), path.clone(), *pinned);
+                            *show_data_popup =
+                                (true, text.to_string(), Some(path.clone()), *pinned);
                         }
 
                         if *sync {

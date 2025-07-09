@@ -58,7 +58,7 @@ struct Clipboard {
     show_createuser_auth_window: bool,
     show_error: (bool, String),
     warn: Option<String>,
-    show_data_popup: (bool, String, PathBuf, bool),
+    show_data_popup: (bool, String, Option<PathBuf>, bool),
     scrool_to_top: bool,
 }
 
@@ -91,7 +91,7 @@ impl Clipboard {
             otp: String::new(),
             thread: None,
             waiting: Arc::new(Mutex::new(Waiting::None)),
-            show_data_popup: (false, String::new(), PathBuf::new(), true),
+            show_data_popup: (false, String::new(), None, true),
             scrool_to_top: false,
         }
     }
@@ -273,6 +273,16 @@ impl App for Clipboard {
 
                             if ui.add(button).on_hover_text("Settings").clicked() {
                                 self.show_settings = true;
+                            }
+
+                            ui.add_space(1.0);
+                            let button = Button::new(RichText::new("➕").size(20.0))
+                                .min_size(Vec2::new(30.0, 30.0))
+                                .corner_radius(50.0)
+                                .stroke(Stroke::new(1.0, ui.visuals().widgets.inactive.bg_fill));
+
+                            if ui.add(button).on_hover_text("Add notes").clicked() {
+                                self.show_data_popup.0 = true;
                             }
 
                             ui.add_space(10.0);
@@ -1115,7 +1125,7 @@ impl App for Clipboard {
             if self.show_settings {
                 self.show_settings = false;
             } else if self.show_data_popup.0 {
-                self.show_data_popup = (false, String::new(), PathBuf::new(), false);
+                self.show_data_popup = (false, String::new(), None, false);
             } else {
                 process::exit(0)
             };

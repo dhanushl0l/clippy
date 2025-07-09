@@ -5,15 +5,17 @@
 
 use clipboard_rs::{ClipboardWatcher, ClipboardWatcherContext};
 use clippy::user::start_cloud;
-use clippy::{UserSettings, get_path_local, read_clipboard, watch_for_next_clip_write};
+use clippy::{MessageIPC, UserSettings, get_path_local, ipc_check, read_clipboard};
 use env_logger::{Builder, Env};
-use fs4::fs_std::FileExt;
+use ipc_channel::ipc::{IpcOneShotServer, IpcSender};
 use log::debug;
 use log::{error, info, warn};
 use std::error::Error;
-use std::fs::File;
-use std::time::Duration;
+use std::fs::{File, write};
+use std::io::Read;
+use std::path::PathBuf;
 use std::{process, thread};
+use tokio::fs::remove_file;
 use tokio::sync::mpsc::Sender;
 
 #[cfg(target_os = "linux")]
@@ -86,53 +88,46 @@ fn read_clipboard(
     Ok(())
 }
 
-fn setup(file: &File) -> Result<(), Box<dyn Error>> {
+fn setup(path: &PathBuf) -> Result<IpcOneShotServer<MessageIPC>, ()> {
     Builder::from_env(Env::default().filter_or("LOG", "info")).init();
 
-    if std::env::var("IGNORE_STARTUP_LOCK").is_ok() {
-        warn!("Startup lock ignored due to IGNORE_STARTUP_LOCK=1");
-        return Ok(());
-    }
-
-    match file.try_lock_exclusive()? {
-        true => {
-            debug!("Lock acquired!");
-        }
-        false => {
-            error!(
-                "Another instance of the app is already running. If you're facing issues and the process is not actually running, set the environment variable IGNORE_STARTUP_LOCK=1 to override the lock."
-            );
-            process::exit(1);
+    if path.is_file() {
+        if let Ok(mut f) = File::open(path) {
+            let mut buff = String::new();
+            if f.read_to_string(&mut buff).is_ok() {
+                if let Ok(sender) = IpcSender::<MessageIPC>::connect(buff.clone()) {
+                    let _ = sender.send(MessageIPC::None);
+                    return Err(());
+                } else {
+                    let _ = remove_file(path);
+                }
+            }
         }
     }
+    let (server, token) = IpcOneShotServer::<MessageIPC>::new().expect("Failed to create server");
+    write(path, &token).expect("Failed to write token");
 
-    Ok(())
+    Ok(server)
 }
 
 fn main() {
     let mut path = get_path_local();
-    path.push("CLIPPY.LOCK");
-
-    if !path.exists() {
-        File::create(&path).unwrap();
-    }
-    let file = File::open(path).unwrap();
-    match setup(&file) {
-        Ok(_) => {
+    path.push(".PROCESS");
+    let channel = match setup(&path) {
+        Ok(x) => {
             debug!("Process startup success");
+            x
         }
-        Err(err) => {
-            error!("Unable to start the app: {}", err);
+        Err(_) => {
+            error!("Another instence of the app is active stop it and try again");
             process::exit(1);
         }
-    }
+    };
 
     let (tx, rx) = tokio::sync::mpsc::channel::<(String, String, String)>(30);
 
-    let mut paste_on_click = false;
     match UserSettings::build_user() {
         Ok(usersettings) => {
-            paste_on_click = usersettings.paste_on_click && usersettings.click_on_quit;
             if !usersettings.disable_sync {
                 if let Some(sync) = usersettings.get_sync() {
                     start_cloud(rx, sync.clone(), usersettings);
@@ -148,10 +143,9 @@ fn main() {
 
     // this thread reads the gui clipboard entry && settings change
     {
-        thread::sleep(Duration::from_secs(1));
-        let path = get_path_local();
+        let tx_c = tx.clone();
         thread::spawn(move || {
-            watch_for_next_clip_write(path, paste_on_click);
+            ipc_check(path, channel, &tx_c);
         });
     }
 

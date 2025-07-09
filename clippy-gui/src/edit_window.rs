@@ -1,6 +1,6 @@
-use std::{fs, io::Write, path::PathBuf};
+use std::{fs, io::Write};
 
-use clippy::Data;
+use clippy::{Data, send_process};
 use clippy_gui::set_lock;
 use egui::ScrollArea;
 use egui::{
@@ -35,7 +35,7 @@ impl Clipboard {
                             .on_hover_text("Close without saving")
                             .clicked()
                         {
-                            self.show_data_popup = (false, String::new(), PathBuf::new(), false);
+                            self.show_data_popup = (false, String::new(), None, false);
                             set_lock!(self.changed, true);
                         }
 
@@ -45,20 +45,28 @@ impl Clipboard {
                             .stroke(Stroke::new(1.0, ui.visuals().widgets.inactive.bg_fill));
 
                         if ui.add(button).on_hover_text("Save").clicked() {
-                            let path = &self.show_data_popup.2;
-                            if let Ok(val) = fs::read_to_string(path) {
-                                if let Ok(mut data) = serde_json::from_str::<Data>(&val) {
-                                    data.change_data(&self.show_data_popup.1);
-                                    data.pined = self.show_data_popup.3;
+                            if let Some(path) = &self.show_data_popup.2 {
+                                if let Ok(val) = fs::read_to_string(path) {
+                                    if let Ok(mut data) = serde_json::from_str::<Data>(&val) {
+                                        data.change_data(&self.show_data_popup.1);
+                                        data.pined = self.show_data_popup.3;
 
-                                    if let Ok(new_val) = serde_json::to_string_pretty(&data) {
-                                        let _ = fs::File::create(path).and_then(|mut file| {
-                                            file.write_all(new_val.as_bytes())
-                                        });
+                                        if let Ok(new_val) = serde_json::to_string_pretty(&data) {
+                                            let _ = fs::File::create(path).and_then(|mut file| {
+                                                file.write_all(new_val.as_bytes())
+                                            });
+                                        }
                                     }
                                 }
+                            } else {
+                                send_process(clippy::MessageIPC::New(Data::new(
+                                    self.show_data_popup.1.to_string(),
+                                    "text/string".to_string(),
+                                    "os".to_string(),
+                                    true,
+                                )));
                             }
-                            self.show_data_popup = (false, String::new(), PathBuf::new(), false);
+                            self.show_data_popup = (false, String::new(), None, false);
                         }
                         let mut button = Button::new(RichText::new("📌").size(20.0))
                             .min_size(Vec2::new(30.0, 30.0))

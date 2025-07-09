@@ -9,17 +9,19 @@ use base64::Engine;
 use base64::engine::general_purpose;
 use bytes::Bytes;
 use bytestring::ByteString;
+use chrono::Utc;
 use encryption_decryption::{decrypt_file, encrept_file};
 use image::{ImageReader, load_from_memory};
+use ipc_channel::ipc::{IpcOneShotServer, IpcSender};
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::error::Error;
-use std::fs::create_dir;
+use std::fs::{create_dir, write};
 use std::io::Write;
 use std::path::Path;
+use std::process;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime};
 use std::{
     collections::BTreeSet,
     env,
@@ -28,7 +30,6 @@ use std::{
     io::{self},
     path::PathBuf,
 };
-use std::{process, thread};
 use tar::{Archive, Builder};
 use tokio::sync::Notify;
 use tokio::sync::mpsc::Sender;
@@ -390,6 +391,8 @@ impl UserSettings {
         let mut file = File::create(&user_config)?;
         file.write_all(&data)?;
 
+        send_process(MessageIPC::Updated);
+
         Ok(())
     }
 }
@@ -607,6 +610,14 @@ impl Resopnse {
 pub enum MessageType {
     Text,
     Binary,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum MessageIPC {
+    None,
+    Paste(PathBuf),
+    New(Data),
+    Updated,
 }
 
 pub fn get_path_local() -> PathBuf {
@@ -952,73 +963,38 @@ pub fn get_global_update_bool() -> bool {
     path.exists()
 }
 
-pub fn create_past_lock(path: &PathBuf) -> Result<(), io::Error> {
-    let mut dir = get_path_local();
-    fs::create_dir_all(&dir)?;
-    dir.push(".next");
-    let mut file = File::create(&dir)?;
+pub fn ipc_check(
+    dir: PathBuf,
+    channel: IpcOneShotServer<MessageIPC>,
+    tx: &Sender<(String, String, String)>,
+) {
+    let (rx, msg) = channel.accept().expect("Failed to accept connection");
 
-    file.write_all(path.to_str().unwrap().as_bytes())?;
-    Ok(())
-}
-
-pub fn watch_for_next_clip_write(dir: PathBuf, paste_on_click: bool) {
-    let mut target = dir.clone();
-    target.push(".next");
-
-    let mut settings = dir;
-    settings.push("user");
-    settings.push(".settings");
-
-    if !settings.is_file() {
-        log_error!(UserSettings::new().write());
-    }
-
-    let last_modified = fs::metadata(&settings)
-        .and_then(|meta| meta.modified())
-        .unwrap();
-
-    loop {
-        if fs::metadata(&target).is_ok() {
-            match read_parse(&target, paste_on_click) {
-                Ok(_) => {
-                    info!("New item copied")
-                }
-                Err(err) => error!("{}", err),
-            }
+    match msg {
+        MessageIPC::None => {}
+        MessageIPC::Paste(path) => {
+            let path = PathBuf::from(path);
+            println!("{:?}", path);
+            read_parse(&path, true);
         }
-
-        check_settings_updated(Path::new(&settings), last_modified);
-
-        thread::sleep(Duration::from_secs(1));
-    }
-
-    fn check_settings_updated(path: &Path, last_modified: SystemTime) {
-        match fs::metadata(path) {
-            Ok(meta) => {
-                if !meta.is_file() {
-                    warn!("Settings updated (not a file)");
-                    process::exit(0);
-                }
-                if let Ok(modified) = meta.modified() {
-                    if modified > last_modified {
-                        warn!("Settings updated (modified)");
-                        process::exit(0);
-                    }
-                }
-            }
-            Err(_) => {
-                warn!("Settings updated (deleted or missing)");
-                process::exit(0);
-            }
+        MessageIPC::Updated => {
+            warn!("Settings updated (modified)");
+            process::exit(0);
+        }
+        MessageIPC::New(data) => {
+            let time = Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
+            data.write_to_json(tx, time);
         }
     }
+
+    let (channel, token) = IpcOneShotServer::<MessageIPC>::new().expect("Failed to create server");
+
+    write(&dir, &token).expect("Failed to write token");
+
+    ipc_check(dir, channel, tx);
 
     fn read_parse(target: &PathBuf, paste_on_click: bool) -> Result<(), String> {
-        let contents = fs::read_to_string(&target)
-            .map_err(|e| format!("Failed to read file {:?}: {}", target, e))?;
-
-        let data = serde_json::from_str(&fs::read_to_string(&contents).unwrap()).unwrap();
+        let data = serde_json::from_str(&fs::read_to_string(&target).unwrap()).unwrap();
 
         #[cfg(target_os = "linux")]
         copy_to_linux(data, paste_on_click);
@@ -1168,4 +1144,15 @@ pub fn save_image(time: &str, data: &[u8]) -> Result<(), io::Error> {
         .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Image write error: {e}")))?;
 
     Ok(())
+}
+
+pub fn send_process(message: MessageIPC) {
+    let mut path = get_path_local();
+    path.push(".PROCESS");
+    let token = fs::read_to_string(path).expect("Failed to read token");
+
+    let sender: IpcSender<MessageIPC> =
+        IpcSender::connect(token.clone()).expect("Failed to connect to server");
+
+    sender.send(message).expect("Failed to send message");
 }
