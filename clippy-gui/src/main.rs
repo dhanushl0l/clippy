@@ -18,8 +18,8 @@ use eframe::{
     run_native,
 };
 use egui::{
-    Align, Button, Frame, Layout, Margin, RichText, Sense, Stroke, TextEdit, TextStyle, Theme,
-    TopBottomPanel, Vec2,
+    Align, Button, Frame, LayerId, Layout, Margin, RichText, Sense, Stroke, TextEdit, TextStyle,
+    Theme, TopBottomPanel, Vec2,
 };
 use http::{check_user, login, signin, signin_otp_auth};
 use std::{
@@ -60,6 +60,14 @@ struct Clipboard {
     warn: Option<String>,
     show_data_popup: (bool, String, Option<PathBuf>, bool),
     scrool_to_top: bool,
+    CurrentPatge: Page,
+}
+
+#[derive(PartialEq)]
+pub enum Page {
+    Clipboard,
+    Notification,
+    Pined,
 }
 
 impl Clipboard {
@@ -93,6 +101,7 @@ impl Clipboard {
             waiting: Arc::new(Mutex::new(Waiting::None)),
             show_data_popup: (false, String::new(), None, true),
             scrool_to_top: false,
+            CurrentPatge: Page::Clipboard,
         }
     }
 
@@ -273,16 +282,6 @@ impl App for Clipboard {
 
                             if ui.add(button).on_hover_text("Settings").clicked() {
                                 self.show_settings = true;
-                            }
-
-                            ui.add_space(1.0);
-                            let button = Button::new(RichText::new("➕").size(20.0))
-                                .min_size(Vec2::new(30.0, 30.0))
-                                .corner_radius(50.0)
-                                .stroke(Stroke::new(1.0, ui.visuals().widgets.inactive.bg_fill));
-
-                            if ui.add(button).on_hover_text("Add notes").clicked() {
-                                self.show_data_popup.0 = true;
                             }
 
                             ui.add_space(10.0);
@@ -1048,7 +1047,82 @@ impl App for Clipboard {
                     }
                 }
             });
+            TopBottomPanel::bottom("footer").show(ctx, |ui| {
+                let available_width = ui.available_width();
 
+                ui.allocate_ui(Vec2::new(available_width, 0.0), |ui| {
+                    ui.horizontal(|ui| {
+                        ui.add_space((available_width / 2.0) - (236.6 / 2.0));
+
+                        let frame_response =
+                            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                                Frame::NONE
+                                    .corner_radius(9.0)
+                                    .outer_margin(Margin::same(10))
+                                    .show(ui, |ui| {
+                                        ui.vertical(|ui| {
+                                            ui.horizontal(|ui| {
+                                                ui.add_space(11.0);
+                                                let button =
+                                                    Button::new(RichText::new("📎").size(20.0))
+                                                        .min_size(Vec2::new(30.0, 30.0))
+                                                        .corner_radius(5.0)
+                                                        .selected(
+                                                            self.CurrentPatge == Page::Clipboard,
+                                                        )
+                                                        .stroke(Stroke::new(
+                                                            1.0,
+                                                            ui.visuals().widgets.inactive.bg_fill,
+                                                        ));
+                                                if ui.add(button).clicked() {
+                                                    self.CurrentPatge = Page::Clipboard;
+                                                }
+                                            });
+                                            ui.label("Clipboard")
+                                        });
+                                        ui.add_space(25.0);
+                                        ui.vertical(|ui| {
+                                            ui.horizontal(|ui| {
+                                                ui.add_space(16.0);
+                                                let button =
+                                                    Button::new(RichText::new("🔔").size(20.0))
+                                                        .min_size(Vec2::new(30.0, 30.0))
+                                                        .corner_radius(5.0)
+                                                        .selected(
+                                                            self.CurrentPatge == Page::Notification,
+                                                        )
+                                                        .stroke(Stroke::new(
+                                                            1.0,
+                                                            ui.visuals().widgets.inactive.bg_fill,
+                                                        ));
+                                                if ui.add(button).clicked() {
+                                                    self.CurrentPatge = Page::Notification;
+                                                }
+                                            });
+                                            ui.label("Notification")
+                                        });
+                                        ui.add_space(25.0);
+                                        ui.vertical(|ui| {
+                                            let button =
+                                                Button::new(RichText::new("📍").size(20.0))
+                                                    .min_size(Vec2::new(30.0, 30.0))
+                                                    .corner_radius(5.0)
+                                                    .selected(self.CurrentPatge == Page::Pined)
+                                                    .stroke(Stroke::new(
+                                                        1.0,
+                                                        ui.visuals().widgets.inactive.bg_fill,
+                                                    ));
+                                            if ui.add(button).clicked() {
+                                                self.CurrentPatge = Page::Pined;
+                                            }
+                                            ui.label("Pined")
+                                        });
+                                    });
+                            });
+                        // println!("{}", frame_response.response.rect.width())
+                    });
+                });
+            });
             if let Ok(mut va) = self.changed.clone().try_lock() {
                 if *va {
                     self.refresh();
@@ -1116,6 +1190,28 @@ impl App for Clipboard {
                         }
                         ui.label("");
                     });
+                    egui::Window::new("New pin")
+                        .id(egui::Id::new("floating_button_window"))
+                        .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-10.0, -80.0))
+                        .resizable(false)
+                        .collapsible(false)
+                        .title_bar(false)
+                        .frame(
+                            egui::Frame::window(&ctx.style())
+                                .fill(egui::Color32::from_rgba_unmultiplied(0, 0, 0, 0))
+                                .stroke(egui::Stroke::NONE)
+                                .shadow(egui::Shadow::NONE),
+                        )
+                        .show(ctx, |ui| {
+                            let button = Button::new(RichText::new("➕").size(40.0))
+                                .min_size(Vec2::new(30.0, 30.0))
+                                .corner_radius(10.0)
+                                .stroke(Stroke::new(1.0, ui.visuals().widgets.inactive.bg_fill));
+
+                            if ui.add(button).on_hover_text("Add notes").clicked() {
+                                self.show_data_popup.0 = true;
+                            }
+                        });
                 });
             });
         } else {
@@ -1175,7 +1271,8 @@ fn main() -> Result<(), eframe::Error> {
         viewport: ViewportBuilder::default()
             .with_inner_size(Vec2::new(600.0, 800.0))
             .with_app_id(APP_ID)
-            .with_icon(icon),
+            .with_icon(icon)
+            .with_min_inner_size(Vec2::new(300.0, 300.0)),
         ..Default::default()
     };
 
