@@ -973,8 +973,6 @@ pub fn ipc_check(
     match msg {
         MessageIPC::None => {}
         MessageIPC::Paste(path) => {
-            let path = PathBuf::from(path);
-            println!("{:?}", path);
             read_parse(&path, true);
         }
         MessageIPC::Updated => {
@@ -993,16 +991,14 @@ pub fn ipc_check(
 
     ipc_check(dir, channel, tx);
 
-    fn read_parse(target: &PathBuf, paste_on_click: bool) -> Result<(), String> {
-        let data = serde_json::from_str(&fs::read_to_string(&target).unwrap()).unwrap();
+    fn read_parse(target: &PathBuf, paste_on_click: bool) -> Result<(), io::Error> {
+        let data = serde_json::from_str(&fs::read_to_string(&target)?)?;
 
         #[cfg(target_os = "linux")]
         copy_to_linux(data, paste_on_click);
 
         #[cfg(not(target_os = "linux"))]
         write_clipboard::push_to_clipboard(data, paste_on_click).unwrap();
-
-        fs::remove_file(&target).map_err(|e| format!("Failed to remove {:?}: {}", target, e))?;
         Ok(())
     }
 }
@@ -1152,7 +1148,7 @@ pub fn send_process(message: MessageIPC) {
     let token = fs::read_to_string(path).expect("Failed to read token");
 
     let sender: IpcSender<MessageIPC> =
-        IpcSender::connect(token.clone()).expect("Failed to connect to server");
+        IpcSender::connect(token).expect("Failed to connect to server");
 
     sender.send(message).expect("Failed to send message");
 }
