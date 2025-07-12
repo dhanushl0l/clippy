@@ -7,8 +7,8 @@ use clipboard_img_widget::item_card_image;
 use clipboard_widget::item_card;
 use clippy::{
     APP_ID, Data, LoginUserCred, NewUser, NewUserOtp, SystemTheam, UserSettings,
-    get_global_update_bool, get_path, get_path_pending, is_valid_email, is_valid_otp,
-    is_valid_password, is_valid_username, log_eprintln, set_global_update_bool,
+    get_global_update_bool, get_path, get_path_pending, get_path_pined, is_valid_email,
+    is_valid_otp, is_valid_password, is_valid_username, log_eprintln, set_global_update_bool,
 };
 use clippy_gui::{Thumbnail, Waiting, set_lock};
 use custom_egui_widget::toggle;
@@ -18,13 +18,12 @@ use eframe::{
     run_native,
 };
 use egui::{
-    Align, Button, Frame, LayerId, Layout, Margin, RichText, Sense, Stroke, TextEdit, TextStyle,
-    Theme, TopBottomPanel, Vec2,
+    Align, Button, Frame, Layout, Margin, RichText, Sense, Stroke, TextEdit, TextStyle, Theme,
+    TopBottomPanel, Vec2,
 };
 use http::{check_user, login, signin, signin_otp_auth};
 use std::{
-    cmp::Reverse,
-    collections::HashMap,
+    collections::BTreeSet,
     fs::{self},
     io::Error,
     path::PathBuf,
@@ -41,8 +40,7 @@ mod edit_window;
 mod http;
 
 struct Clipboard {
-    data: HashMap<u32, Vec<(PathBuf, bool)>>,
-    page: (u32, Option<Vec<(Thumbnail, PathBuf, Data, bool)>>),
+    page: PatgeData,
     changed: Arc<Mutex<bool>>,
     first_run: bool,
     settings: UserSettings,
@@ -60,7 +58,6 @@ struct Clipboard {
     warn: Option<String>,
     show_data_popup: (bool, String, Option<PathBuf>, bool),
     scrool_to_top: bool,
-    CurrentPatge: Page,
 }
 
 #[derive(PartialEq)]
@@ -70,14 +67,56 @@ pub enum Page {
     Pined,
 }
 
+pub enum GETPAGE {
+    NEXT,
+    PREVIOUS,
+    REFRESH,
+}
+
+pub struct PatgeData {
+    page_no: u32,
+    page_data: Option<Vec<(Thumbnail, PathBuf, Data, bool)>>,
+    current_pos: Vec<u32>,
+    CurrentPatge: Page,
+    data: BTreeSet<(PathBuf, bool)>,
+}
+
+impl PatgeData {
+    pub fn get_data() -> BTreeSet<(PathBuf, bool)> {
+        let mut temp = BTreeSet::new();
+
+        if let Ok(entries) = fs::read_dir(get_path_pending()) {
+            for entry in entries.flatten() {
+                temp.insert((entry.path(), true));
+            }
+        }
+
+        if let Ok(entries) = fs::read_dir(get_path()) {
+            for entry in entries.flatten() {
+                temp.insert((entry.path(), false));
+            }
+        }
+
+        if let Ok(entries) = fs::read_dir(get_path_pined()) {
+            for entry in entries.flatten() {
+                temp.insert((entry.path(), false));
+            }
+        }
+
+        temp
+    }
+}
+
 impl Clipboard {
     fn new() -> Self {
-        let data = Self::get_data();
-        let page = Self::get_current_page(&data, 1);
-
-        Self {
-            data,
-            page: (1, page),
+        let mut new = Self {
+            page: PatgeData {
+                page_no: 1,
+                page_data: None,
+                current_pos: vec![0],
+                CurrentPatge: Page::Clipboard,
+                data: PatgeData::get_data(),
+            },
             changed: Arc::new(Mutex::new(false)),
             first_run: true,
             settings: match UserSettings::build_user() {
@@ -101,101 +140,122 @@ impl Clipboard {
             waiting: Arc::new(Mutex::new(Waiting::None)),
             show_data_popup: (false, String::new(), None, true),
             scrool_to_top: false,
-            CurrentPatge: Page::Clipboard,
-        }
+        };
+        new.get_current_page(GETPAGE::REFRESH);
+        new
     }
 
     fn refresh(&mut self) {
-        self.data = Self::get_data();
-        let page = Self::get_current_page(&self.data, self.page.0);
-        self.page.1 = page;
+        self.page.data = PatgeData::get_data();
+        self.get_current_page(GETPAGE::REFRESH);
     }
 
-    fn get_current_page(
-        page: &HashMap<u32, Vec<(PathBuf, bool)>>,
-        page_num: u32,
-    ) -> Option<Vec<(Thumbnail, PathBuf, Data, bool)>> {
-        let page = page.get(&page_num)?;
-        let mut result = Vec::new();
-        for path in page {
+    fn get_current_page(&mut self, get_page: GETPAGE) {
+        let mut page_data = Vec::new();
+        let mut count = 0;
+        let mut current_pos = 0;
+        let skip = match get_page {
+            GETPAGE::NEXT => self.page.current_pos.last(),
+            GETPAGE::PREVIOUS => {
+                self.page.current_pos.pop();
+                self.page.current_pos.pop();
+                self.page.current_pos.last()
+            }
+            GETPAGE::REFRESH => {
+                self.page.current_pos.pop();
+                self.page.current_pos.last()
+            }
+        };
+        for (i, path) in self
+            .page
+            .data
+            .iter()
+            .rev()
+            .enumerate()
+            .skip(*skip.unwrap_or(&0) as usize)
+        {
+            println!("{:?}", path);
             if let Ok(content) = fs::read_to_string(&path.0) {
                 match serde_json::from_str::<Data>(&content) {
-                    Ok(file) => {
-                        if file.typ.starts_with("image/") {
-                            if let Some(val) = file.get_image_thumbnail(&path.0) {
-                                result.push((Thumbnail::Image(val), path.0.clone(), file, path.1));
-                            }
-                        } else {
-                            if let Some(val) = file.get_meta_data() {
-                                result.push((Thumbnail::Text(val), path.0.clone(), file, path.1));
+                    Ok(file) => match self.page.CurrentPatge {
+                        Page::Clipboard => {
+                            if file.typ.starts_with("image/") {
+                                if let Some(val) = file.get_image_thumbnail(&path.0) {
+                                    page_data.push((
+                                        Thumbnail::Image(val),
+                                        path.0.clone(),
+                                        file,
+                                        path.1,
+                                    ));
+                                    count += 1;
+                                }
+                            } else {
+                                if let Some(val) = file.get_meta_data() {
+                                    page_data.push((
+                                        Thumbnail::Text(val),
+                                        path.0.clone(),
+                                        file,
+                                        path.1,
+                                    ));
+                                    count += 1;
+                                }
                             }
                         }
-                    }
+                        Page::Notification => {
+                            if file.typ.starts_with("notification/") {
+                                if let Some(val) = file.get_meta_data() {
+                                    page_data.push((
+                                        Thumbnail::Text(val),
+                                        path.0.clone(),
+                                        file,
+                                        path.1,
+                                    ));
+                                    count += 1;
+                                }
+                            }
+                        }
+                        Page::Pined => {
+                            if file.pined {
+                                if file.typ.starts_with("image/") {
+                                    if let Some(val) = file.get_image_thumbnail(&path.0) {
+                                        page_data.push((
+                                            Thumbnail::Image(val),
+                                            path.0.clone(),
+                                            file,
+                                            path.1,
+                                        ));
+                                        count += 1;
+                                    }
+                                } else {
+                                    if let Some(val) = file.get_meta_data() {
+                                        page_data.push((
+                                            Thumbnail::Text(val),
+                                            path.0.clone(),
+                                            file,
+                                            path.1,
+                                        ));
+                                        count += 1;
+                                    }
+                                }
+                            }
+                        }
+                    },
                     Err(err) => {
                         eprintln!("json: {:?}", content);
                         eprintln!("{:?}", err)
                     }
                 }
             }
-        }
-        Some(result)
-    }
-
-    fn get_data() -> HashMap<u32, Vec<(PathBuf, bool)>> {
-        let mut data = HashMap::new();
-        let mut temp = Vec::new();
-
-        let mut count = 0;
-        let mut page = 1;
-
-        if let Ok(entries) = fs::read_dir(get_path_pending()) {
-            let mut entries: Vec<_> = entries.flatten().collect();
-            entries.sort_unstable_by_key(|entry| Reverse(entry.path()));
-
-            for entry in entries.iter() {
-                let path = entry.path();
-                if path.is_file() {
-                    temp.push((path, true)); // or false in the second loop
-                    count += 1;
-                    if count >= 20 {
-                        data.insert(page, temp);
-                        temp = vec![];
-                        page += 1;
-                        if page > 100 {
-                            break;
-                        }
-                        count = 0;
-                    }
-                }
+            if i == 0 {
+                self.page.page_no = 1;
+            }
+            if count == 10 || self.page.data.len() == i {
+                current_pos = i + 1;
+                break;
             }
         }
-
-        if let Ok(entries) = fs::read_dir(get_path()) {
-            let mut entries: Vec<_> = entries.flatten().collect();
-            entries.sort_unstable_by_key(|entry| Reverse(entry.path()));
-            for entry in entries.iter() {
-                let path = entry.path();
-                if path.is_file() {
-                    temp.push((path, false)); // or false in the second loop
-                    count += 1;
-                    if count >= 20 {
-                        data.insert(page, temp);
-                        temp = vec![];
-                        page += 1;
-                        if page > 100 {
-                            break;
-                        }
-                        count = 0;
-                    }
-                }
-            }
-        }
-
-        if !temp.is_empty() {
-            data.insert(page, temp);
-        }
-
-        data
+        self.page.current_pos.push(current_pos as u32);
+        self.page.page_data = Some(page_data);
     }
 }
 impl App for Clipboard {
@@ -242,14 +302,14 @@ impl App for Clipboard {
 
                                     if ui.add(button_next).on_hover_text("Previous page").clicked()
                                     {
-                                        if self.page.0 > 1 {
-                                            self.page.0 -= 1;
-                                            self.refresh();
+                                        if self.page.page_no > 1 {
+                                            self.page.page_no -= 1;
+                                            self.get_current_page(GETPAGE::PREVIOUS);
                                             self.scrool_to_top = true;
                                         }
                                     }
 
-                                    ui.label(self.page.0.to_string());
+                                    ui.label(self.page.page_no.to_string());
 
                                     let button_prev = Button::new(RichText::new("➡").size(15.0))
                                         .min_size(Vec2::new(20.0, 20.0))
@@ -260,11 +320,9 @@ impl App for Clipboard {
                                         ));
 
                                     if ui.add(button_prev).on_hover_text("Next page").clicked() {
-                                        if self.data.contains_key(&(self.page.0 + 1)) {
-                                            self.page.0 += 1;
-                                            self.refresh();
-                                            self.scrool_to_top = true;
-                                        }
+                                        self.page.page_no += 1;
+                                        self.get_current_page(GETPAGE::NEXT);
+                                        self.scrool_to_top = true;
                                     }
                                 });
                         });
@@ -1047,82 +1105,7 @@ impl App for Clipboard {
                     }
                 }
             });
-            TopBottomPanel::bottom("footer").show(ctx, |ui| {
-                let available_width = ui.available_width();
 
-                ui.allocate_ui(Vec2::new(available_width, 0.0), |ui| {
-                    ui.horizontal(|ui| {
-                        ui.add_space((available_width / 2.0) - (236.6 / 2.0));
-
-                        let frame_response =
-                            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                                Frame::NONE
-                                    .corner_radius(9.0)
-                                    .outer_margin(Margin::same(10))
-                                    .show(ui, |ui| {
-                                        ui.vertical(|ui| {
-                                            ui.horizontal(|ui| {
-                                                ui.add_space(11.0);
-                                                let button =
-                                                    Button::new(RichText::new("📎").size(20.0))
-                                                        .min_size(Vec2::new(30.0, 30.0))
-                                                        .corner_radius(5.0)
-                                                        .selected(
-                                                            self.CurrentPatge == Page::Clipboard,
-                                                        )
-                                                        .stroke(Stroke::new(
-                                                            1.0,
-                                                            ui.visuals().widgets.inactive.bg_fill,
-                                                        ));
-                                                if ui.add(button).clicked() {
-                                                    self.CurrentPatge = Page::Clipboard;
-                                                }
-                                            });
-                                            ui.label("Clipboard")
-                                        });
-                                        ui.add_space(25.0);
-                                        ui.vertical(|ui| {
-                                            ui.horizontal(|ui| {
-                                                ui.add_space(16.0);
-                                                let button =
-                                                    Button::new(RichText::new("🔔").size(20.0))
-                                                        .min_size(Vec2::new(30.0, 30.0))
-                                                        .corner_radius(5.0)
-                                                        .selected(
-                                                            self.CurrentPatge == Page::Notification,
-                                                        )
-                                                        .stroke(Stroke::new(
-                                                            1.0,
-                                                            ui.visuals().widgets.inactive.bg_fill,
-                                                        ));
-                                                if ui.add(button).clicked() {
-                                                    self.CurrentPatge = Page::Notification;
-                                                }
-                                            });
-                                            ui.label("Notification")
-                                        });
-                                        ui.add_space(25.0);
-                                        ui.vertical(|ui| {
-                                            let button =
-                                                Button::new(RichText::new("📍").size(20.0))
-                                                    .min_size(Vec2::new(30.0, 30.0))
-                                                    .corner_radius(5.0)
-                                                    .selected(self.CurrentPatge == Page::Pined)
-                                                    .stroke(Stroke::new(
-                                                        1.0,
-                                                        ui.visuals().widgets.inactive.bg_fill,
-                                                    ));
-                                            if ui.add(button).clicked() {
-                                                self.CurrentPatge = Page::Pined;
-                                            }
-                                            ui.label("Pined")
-                                        });
-                                    });
-                            });
-                        // println!("{}", frame_response.response.rect.width())
-                    });
-                });
-            });
             if let Ok(mut va) = self.changed.clone().try_lock() {
                 if *va {
                     self.refresh();
@@ -1141,7 +1124,7 @@ impl App for Clipboard {
                             self.scrool_to_top = false;
                         }
 
-                        let data = &self.page.1;
+                        let data = &self.page.page_data;
 
                         if let Some(data) = data {
                             for (thumbnail, path, i, sync) in data {
@@ -1188,11 +1171,12 @@ impl App for Clipboard {
                                 }
                             }
                         }
+                        ui.add_space(70.0);
                         ui.label("");
                     });
                     egui::Window::new("New pin")
                         .id(egui::Id::new("floating_button_window"))
-                        .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-10.0, -80.0))
+                        .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -10.0))
                         .resizable(false)
                         .collapsible(false)
                         .title_bar(false)
@@ -1203,14 +1187,92 @@ impl App for Clipboard {
                                 .shadow(egui::Shadow::NONE),
                         )
                         .show(ctx, |ui| {
-                            let button = Button::new(RichText::new("➕").size(40.0))
-                                .min_size(Vec2::new(30.0, 30.0))
-                                .corner_radius(10.0)
-                                .stroke(Stroke::new(1.0, ui.visuals().widgets.inactive.bg_fill));
-
-                            if ui.add(button).on_hover_text("Add notes").clicked() {
-                                self.show_data_popup.0 = true;
-                            }
+                            ui.horizontal(|ui| {
+                                ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                                    Frame::group(ui.style())
+                                        .corner_radius(9.0)
+                                        .fill(ui.visuals().window_fill())
+                                        .outer_margin(Margin::same(10))
+                                        .show(ui, |ui| {
+                                            ui.vertical(|ui| {
+                                                ui.horizontal(|ui| {
+                                                    ui.add_space(11.0);
+                                                    let button =
+                                                        Button::new(RichText::new("📎").size(20.0))
+                                                            .min_size(Vec2::new(30.0, 30.0))
+                                                            .corner_radius(5.0)
+                                                            .selected(
+                                                                self.page.CurrentPatge
+                                                                    == Page::Clipboard,
+                                                            )
+                                                            .stroke(Stroke::new(
+                                                                1.0,
+                                                                ui.visuals()
+                                                                    .widgets
+                                                                    .inactive
+                                                                    .bg_fill,
+                                                            ));
+                                                    if ui.add(button).clicked() {
+                                                        self.page.CurrentPatge = Page::Clipboard;
+                                                        self.page.current_pos = vec![0];
+                                                        self.page.page_no = 1;
+                                                        self.get_current_page(GETPAGE::REFRESH);
+                                                    }
+                                                });
+                                                ui.label("Clipboard")
+                                            });
+                                            ui.add_space(25.0);
+                                            ui.vertical(|ui| {
+                                                ui.horizontal(|ui| {
+                                                    ui.add_space(16.0);
+                                                    let button =
+                                                        Button::new(RichText::new("🔔").size(20.0))
+                                                            .min_size(Vec2::new(30.0, 30.0))
+                                                            .corner_radius(5.0)
+                                                            .selected(
+                                                                self.page.CurrentPatge
+                                                                    == Page::Notification,
+                                                            )
+                                                            .stroke(Stroke::new(
+                                                                1.0,
+                                                                ui.visuals()
+                                                                    .widgets
+                                                                    .inactive
+                                                                    .bg_fill,
+                                                            ));
+                                                    if ui.add(button).clicked() {
+                                                        self.page.CurrentPatge = Page::Notification;
+                                                        self.page.current_pos = vec![0];
+                                                        self.page.page_no = 1;
+                                                        self.get_current_page(GETPAGE::REFRESH)
+                                                    }
+                                                });
+                                                ui.label("Notification")
+                                            });
+                                            ui.add_space(25.0);
+                                            ui.vertical(|ui| {
+                                                let button =
+                                                    Button::new(RichText::new("📍").size(20.0))
+                                                        .min_size(Vec2::new(30.0, 30.0))
+                                                        .corner_radius(5.0)
+                                                        .selected(
+                                                            self.page.CurrentPatge == Page::Pined,
+                                                        )
+                                                        .stroke(Stroke::new(
+                                                            1.0,
+                                                            ui.visuals().widgets.inactive.bg_fill,
+                                                        ));
+                                                if ui.add(button).clicked() {
+                                                    self.page.CurrentPatge = Page::Pined;
+                                                    self.page.page_no = 1;
+                                                    self.page.current_pos = vec![0];
+                                                    self.get_current_page(GETPAGE::REFRESH);
+                                                }
+                                                ui.label("Pined")
+                                            });
+                                        });
+                                });
+                            });
                         });
                 });
             });
