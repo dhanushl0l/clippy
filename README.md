@@ -14,6 +14,10 @@ Clippy is in the initial stages of development. If you're interested, contributi
 > Cloud sync functionality is currently broken in the alpha release. The API is under active development and may change frequently.  
 > Please wait for future releases for stable cloud sync support.
 
+## Demo
+
+<img src="./assets/demo.png" width="400"/>
+
 ## Contributions
 
 We appreciate any contributions! Whether it's reporting bugs, suggesting features, or writing code, your help makes a difference.
