@@ -10,15 +10,21 @@ Clippy is a cross-platform clipboard and notes manager that syncs across your de
 🚀 **Project Status: Early Development**  
 Clippy is in the initial stages of development. If you're interested, contributions are welcome!
 
-## 🛠 Contributing
+> ⚠️ **Warning: Cloud Sync Features Are Experimental**  
+> Cloud sync functionality is currently broken in the alpha release. The API is under active development and may change frequently.  
+> Please wait for future releases for stable cloud sync support.
+
+## Demo
+
+<img src="./assets/demo.png" width="400"/>
+
+## Contributions
 
 We appreciate any contributions! Whether it's reporting bugs, suggesting features, or writing code, your help makes a difference.
 
-## 📌 Roadmap
+## Roadmap
 
 Below is our planned development roadmap. Features and priorities may change over time based on feedback.
-
-<img src="/assets/rust.png" alt="Rust Logo" width="200">
 
 ### Phase 1: Core Features (In Progress)
 
@@ -28,17 +34,17 @@ Below is our planned development roadmap. Features and priorities may change ove
 
 ### Phase 2: Enhancements & Improvements
 
-- [ ] Advanced settings
+- [x] Advanced settings
 - [ ] End-to-end encryption for sync
 - [x] Multi-device sync
-- [ ] Platform-specific packaging
+- [x] Platform-specific packaging
 
 ### Phase 3: Stable Release & Beyond
 
 - [ ] UI customization
 - [ ] Platform-specific optimizations
 - [ ] Landing Page & Documentation
-- [ ] Start Mobile app Development
+- [x] Start Mobile app Development
 
 ## Installation _(Alpha – for testing only, not ready for production use)_
 
@@ -59,11 +65,11 @@ Download and install the `.msi` installer from the [Releases page](https://githu
 Clippy is licensed under the **GNU General Public License v2.0 (GPL-2.0-only)**.  
 See the [LICENSE](./LICENSE) file for more details.
 
-## 💬 Stay Connected
+## Stay Connected
 
 For discussions, updates, and questions, join our community:
 
-- 📌 Issues & Feature Requests: [GitHub Issues](https://github.com/dhanushl0l/clippy/issues)
+- Issues & Feature Requests: [GitHub Issues](https://github.com/dhanushl0l/clippy/issues)
 
 ---
 
