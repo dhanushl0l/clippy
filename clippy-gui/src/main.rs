@@ -24,7 +24,6 @@ use egui::{
 };
 use http::{check_user, login, signin, signin_otp_auth};
 use std::{
-    collections::BTreeSet,
     fs::{self},
     io::Error,
     path::PathBuf,
@@ -82,31 +81,50 @@ pub struct PatgeData {
     page_data: Option<Vec<(Thumbnail, PathBuf, Data, bool)>>,
     current_pos: Vec<u32>,
     current_patge: Page,
-    data: BTreeSet<(PathBuf, bool)>,
+    data: Vec<(PathBuf, bool)>,
 }
 
 impl PatgeData {
-    pub fn get_data() -> BTreeSet<(PathBuf, bool)> {
-        let mut temp = BTreeSet::new();
-
-        if let Ok(entries) = fs::read_dir(get_path_pending()) {
-            for entry in entries.flatten() {
-                temp.insert((entry.path(), true));
-            }
-        }
+    pub fn get_data() -> Vec<(PathBuf, bool)> {
+        let mut temp = Vec::new();
 
         if let Ok(entries) = fs::read_dir(get_path()) {
             for entry in entries.flatten() {
-                temp.insert((entry.path(), false));
+                temp.push((entry.path(), false));
+            }
+        }
+
+        if let Ok(entries) = fs::read_dir(get_path_pending()) {
+            for entry in entries.flatten() {
+                temp.push((entry.path(), true));
             }
         }
 
         if let Ok(entries) = fs::read_dir(get_path_pined()) {
             for entry in entries.flatten() {
-                temp.insert((entry.path(), false));
+                temp.push((entry.path(), false));
             }
         }
 
+        fn priority(path: &PathBuf) -> u8 {
+            let path_str = path.to_string_lossy();
+            if path_str.contains("clippy/local_data/") {
+                3
+            } else if path_str.contains("clippy/data/") {
+                2
+            } else if path_str.contains("clippy/pined/") {
+                1
+            } else {
+                0
+            }
+        }
+
+        temp.sort_by(|(a, _), (b, _)| {
+            let pa = priority(a);
+            let pb = priority(b);
+
+            pb.cmp(&pa).then_with(|| b.cmp(a))
+        });
         temp
     }
 }
@@ -174,7 +192,6 @@ impl Clipboard {
             .page
             .data
             .iter()
-            .rev()
             .enumerate()
             .skip(*skip.unwrap_or(&0) as usize)
         {
@@ -388,6 +405,7 @@ impl App for Clipboard {
                                                 .min_size(button_size),
                                             );
                                             if button.clicked() {
+                                                self.settings.remove_user();
                                                 log_eprintln!(send_process(clippy::MessageIPC::UpdateSettings(
                                                     self.settings.clone(),
                                                 )));
@@ -1047,7 +1065,6 @@ impl App for Clipboard {
                                     ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
                                         if ui.add(toggle(&mut self.settings.disable_sync)).changed()
                                         {
-                                            self.settings.remove_user();
                                                 log_eprintln!(send_process(clippy::MessageIPC::UpdateSettings(
                                                     self.settings.clone(),
                                                 )));

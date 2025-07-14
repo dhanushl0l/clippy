@@ -2,12 +2,13 @@ name: Rust
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["*"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["*"]
 
 env:
   CARGO_TERM_COLOR: always
+  RUSTFLAGS: ""
 
 jobs:
   build:
@@ -15,18 +16,20 @@ jobs:
 
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest, macos-15]
+        BUILD_TARGET: [release]
 
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libssl-dev libxkbcommon-dev
+
       - name: Set up Rust
-        uses: actions/setup-rust@v1
-        with:
-          rust-version: stable
+        uses: actions-rust-lang/setup-rust-toolchain@v1
 
       - name: Build
-        run: cargo build --verbose
-
+        run: cargo build --profile ${{ matrix.BUILD_TARGET }}
 #      - name: Run tests
 #        run: cargo test --verbose
