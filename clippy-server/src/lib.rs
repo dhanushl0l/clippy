@@ -15,8 +15,9 @@ use sha2::{Digest, Sha256};
 use sqlx::prelude::FromRow;
 use std::{
     collections::{BTreeSet, HashMap, hash_map::Entry},
+    error::Error,
     fs::{self},
-    io::{Error, Write},
+    io::{self, Write},
     path::{Path, PathBuf},
     sync::{Arc, Mutex, OnceLock},
 };
@@ -150,6 +151,20 @@ impl UserState {
         }
 
         Some(temp)
+    }
+
+    pub fn remove(&self, username: &str, id: &str) -> Result<(), Box<dyn Error>> {
+        let mut map = self.data.lock().or_else(|_| Err("Unable to lock cred"))?;
+        let tree = map
+            .get_mut(username)
+            .ok_or_else(|| "Unable to identify user")?;
+        if tree.remove(id) {
+            match remove_db_file(username, id) {
+                Ok(_) => (),
+                Err(err) => debug!("{}", err),
+            };
+        }
+        Ok(())
     }
 }
 
@@ -305,7 +320,7 @@ pub fn get_filename(id: i64, mut path: PathBuf) -> String {
     file_name
 }
 
-pub fn to_zip(files: Vec<String>) -> Result<Vec<u8>, Error> {
+pub fn to_zip(files: Vec<String>) -> Result<Vec<u8>, io::Error> {
     let mut buffer = Vec::new();
     {
         let mut tar = Builder::new(&mut buffer);
@@ -518,7 +533,7 @@ fn is_token_expired(expiry_timestamp: i64) -> bool {
     now_timestamp >= expiry_timestamp
 }
 
-fn remove_db_file(username: &str, id: &str) -> Result<(), Error> {
+fn remove_db_file(username: &str, id: &str) -> Result<(), io::Error> {
     let mut path = PathBuf::from(DATABASE_PATH);
     path.push(username);
     path.push(id);

@@ -1,6 +1,6 @@
-use std::{fs, io::Write};
+use std::fs;
 
-use clippy::{Data, send_process};
+use clippy::{Data, EditData, log_eprintln};
 use clippy_gui::set_lock;
 use egui::ScrollArea;
 use egui::{
@@ -9,6 +9,7 @@ use egui::{
 };
 
 use crate::Clipboard;
+use crate::ipc::ipc::send_process;
 
 impl Clipboard {
     pub fn edit_window(&mut self, ctx: &egui::Context) {
@@ -50,21 +51,25 @@ impl Clipboard {
                                     if let Ok(mut data) = serde_json::from_str::<Data>(&val) {
                                         data.change_data(&self.show_data_popup.1);
                                         data.pined = self.show_data_popup.3;
-
-                                        if let Ok(new_val) = serde_json::to_string_pretty(&data) {
-                                            let _ = fs::File::create(path).and_then(|mut file| {
-                                                file.write_all(new_val.as_bytes())
-                                            });
+                                        log_eprintln!(fs::remove_file(path));
+                                        if let Some(file_name) =
+                                            path.file_name().and_then(|f| f.to_str())
+                                        {
+                                            let msg = clippy::MessageIPC::Edit(EditData::new(
+                                                data,
+                                                file_name.to_string(),
+                                            ));
+                                            log_eprintln!(send_process(msg));
                                         }
                                     }
                                 }
                             } else {
-                                send_process(clippy::MessageIPC::New(Data::new(
+                                log_eprintln!(send_process(clippy::MessageIPC::New(Data::new(
                                     self.show_data_popup.1.to_string(),
                                     "text/string".to_string(),
                                     "os".to_string(),
                                     true,
-                                )));
+                                ))));
                             }
                             self.show_data_popup = (false, String::new(), None, false);
                         }

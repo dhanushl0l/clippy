@@ -4,18 +4,14 @@
 )]
 
 use clipboard_rs::{ClipboardWatcher, ClipboardWatcherContext};
+use clippy::ipc::ipc::{ipc_check, startup};
 use clippy::user::start_cloud;
-use clippy::{MessageIPC, UserSettings, get_path_local, ipc_check, read_clipboard};
+use clippy::{MessageChannel, UserSettings, read_clipboard};
 use env_logger::{Builder, Env};
-use ipc_channel::ipc::{IpcOneShotServer, IpcSender};
 use log::debug;
 use log::{error, info, warn};
 use std::error::Error;
-use std::fs::{File, write};
-use std::io::Read;
-use std::path::PathBuf;
 use std::{process, thread};
-use tokio::fs::remove_file;
 use tokio::sync::mpsc::Sender;
 
 #[cfg(target_os = "linux")]
@@ -25,7 +21,7 @@ use clippy::read_clipboard::read_wayland_clipboard;
 use wayland_clipboard_listener::{WlClipboardPasteStream, WlListenType};
 
 #[cfg(target_os = "linux")]
-fn run(tx: &Sender<(String, String, String)>) {
+fn run(tx: &Sender<MessageChannel>) {
     use std::env;
 
     if env::var("WAYLAND_DISPLAY").is_ok() {
@@ -46,7 +42,7 @@ fn run(tx: &Sender<(String, String, String)>) {
 
 // need to find a way to monitor clipboard changes in wayland the current way is not optimal
 #[cfg(target_os = "linux")]
-fn read_clipboard_wayland(tx: &Sender<(String, String, String)>) {
+fn read_clipboard_wayland(tx: &Sender<MessageChannel>) {
     let mut stream = WlClipboardPasteStream::init(WlListenType::ListenOnCopy).unwrap();
 
     for _ in stream.paste_stream().flatten().flatten() {
@@ -58,7 +54,7 @@ fn read_clipboard_wayland(tx: &Sender<(String, String, String)>) {
 }
 
 #[cfg(any(target_os = "windows", target_os = "macos"))]
-fn run(tx: &Sender<(String, String, String)>) {
+fn run(tx: &Sender<MessageChannel>) {
     match read_clipboard(tx) {
         Ok(_) => (),
         Err(err) => {
@@ -74,9 +70,7 @@ fn run(tx: Sender<(String, String)>) {
     process::exit(1);
 }
 
-fn read_clipboard(
-    tx: &Sender<(String, String, String)>,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
+fn read_clipboard(tx: &Sender<MessageChannel>) -> Result<(), Box<dyn Error + Send + Sync>> {
     let manager = read_clipboard::Manager::new(tx);
 
     let mut watcher = ClipboardWatcherContext::new()?;
@@ -88,43 +82,21 @@ fn read_clipboard(
     Ok(())
 }
 
-fn setup(path: &PathBuf) -> Result<IpcOneShotServer<MessageIPC>, ()> {
-    Builder::from_env(Env::default().filter_or("LOG", "info")).init();
-
-    if path.is_file() {
-        if let Ok(mut f) = File::open(path) {
-            let mut buff = String::new();
-            if f.read_to_string(&mut buff).is_ok() {
-                if let Ok(sender) = IpcSender::<MessageIPC>::connect(buff.clone()) {
-                    let _ = sender.send(MessageIPC::None);
-                    return Err(());
-                } else {
-                    let _ = remove_file(path);
-                }
-            }
-        }
-    }
-    let (server, token) = IpcOneShotServer::<MessageIPC>::new().expect("Failed to create server");
-    write(path, &token).expect("Failed to write token");
-
-    Ok(server)
-}
-
 fn main() {
-    let mut path = get_path_local();
-    path.push(".PROCESS");
-    let channel = match setup(&path) {
+    Builder::from_env(Env::default().filter_or("LOG", "info")).init();
+    let channel = match startup() {
         Ok(x) => {
             debug!("Process startup success");
             x
         }
-        Err(_) => {
+        Err(e) => {
             error!("Another instence of the app is active stop it and try again");
+            error!("{}", e);
             process::exit(1);
         }
     };
 
-    let (tx, rx) = tokio::sync::mpsc::channel::<(String, String, String)>(30);
+    let (tx, rx) = tokio::sync::mpsc::channel::<MessageChannel>(30);
 
     match UserSettings::build_user() {
         Ok(usersettings) => {
@@ -145,7 +117,7 @@ fn main() {
     {
         let tx_c = tx.clone();
         thread::spawn(move || {
-            ipc_check(path, channel, &tx_c);
+            ipc_check(channel, &tx_c);
         });
     }
 

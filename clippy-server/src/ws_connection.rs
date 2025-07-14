@@ -87,7 +87,13 @@ pub async fn ws_connection(
                                             },
                                         };
                                     }
-                                    Resopnse::Data{data,id,last,} => {
+                                    Resopnse::Data{data,id,last,is_it_edit} => {
+                                        if let Some(val) = is_it_edit {
+                                            if let Err(e) = state.remove(&user, &val){
+                                                error!("unable to remove edited state");
+                                                debug!("{}",e)
+                                            };
+                                        }
                                         handle_bin(&user,&state,&tx,&mut session,data,id,last,&mut old).await;
                                     }
                                     _ => {}

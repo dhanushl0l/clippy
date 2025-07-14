@@ -1,14 +1,16 @@
-use clippy::{Data, log_eprintln, send_process, set_global_bool};
+use clippy::{Data, EditData, log_eprintln, set_global_bool};
 use clippy_gui::set_lock;
 use egui::{self, *};
 use std::{
     fs,
-    io::Write,
     path::PathBuf,
     sync::{Arc, Mutex},
 };
 
+use crate::ipc::ipc::send_process;
+
 pub fn item_card_image(
+    data: &mut Data,
     ui: &mut Ui,
     texture: &egui::TextureHandle,
     pinned: &mut bool,
@@ -36,7 +38,7 @@ pub fn item_card_image(
                 if ui.add(egui::ImageButton::new(texture)).clicked() {
                     set_global_bool(true);
 
-                    send_process(clippy::MessageIPC::Paste(path.clone()));
+                    log_eprintln!(send_process(clippy::MessageIPC::Paste(data.clone())));
 
                     if click_on_quit {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -48,18 +50,18 @@ pub fn item_card_image(
                     ui.horizontal(|ui| {
                         let pin_response = ui.selectable_label(*pinned, "📌");
                         if pin_response.clicked() {
-                            if let Ok(val) = fs::read_to_string(&path) {
-                                if let Ok(mut data) = serde_json::from_str::<Data>(&val) {
-                                    data.change_pined();
-
-                                    if let Ok(new_val) = serde_json::to_string_pretty(&data) {
-                                        let _ = fs::File::create(&path).and_then(|mut file| {
-                                            file.write_all(new_val.as_bytes())
-                                        });
-                                    }
+                            if pin_response.clicked() {
+                                data.change_pined();
+                                log_eprintln!(fs::remove_file(path));
+                                if let Some(file_name) = path.file_name().and_then(|f| f.to_str()) {
+                                    let msg = clippy::MessageIPC::Edit(EditData::new(
+                                        data.clone(),
+                                        file_name.to_string(),
+                                    ));
+                                    log_eprintln!(send_process(msg));
                                 }
+                                set_lock!(changed, true);
                             }
-                            set_lock!(changed, true);
                         }
 
                         let delete_response = ui.selectable_label(false, "🗑");

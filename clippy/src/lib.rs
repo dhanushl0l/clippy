@@ -1,5 +1,6 @@
 pub mod encryption_decryption;
 pub mod http;
+pub mod ipc;
 pub mod macros;
 pub mod read_clipboard;
 pub mod user;
@@ -9,18 +10,15 @@ use base64::Engine;
 use base64::engine::general_purpose;
 use bytes::Bytes;
 use bytestring::ByteString;
-use chrono::Utc;
 use encryption_decryption::{decrypt_file, encrept_file};
 use image::{ImageReader, load_from_memory};
-use ipc_channel::ipc::{IpcOneShotServer, IpcSender};
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::error::Error;
-use std::fs::{create_dir, write};
-use std::io::Write;
+use std::fs::create_dir;
+use std::io::{Read, Write};
 use std::path::Path;
-use std::process;
 use std::sync::{Arc, Mutex};
 use std::{
     collections::BTreeSet,
@@ -36,8 +34,12 @@ use tokio::sync::mpsc::Sender;
 
 pub const APP_ID: &str = "org.clippy.clippy";
 pub const API_KEY: Option<&str> = option_env!("KEY");
-pub static SETTINGS: Mutex<Option<UserSettings>> = Mutex::new(None);
+// pub static SETTINGS: Mutex<Option<UserSettings>> = Mutex::new(None);
 const IMAGE_DATA: &[u8] = include_bytes!("../../assets/gui_icons/image.png");
+#[cfg(debug_assertions)]
+const GUI_BIN: &str = "target/debug/clippy-gui";
+#[cfg(not(debug_assertions))]
+const GUI_BIN: &str = "clippy-gui";
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Data {
@@ -59,7 +61,7 @@ impl Data {
 
     pub fn write_to_json(
         &self,
-        tx: &Sender<(String, String, String)>,
+        tx: &Sender<MessageChannel>,
         time: String,
     ) -> Result<(), io::Error> {
         let path = get_path_pending();
@@ -73,7 +75,45 @@ impl Data {
 
         set_global_update_bool(true);
 
-        match tx.try_send((file_path.to_str().unwrap().into(), time, self.typ.clone())) {
+        match tx.try_send(MessageChannel::New {
+            path: file_path.to_str().unwrap().into(),
+            typ: self.typ.clone(),
+            time,
+        }) {
+            Ok(_) => (),
+            Err(err) => warn!(
+                "Failed to send file '{}' to channel: {}",
+                file_path.display(),
+                err
+            ),
+        }
+
+        Ok(())
+    }
+
+    pub fn re_write_json(
+        &self,
+        tx: &Sender<MessageChannel>,
+        time: String,
+        old_id: String,
+    ) -> Result<(), io::Error> {
+        let path = get_path_pending();
+        fs::create_dir_all(&path)?;
+        let file_path = &path.join(&time);
+
+        let json_data = serde_json::to_string_pretty(self)?;
+
+        let mut file = File::create(file_path)?;
+        file.write_all(json_data.as_bytes())?;
+
+        set_global_update_bool(true);
+
+        match tx.try_send(MessageChannel::Edit {
+            time,
+            old_id,
+            path: file_path.to_str().unwrap().to_string(),
+            typ: self.typ.clone(),
+        }) {
             Ok(_) => (),
             Err(err) => warn!(
                 "Failed to send file '{}' to channel: {}",
@@ -151,6 +191,13 @@ impl Data {
         let display_text = lines.collect::<Vec<_>>().join("\n");
 
         Some(display_text)
+    }
+
+    pub fn build(path: &PathBuf) -> Result<Self, io::Error> {
+        let mut buf = String::new();
+        let mut file = File::open(path)?;
+        file.read_to_string(&mut buf)?;
+        Ok(serde_json::from_str(&buf)?)
     }
 }
 
@@ -356,13 +403,11 @@ impl UserSettings {
                 }
             };
         }
-        if let Ok(mut va) = SETTINGS.lock() {
-            *va = Some(settings.clone());
-        }
+
         Ok(settings)
     }
 
-    pub fn write(&self) -> Result<(), Box<dyn Error>> {
+    pub fn write_local(&self) -> Result<(), Box<dyn Error>> {
         let mut user_config = get_path_local();
         user_config.push("user");
         user_config.push(".user");
@@ -391,8 +436,6 @@ impl UserSettings {
         let mut file = File::create(&user_config)?;
         file.write_all(&data)?;
 
-        send_process(MessageIPC::Updated);
-
         Ok(())
     }
 }
@@ -407,14 +450,16 @@ pub enum DataState {
 pub struct Value {
     path: PathBuf,
     typ: String,
+    pub is_it_edit: Option<String>,
     state: DataState,
 }
 
 impl Value {
-    fn new(path: PathBuf, typ: String) -> Self {
+    fn new(path: PathBuf, typ: String, is_it_edit: Option<String>) -> Self {
         Self {
             path,
             typ,
+            is_it_edit,
             state: DataState::WaitingToSend,
         }
     }
@@ -446,7 +491,7 @@ impl Pending {
             } else {
                 continue;
             };
-            temp.insert(file_name, Value::new(path, data.typ));
+            temp.insert(file_name, Value::new(path, data.typ, None));
         }
         Ok(Self {
             data: temp,
@@ -458,6 +503,7 @@ impl Pending {
         self.data.len()
     }
 
+    // here the bool mean is it the final data if true the server sends the data to all the connected clients immediately
     pub async fn next(&self) -> Option<(bool, String, &Value)> {
         loop {
             let mut found: Option<(&String, &Value)> = None;
@@ -483,9 +529,10 @@ impl Pending {
         }
     }
 
-    pub fn add(&mut self, path: String, id: String, typ: String) {
+    pub fn add(&mut self, path: String, id: String, typ: String, is_it_edit: Option<String>) {
         self.notify.notify_one();
-        self.data.insert(id, Value::new(PathBuf::from(path), typ));
+        self.data
+            .insert(id, Value::new(PathBuf::from(path), typ, is_it_edit));
     }
 
     pub fn is_empty(&self) -> bool {
@@ -597,6 +644,7 @@ pub enum Resopnse {
         data: String,
         id: String,
         last: bool,
+        is_it_edit: Option<String>,
     },
 }
 
@@ -612,12 +660,41 @@ pub enum MessageType {
     Binary,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub enum MessageIPC {
     None,
-    Paste(PathBuf),
+    OpentGUI,
+    Paste(Data),
     New(Data),
+    Edit(EditData),
+    UpdateSettings(UserSettings),
     Updated,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct EditData {
+    data: Data,
+    id: String,
+}
+
+impl EditData {
+    pub fn new(data: Data, id: String) -> Self {
+        Self { data, id }
+    }
+}
+
+pub enum MessageChannel {
+    New {
+        path: String,
+        time: String,
+        typ: String,
+    },
+    Edit {
+        path: String,
+        old_id: String,
+        time: String,
+        typ: String,
+    },
 }
 
 pub fn get_path_local() -> PathBuf {
@@ -963,46 +1040,6 @@ pub fn get_global_update_bool() -> bool {
     path.exists()
 }
 
-pub fn ipc_check(
-    dir: PathBuf,
-    channel: IpcOneShotServer<MessageIPC>,
-    tx: &Sender<(String, String, String)>,
-) {
-    let (rx, msg) = channel.accept().expect("Failed to accept connection");
-
-    match msg {
-        MessageIPC::None => {}
-        MessageIPC::Paste(path) => {
-            read_parse(&path, true);
-        }
-        MessageIPC::Updated => {
-            warn!("Settings updated (modified)");
-            process::exit(0);
-        }
-        MessageIPC::New(data) => {
-            let time = Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
-            data.write_to_json(tx, time);
-        }
-    }
-
-    let (channel, token) = IpcOneShotServer::<MessageIPC>::new().expect("Failed to create server");
-
-    write(&dir, &token).expect("Failed to write token");
-
-    ipc_check(dir, channel, tx);
-
-    fn read_parse(target: &PathBuf, paste_on_click: bool) -> Result<(), io::Error> {
-        let data = serde_json::from_str(&fs::read_to_string(&target)?)?;
-
-        #[cfg(target_os = "linux")]
-        copy_to_linux(data, paste_on_click);
-
-        #[cfg(not(target_os = "linux"))]
-        write_clipboard::push_to_clipboard(data, paste_on_click).unwrap();
-        Ok(())
-    }
-}
-
 #[cfg(target_os = "linux")]
 pub fn copy_to_linux(data: Data, paste_on_click: bool) {
     use write_clipboard::{push_to_clipboard, push_to_clipboard_wl};
@@ -1140,15 +1177,4 @@ pub fn save_image(time: &str, data: &[u8]) -> Result<(), io::Error> {
         .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Image write error: {e}")))?;
 
     Ok(())
-}
-
-pub fn send_process(message: MessageIPC) {
-    let mut path = get_path_local();
-    path.push(".PROCESS");
-    let token = fs::read_to_string(path).expect("Failed to read token");
-
-    let sender: IpcSender<MessageIPC> =
-        IpcSender::connect(token).expect("Failed to connect to server");
-
-    sender.send(message).expect("Failed to send message");
 }

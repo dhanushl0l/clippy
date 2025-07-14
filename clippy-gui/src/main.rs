@@ -5,6 +5,7 @@
 
 use clipboard_img_widget::item_card_image;
 use clipboard_widget::item_card;
+#[cfg(target_family = "unix")]
 use clippy::{
     APP_ID, Data, LoginUserCred, NewUser, NewUserOtp, SystemTheam, UserSettings,
     get_global_update_bool, get_path, get_path_pending, get_path_pined, is_valid_email,
@@ -33,11 +34,14 @@ use std::{
     time::Duration,
 };
 use tokio::runtime::Runtime;
+
+use crate::ipc::ipc::{init_stream, send_process};
 mod clipboard_img_widget;
 mod clipboard_widget;
 mod custom_egui_widget;
 mod edit_window;
 mod http;
+mod ipc;
 
 struct Clipboard {
     page: PatgeData,
@@ -77,7 +81,7 @@ pub struct PatgeData {
     page_no: u32,
     page_data: Option<Vec<(Thumbnail, PathBuf, Data, bool)>>,
     current_pos: Vec<u32>,
-    CurrentPatge: Page,
+    current_patge: Page,
     data: BTreeSet<(PathBuf, bool)>,
 }
 
@@ -114,7 +118,7 @@ impl Clipboard {
                 page_no: 1,
                 page_data: None,
                 current_pos: vec![0],
-                CurrentPatge: Page::Clipboard,
+                current_patge: Page::Clipboard,
                 data: PatgeData::get_data(),
             },
             changed: Arc::new(Mutex::new(false)),
@@ -174,10 +178,9 @@ impl Clipboard {
             .enumerate()
             .skip(*skip.unwrap_or(&0) as usize)
         {
-            println!("{:?}", path);
             if let Ok(content) = fs::read_to_string(&path.0) {
                 match serde_json::from_str::<Data>(&content) {
-                    Ok(file) => match self.page.CurrentPatge {
+                    Ok(file) => match self.page.current_patge {
                         Page::Clipboard => {
                             if file.typ.starts_with("image/") {
                                 if let Some(val) = file.get_image_thumbnail(&path.0) {
@@ -342,7 +345,15 @@ impl App for Clipboard {
                                 self.show_settings = true;
                             }
 
-                            ui.add_space(10.0);
+                            ui.add_space(1.0);
+                            let button = Button::new(RichText::new("➕").size(20.0))
+                                .min_size(Vec2::new(30.0, 30.0))
+                                .corner_radius(50.0)
+                                .stroke(Stroke::new(1.0, ui.visuals().widgets.inactive.bg_fill));
+
+                            if ui.add(button).on_hover_text("Add notes").clicked() {
+                                self.show_data_popup.0 = true;
+                            }
                         });
                     });
                 });
@@ -377,8 +388,9 @@ impl App for Clipboard {
                                                 .min_size(button_size),
                                             );
                                             if button.clicked() {
-                                                self.settings.remove_user();
-                                                log_eprintln!(self.settings.write());
+                                                log_eprintln!(send_process(clippy::MessageIPC::UpdateSettings(
+                                                    self.settings.clone(),
+                                                )));
                                             }
 
                                             ui.add_space(10.0);
@@ -900,7 +912,9 @@ impl App for Clipboard {
                                                 )
                                                 .clicked()
                                             {
-                                                log_eprintln!(self.settings.write());
+                                                log_eprintln!(send_process(clippy::MessageIPC::UpdateSettings(
+                                                    self.settings.clone(),
+                                                )));
                                                 if let Some(theam) = ctx.system_theme() {
                                                     if theam == Theme::Dark {
                                                         ctx.set_visuals(egui::Visuals::dark());
@@ -919,7 +933,9 @@ impl App for Clipboard {
                                                 )
                                                 .changed()
                                             {
-                                                log_eprintln!(self.settings.write());
+                                                log_eprintln!(send_process(clippy::MessageIPC::UpdateSettings(
+                                                    self.settings.clone(),
+                                                )));
                                                 ctx.set_visuals(egui::Visuals::light());
                                             };
                                             if ui
@@ -930,7 +946,9 @@ impl App for Clipboard {
                                                 )
                                                 .clicked()
                                             {
-                                                log_eprintln!(self.settings.write());
+                                                log_eprintln!(send_process(clippy::MessageIPC::UpdateSettings(
+                                                    self.settings.clone(),
+                                                )));
                                                 ctx.set_visuals(egui::Visuals::dark());
                                             };
                                         });
@@ -945,7 +963,9 @@ impl App for Clipboard {
                                     ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
                                         if ui.add(toggle(&mut true)).changed() {
                                             self.settings.max_clipboard = None;
-                                            log_eprintln!(self.settings.write());
+                                                log_eprintln!(send_process(clippy::MessageIPC::UpdateSettings(
+                                                    self.settings.clone(),
+                                                )));
                                         }
                                     });
                                 });
@@ -958,7 +978,9 @@ impl App for Clipboard {
                                             .changed()
                                         {
                                             self.settings.max_clipboard = Some(val);
-                                            log_eprintln!(self.settings.write());
+                                                log_eprintln!(send_process(clippy::MessageIPC::UpdateSettings(
+                                                    self.settings.clone(),
+                                                )));
                                         }
                                     });
                                 });
@@ -968,7 +990,9 @@ impl App for Clipboard {
                                     ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
                                         if ui.add(toggle(&mut false)).changed() {
                                             self.settings.max_clipboard = Some(100);
-                                            log_eprintln!(self.settings.write());
+                                                log_eprintln!(send_process(clippy::MessageIPC::UpdateSettings(
+                                                    self.settings.clone(),
+                                                )));
                                         }
                                     });
                                 });
@@ -979,7 +1003,9 @@ impl App for Clipboard {
                                 ui.label("Store Image Thumbnails").on_hover_text(note);
                                 ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
                                     if ui.add(toggle(&mut self.settings.store_image)).changed() {
-                                        log_eprintln!(self.settings.write());
+                                                log_eprintln!(send_process(clippy::MessageIPC::UpdateSettings(
+                                                    self.settings.clone(),
+                                                )));
                                     }
                                 });
                             });
@@ -990,7 +1016,9 @@ impl App for Clipboard {
                                 ui.label("Click to Copy and Quit").on_hover_text(note);
                                 ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
                                     if ui.add(toggle(&mut self.settings.click_on_quit)).changed() {
-                                        log_eprintln!(self.settings.write());
+                                                log_eprintln!(send_process(clippy::MessageIPC::UpdateSettings(
+                                                    self.settings.clone(),
+                                                )));
                                     }
                                 });
                             });
@@ -1003,7 +1031,9 @@ impl App for Clipboard {
                                             .add(toggle(&mut self.settings.paste_on_click))
                                             .changed()
                                         {
-                                            log_eprintln!(self.settings.write());
+                                                log_eprintln!(send_process(clippy::MessageIPC::UpdateSettings(
+                                                    self.settings.clone(),
+                                                )));
                                         }
                                     });
                                 });
@@ -1017,7 +1047,10 @@ impl App for Clipboard {
                                     ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
                                         if ui.add(toggle(&mut self.settings.disable_sync)).changed()
                                         {
-                                            log_eprintln!(self.settings.write());
+                                            self.settings.remove_user();
+                                                log_eprintln!(send_process(clippy::MessageIPC::UpdateSettings(
+                                                    self.settings.clone(),
+                                                )));
                                         }
                                     });
                                 });
@@ -1026,7 +1059,9 @@ impl App for Clipboard {
                                     ui.label("Placeholder");
                                     ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
                                         if ui.add(toggle(&mut true)).changed() {
-                                            log_eprintln!(self.settings.write());
+                                                log_eprintln!(send_process(clippy::MessageIPC::UpdateSettings(
+                                                    self.settings.clone(),
+                                                )));
                                         }
                                     });
                                 });
@@ -1062,7 +1097,9 @@ impl App for Clipboard {
                             Waiting::Login(Ok(usercred)) => {
                                 self.settings.set_user(usercred.clone());
                                 self.show_login_window = false;
-                                log_eprintln!(self.settings.write());
+                                log_eprintln!(send_process(clippy::MessageIPC::UpdateSettings(
+                                    self.settings.clone(),
+                                )));
                                 *val = Waiting::None;
                             }
                             Waiting::Login(Err(e)) => {
@@ -1081,7 +1118,9 @@ impl App for Clipboard {
                                 self.show_createuser_window = false;
                                 self.show_createuser_auth_window = false;
                                 self.settings.set_user(usercred.clone());
-                                log_eprintln!(self.settings.write());
+                                log_eprintln!(send_process(clippy::MessageIPC::UpdateSettings(
+                                    self.settings.clone(),
+                                )));
                                 *val = Waiting::None;
                             }
                             Waiting::SigninOTP(Ok(_)) => {
@@ -1124,15 +1163,15 @@ impl App for Clipboard {
                             self.scrool_to_top = false;
                         }
 
-                        let data = &self.page.page_data;
+                        let data = &mut self.page.page_data;
 
                         if let Some(data) = data {
-                            for (thumbnail, path, i, sync) in data {
-                                if let Some(dat) = i.get_data() {
+                            for (thumbnail, path, i, sync) in data.iter_mut() {
+                                if let Thumbnail::Text(thumbnail) = thumbnail {
                                     ui.add_enabled_ui(true, |ui| {
                                         item_card(
                                             ui,
-                                            &dat,
+                                            i,
                                             thumbnail,
                                             &mut i.get_pined(),
                                             self.settings.click_on_quit,
@@ -1158,6 +1197,7 @@ impl App for Clipboard {
                                     );
                                     ui.add_enabled_ui(true, |ui| {
                                         item_card_image(
+                                            i,
                                             ui,
                                             &texture,
                                             &mut i.get_pined(),
@@ -1202,7 +1242,7 @@ impl App for Clipboard {
                                                             .min_size(Vec2::new(30.0, 30.0))
                                                             .corner_radius(5.0)
                                                             .selected(
-                                                                self.page.CurrentPatge
+                                                                self.page.current_patge
                                                                     == Page::Clipboard,
                                                             )
                                                             .stroke(Stroke::new(
@@ -1213,7 +1253,7 @@ impl App for Clipboard {
                                                                     .bg_fill,
                                                             ));
                                                     if ui.add(button).clicked() {
-                                                        self.page.CurrentPatge = Page::Clipboard;
+                                                        self.page.current_patge = Page::Clipboard;
                                                         self.page.current_pos = vec![0];
                                                         self.page.page_no = 1;
                                                         self.get_current_page(GETPAGE::REFRESH);
@@ -1230,7 +1270,7 @@ impl App for Clipboard {
                                                             .min_size(Vec2::new(30.0, 30.0))
                                                             .corner_radius(5.0)
                                                             .selected(
-                                                                self.page.CurrentPatge
+                                                                self.page.current_patge
                                                                     == Page::Notification,
                                                             )
                                                             .stroke(Stroke::new(
@@ -1241,7 +1281,8 @@ impl App for Clipboard {
                                                                     .bg_fill,
                                                             ));
                                                     if ui.add(button).clicked() {
-                                                        self.page.CurrentPatge = Page::Notification;
+                                                        self.page.current_patge =
+                                                            Page::Notification;
                                                         self.page.current_pos = vec![0];
                                                         self.page.page_no = 1;
                                                         self.get_current_page(GETPAGE::REFRESH)
@@ -1256,14 +1297,14 @@ impl App for Clipboard {
                                                         .min_size(Vec2::new(30.0, 30.0))
                                                         .corner_radius(5.0)
                                                         .selected(
-                                                            self.page.CurrentPatge == Page::Pined,
+                                                            self.page.current_patge == Page::Pined,
                                                         )
                                                         .stroke(Stroke::new(
                                                             1.0,
                                                             ui.visuals().widgets.inactive.bg_fill,
                                                         ));
                                                 if ui.add(button).clicked() {
-                                                    self.page.CurrentPatge = Page::Pined;
+                                                    self.page.current_patge = Page::Pined;
                                                     self.page.page_no = 1;
                                                     self.page.current_pos = vec![0];
                                                     self.get_current_page(GETPAGE::REFRESH);
@@ -1315,6 +1356,10 @@ fn setup() -> Result<(), Error> {
             println!("Clippy is running!")
         }
     }
+
+    // initialize ipc id
+    #[cfg(target_family = "unix")]
+    init_stream();
 
     Ok(())
 }

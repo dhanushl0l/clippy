@@ -20,7 +20,10 @@ Clippy is in the initial stages of development. If you're interested, contributi
 
 ## Contributions
 
-We appreciate any contributions! Whether it's reporting bugs, suggesting features, or writing code, your help makes a difference.
+We welcome all contributions — whether it's reporting bugs, suggesting improvements, or submitting code.
+
+- Please refer to the [testing branch](https://github.com/dhanushl0l/clippy/tree/testing) for the latest development work. Contributions should be made to this branch.
+- To report bugs or request features, use the [GitHub Issues](https://github.com/dhanushl0l/clippy/issues) page.
 
 ## Roadmap
 
@@ -64,12 +67,6 @@ Download and install the `.msi` installer from the [Releases page](https://githu
 
 Clippy is licensed under the **GNU General Public License v2.0 (GPL-2.0-only)**.  
 See the [LICENSE](./LICENSE) file for more details.
-
-## Stay Connected
-
-For discussions, updates, and questions, join our community:
-
-- Issues & Feature Requests: [GitHub Issues](https://github.com/dhanushl0l/clippy/issues)
 
 ---
 

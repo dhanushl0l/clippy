@@ -7,6 +7,7 @@ ExecStart=/usr/local/bin/clippy
 Restart=always
 RestartSec=5
 Environment="LOG=debug"
+Environment="CLIPPY_SERVICE=1"
 
 [Install]
 WantedBy=default.target

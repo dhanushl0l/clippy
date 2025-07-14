@@ -1,18 +1,19 @@
 use std::{
     fs,
-    io::Write,
     path::PathBuf,
     sync::{Arc, Mutex},
 };
 
-use clippy::{Data, log_eprintln, send_process, set_global_bool};
-use clippy_gui::{Thumbnail, set_lock};
+use clippy::{Data, EditData, log_eprintln, set_global_bool};
+use clippy_gui::set_lock;
 use egui::{self, *};
+
+use crate::ipc::ipc::send_process;
 
 pub fn item_card(
     ui: &mut Ui,
-    text: &str,
-    text_label: &Thumbnail,
+    data: &mut Data,
+    text_label: &str,
     pinned: &mut bool,
     click_on_quit: bool,
     show_data_popup: &mut (bool, String, Option<PathBuf>, bool),
@@ -40,18 +41,15 @@ pub fn item_card(
                 if ui
                     .add_sized(
                         ui.available_size(),
-                        egui::Button::new(if let Thumbnail::Text(val) = text_label {
-                            val
-                        } else {
-                            text
-                        })
-                        .fill(background_color),
+                        egui::Button::new(text_label).fill(background_color),
                     )
                     .clicked()
                 {
                     set_global_bool(true);
 
-                    send_process(clippy::MessageIPC::Paste(path.clone()));
+                    log_eprintln!(send_process(clippy::MessageIPC::Paste(
+                        Data::build(&path).unwrap()
+                    )));
 
                     if click_on_quit {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -63,16 +61,14 @@ pub fn item_card(
                     ui.horizontal(|ui| {
                         let pin_response = ui.selectable_label(*pinned, "📌");
                         if pin_response.clicked() {
-                            if let Ok(val) = fs::read_to_string(&path) {
-                                if let Ok(mut data) = serde_json::from_str::<Data>(&val) {
-                                    data.change_pined();
-
-                                    if let Ok(new_val) = serde_json::to_string_pretty(&data) {
-                                        let _ = fs::File::create(&path).and_then(|mut file| {
-                                            file.write_all(new_val.as_bytes())
-                                        });
-                                    }
-                                }
+                            data.change_pined();
+                            log_eprintln!(fs::remove_file(path));
+                            if let Some(file_name) = path.file_name().and_then(|f| f.to_str()) {
+                                let msg = clippy::MessageIPC::Edit(EditData::new(
+                                    data.clone(),
+                                    file_name.to_string(),
+                                ));
+                                log_eprintln!(send_process(msg));
                             }
                             set_lock!(changed, true);
                         }
@@ -86,8 +82,12 @@ pub fn item_card(
                         let view_all = ui.selectable_label(false, "💬");
 
                         if view_all.clicked() {
-                            *show_data_popup =
-                                (true, text.to_string(), Some(path.clone()), *pinned);
+                            *show_data_popup = (
+                                true,
+                                data.get_data().unwrap().to_string(),
+                                Some(path.clone()),
+                                *pinned,
+                            );
                         }
 
                         if *sync {

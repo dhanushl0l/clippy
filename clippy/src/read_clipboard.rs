@@ -4,6 +4,8 @@ use std::io::Cursor;
 #[cfg(target_os = "linux")]
 use std::io::{self};
 
+#[cfg(target_os = "linux")]
+use crate::MessageChannel;
 use crate::{Data, get_global_bool, set_global_bool};
 use base64::{Engine, engine::general_purpose};
 use chrono::Utc;
@@ -14,7 +16,7 @@ use log::{debug, error};
 use tokio::sync::mpsc::Sender;
 
 #[cfg(target_os = "linux")]
-pub fn read_wayland_clipboard(tx: &Sender<(String, String, String)>) -> Result<(), io::Error> {
+pub fn read_wayland_clipboard(tx: &Sender<MessageChannel>) -> Result<(), io::Error> {
     use wayland_clipboard_listener::{WlClipboardPasteStream, WlListenType};
 
     let preferred_formats: Vec<String> = [
@@ -51,11 +53,11 @@ pub fn read_wayland_clipboard(tx: &Sender<(String, String, String)>) -> Result<(
 
 pub struct Manager<'a> {
     ctx: ClipboardContext,
-    tx: &'a Sender<(String, String, String)>,
+    tx: &'a Sender<MessageChannel>,
 }
 
 impl<'a> Manager<'a> {
-    pub fn new(tx: &'a Sender<(String, String, String)>) -> Self {
+    pub fn new(tx: &'a Sender<MessageChannel>) -> Self {
         let ctx = ClipboardContext::new().unwrap();
         Manager { ctx, tx }
     }
@@ -91,12 +93,7 @@ impl<'a> ClipboardHandler for Manager<'a> {
     }
 }
 
-pub fn write_to_json(
-    data: Vec<u8>,
-    typ: String,
-    device: String,
-    tx: &Sender<(String, String, String)>,
-) {
+pub fn write_to_json(data: Vec<u8>, typ: String, device: String, tx: &Sender<MessageChannel>) {
     let time = Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
 
     let data = if data.len() > 15700268 {
@@ -124,17 +121,17 @@ pub fn write_to_json(
 #[cfg(target_os = "linux")]
 pub fn parse_wayland_clipboard(
     data: wayland_clipboard_listener::ClipBoardListenContext,
-    tx: &Sender<(String, String, String)>,
+    tx: &Sender<MessageChannel>,
 ) -> Result<(), Box<dyn error::Error>> {
-    use crate::SETTINGS;
+    use crate::UserSettings;
     use chrono::Utc;
 
     let (typ, data) = (data.mime_type, data.context);
     log::info!("Clipboard data stored: {}", typ);
     let time = Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
 
-    let store_image = match SETTINGS.lock() {
-        Ok(guard) => guard.as_ref().map_or(true, |va| va.store_image),
+    let store_image = match UserSettings::build_user() {
+        Ok(settings) => settings.store_image,
         Err(_) => true,
     };
 

@@ -1,4 +1,4 @@
-use crate::write_clipboard;
+use crate::{MessageChannel, write_clipboard};
 use crate::{
     MessageType, Pending, Resopnse, UserCred, UserData, UserSettings, extract_zip,
     http::{SERVER_WS, get_token, get_token_serv, health},
@@ -26,7 +26,7 @@ use tokio::{
 };
 
 pub fn start_cloud(
-    mut rx: Receiver<(String, String, String)>,
+    mut rx: Receiver<MessageChannel>,
     usercred: UserCred,
     usersettings: UserSettings,
 ) {
@@ -97,7 +97,7 @@ fn past_last(last: &str) {
             write_clipboard::copy_to_clipboard(val).unwrap();
 
             #[cfg(target_os = "linux")]
-            write_clipboard::copy_to_linux(val).unwrap();
+            write_clipboard::copy_to_unix(val).unwrap();
         }
         Err(err) => {
             warn!("{}", err)
@@ -123,7 +123,7 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
     user_data: &UserData,
     usersettings: &UserSettings,
     pending: &mut Pending,
-    rx: &mut Receiver<(String, String, String)>,
+    rx: &mut Receiver<MessageChannel>,
 ) -> Result<(), Box<dyn Error>> {
     let mut buffer: Option<BytesMut> = None;
     let mut current_type: Option<MessageType> = None;
@@ -152,7 +152,7 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
                         let mut file_data = String::new();
                         match file.read_to_string(&mut file_data).await {
                             Ok(_) => {
-                                let  buffer = Resopnse::Data { data: file_data, id: id.clone(), last };
+                                let  buffer = Resopnse::Data { data: file_data, id: id.clone(), last,is_it_edit: value.is_it_edit.clone() };
                                 if ws.send(ws::Message::Text(buffer.to_bytestring().unwrap())).await.is_err() {
                                     return Err("Unable to connect to server".into());
                                 }
@@ -171,8 +171,16 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
                     }
                 }
             }
-            Some((path, id, typ)) = rx.recv() => {
-                pending.add(path, id, typ);
+            Some(va) = rx.recv() => {
+            match va {
+                MessageChannel::New { path, time, typ } => {
+                    pending.add(path, time, typ, None);
+                }
+                MessageChannel::Edit { path, old_id, time, typ } => {
+                    println!("path {} old_id{} new_time{} typ{}",path,old_id,time,typ);
+                    pending.add(path, time, typ, Some(old_id));
+                }
+        }
             }
 
         }
