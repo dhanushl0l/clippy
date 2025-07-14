@@ -1162,9 +1162,7 @@ impl App for Clipboard {
                             ui.scroll_to_rect(top_rect, Some(Align::TOP));
                             self.scrool_to_top = false;
                         }
-
                         let data = &mut self.page.page_data;
-
                         if let Some(data) = data {
                             for (thumbnail, path, i, sync) in data.iter_mut() {
                                 if let Thumbnail::Text(thumbnail) = thumbnail {
