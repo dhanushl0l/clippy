@@ -180,6 +180,9 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
                     println!("path {} old_id{} new_time{} typ{}",path,old_id,time,typ);
                     pending.add(path, time, typ, Some(old_id));
                 }
+                MessageChannel::SettingsChanged => {
+                    break Ok(());
+                }
         }
             }
 

@@ -26,4 +26,22 @@ pub mod ipc {
 }
 
 #[cfg(not(target_family = "unix"))]
-pub mod ipc {}
+pub mod ipc {
+    use clippy::MessageIPC;
+    use interprocess::os::windows::named_pipe::DuplexPipeStream;
+    use std::{io::Write, sync::Mutex};
+
+    static STREAM: std::sync::OnceLock<Mutex<String>> = std::sync::OnceLock::new();
+
+    pub fn init_stream() {
+        let path = std::env::var("IPC").expect("IPC env not set");
+        STREAM.set(Mutex::new(path)).expect("STREAM already set");
+    }
+
+    pub fn send_process(message: MessageIPC) -> Result<(), Box<dyn std::error::Error>> {
+        let path = STREAM.get().unwrap().lock()?;
+        let mut stream = DuplexPipeStream::connect_by_path(path.as_str())?;
+        stream.write(&serde_json::to_vec(&message)?)?;
+        Ok(())
+    }
+}

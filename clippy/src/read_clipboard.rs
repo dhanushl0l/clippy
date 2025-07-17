@@ -1,10 +1,3 @@
-#[cfg(target_os = "linux")]
-use std::error;
-use std::io::Cursor;
-#[cfg(target_os = "linux")]
-use std::io::{self};
-
-#[cfg(target_os = "linux")]
 use crate::MessageChannel;
 use crate::{Data, get_global_bool, set_global_bool};
 use base64::{Engine, engine::general_purpose};
@@ -13,10 +6,12 @@ use clipboard_rs::common::RustImage;
 use clipboard_rs::{Clipboard, ClipboardContext, ClipboardHandler};
 use image::{ImageFormat, ImageReader, imageops};
 use log::{debug, error};
+use std::error;
+use std::io::Cursor;
 use tokio::sync::mpsc::Sender;
 
 #[cfg(target_os = "linux")]
-pub fn read_wayland_clipboard(tx: &Sender<MessageChannel>) -> Result<(), io::Error> {
+pub fn read_wayland_clipboard(tx: &Sender<MessageChannel>) -> Result<(), std::io::Error> {
     use wayland_clipboard_listener::{WlClipboardPasteStream, WlListenType};
 
     let preferred_formats: Vec<String> = [

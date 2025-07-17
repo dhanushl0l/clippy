@@ -9,14 +9,13 @@ use clippy::user::start_cloud;
 use clippy::{MessageChannel, UserSettings, read_clipboard};
 use env_logger::{Builder, Env};
 use log::debug;
-use log::{error, info, warn};
+use log::{error, info};
 use std::error::Error;
 use std::{process, thread};
 use tokio::sync::mpsc::Sender;
 
 #[cfg(target_os = "linux")]
 use clippy::read_clipboard::read_wayland_clipboard;
-
 #[cfg(target_os = "linux")]
 use wayland_clipboard_listener::{WlClipboardPasteStream, WlListenType};
 

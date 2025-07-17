@@ -1,4 +1,5 @@
 use clippy::{LoginUserCred, NewUser, NewUserOtp, UserCred, http::SERVER};
+use log::debug;
 use reqwest::Client;
 
 pub async fn check_user(user: String) -> Result<bool, String> {
@@ -40,7 +41,10 @@ pub async fn signin(data: NewUser) -> Result<(), String> {
             200 => Ok(()),
             409 => match resp.text().await {
                 Ok(v) => Err(v),
-                Err(e) => Err(String::from("Unable to connect to server.")),
+                Err(e) => {
+                    debug!("{e}");
+                    Err(String::from("Unable to connect to server."))
+                }
             },
             _ => {
                 let msg = resp.text().await.unwrap_or("Server error".to_string());
@@ -72,7 +76,10 @@ pub async fn signin_otp_auth(data: NewUserOtp) -> Result<UserCred, String> {
                 Err(body)
             }
         }
-        Err(e) => Err("Unable to connect to server".to_string()),
+        Err(e) => {
+            debug!("{e}");
+            Err("Unable to connect to server".to_string())
+        }
     }
 }
 

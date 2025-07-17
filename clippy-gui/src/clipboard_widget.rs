@@ -4,9 +4,10 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use clippy::{Data, EditData, log_eprintln, set_global_bool};
+use clippy::{Data, EditData, log_error, set_global_bool};
 use clippy_gui::set_lock;
 use egui::{self, *};
+use log::error;
 
 use crate::ipc::ipc::send_process;
 
@@ -47,7 +48,7 @@ pub fn item_card(
                 {
                     set_global_bool(true);
 
-                    log_eprintln!(send_process(clippy::MessageIPC::Paste(
+                    log_error!(send_process(clippy::MessageIPC::Paste(
                         Data::build(&path).unwrap()
                     )));
 
@@ -62,20 +63,20 @@ pub fn item_card(
                         let pin_response = ui.selectable_label(*pinned, "📌");
                         if pin_response.clicked() {
                             data.change_pined();
-                            log_eprintln!(fs::remove_file(path));
+                            log_error!(fs::remove_file(path));
                             if let Some(file_name) = path.file_name().and_then(|f| f.to_str()) {
                                 let msg = clippy::MessageIPC::Edit(EditData::new(
                                     data.clone(),
                                     file_name.to_string(),
                                 ));
-                                log_eprintln!(send_process(msg));
+                                log_error!(send_process(msg));
                             }
                             set_lock!(changed, true);
                         }
 
                         let delete_response = ui.selectable_label(false, "🗑");
                         if delete_response.clicked() {
-                            log_eprintln!(fs::remove_file(path));
+                            log_error!(fs::remove_file(path));
                             set_lock!(changed, true);
                         }
 

@@ -135,6 +135,9 @@ pub async fn health(client: &Client, rx: &mut Receiver<MessageChannel>, pending:
                         } => {
                             pending.add(path, time, typ, Some(old_id));
                         }
+                        MessageChannel::SettingsChanged => {
+                            unimplemented!("to do")
+                        }
                     }
                 }
                 debug!("ubale to connect :{:?}|{}", client, err);
@@ -153,6 +156,9 @@ pub async fn health(client: &Client, rx: &mut Receiver<MessageChannel>, pending:
                     path,
                 } => {
                     pending.add(old_id, time, typ, Some(path));
+                }
+                MessageChannel::SettingsChanged => {
+                    unimplemented!("to do")
                 }
             }
         }

@@ -1,12 +1,13 @@
 use std::fs;
 
-use clippy::{Data, EditData, log_eprintln};
+use clippy::{Data, EditData, log_error};
 use clippy_gui::set_lock;
 use egui::ScrollArea;
 use egui::{
     self, Align, Button, CentralPanel, Color32, Layout, Margin, RichText, Stroke, TopBottomPanel,
     Vec2,
 };
+use log::error;
 
 use crate::Clipboard;
 use crate::ipc::ipc::send_process;
@@ -51,7 +52,7 @@ impl Clipboard {
                                     if let Ok(mut data) = serde_json::from_str::<Data>(&val) {
                                         data.change_data(&self.show_data_popup.1);
                                         data.pined = self.show_data_popup.3;
-                                        log_eprintln!(fs::remove_file(path));
+                                        log_error!(fs::remove_file(path));
                                         if let Some(file_name) =
                                             path.file_name().and_then(|f| f.to_str())
                                         {
@@ -59,12 +60,12 @@ impl Clipboard {
                                                 data,
                                                 file_name.to_string(),
                                             ));
-                                            log_eprintln!(send_process(msg));
+                                            log_error!(send_process(msg));
                                         }
                                     }
                                 }
                             } else {
-                                log_eprintln!(send_process(clippy::MessageIPC::New(Data::new(
+                                log_error!(send_process(clippy::MessageIPC::New(Data::new(
                                     self.show_data_popup.1.to_string(),
                                     "text/string".to_string(),
                                     "os".to_string(),

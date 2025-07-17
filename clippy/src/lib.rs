@@ -38,7 +38,9 @@ pub const API_KEY: Option<&str> = option_env!("KEY");
 const IMAGE_DATA: &[u8] = include_bytes!("../../assets/gui_icons/image.png");
 #[cfg(debug_assertions)]
 const GUI_BIN: &str = "target/debug/clippy-gui";
-#[cfg(not(debug_assertions))]
+#[cfg(all(not(debug_assertions), target_family = "unix"))]
+const GUI_BIN: &str = "clippy-gui";
+#[cfg(all(not(debug_assertions), not(target_family = "unix")))]
 const GUI_BIN: &str = "clippy-gui";
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -329,6 +331,7 @@ pub struct UserSettings {
     pub click_on_quit: bool,
     pub paste_on_click: bool,
     pub disable_sync: bool,
+    pub always_on_top: bool,
     encrept: Option<String>,
     pub intrevel: u32,
     pub max_clipboard: Option<u32>,
@@ -349,6 +352,7 @@ impl UserSettings {
             disable_sync: false,
             store_image: true,
             encrept: None,
+            always_on_top: true,
             click_on_quit: true,
             paste_on_click: true,
             intrevel: 3,
@@ -381,7 +385,16 @@ impl UserSettings {
         }
         user_config.push(".settings");
         let file = fs::read(&user_config)?;
-        let mut settings: UserSettings = serde_json::from_slice(&file).unwrap();
+        let mut settings: UserSettings = match serde_json::from_slice(&file) {
+            Ok(s) => s,
+            Err(e) => {
+                error!("Failed to parse user settings: {e}");
+                if let Err(err) = fs::remove_file(&user_config) {
+                    error!("Also failed to remove corrupted settings file: {err}");
+                }
+                UserSettings::new()
+            }
+        };
         user_config.pop();
         user_config.push(".user");
         let file = if let Ok(data) = fs::read(&user_config) {
@@ -669,6 +682,7 @@ pub enum MessageIPC {
     Edit(EditData),
     UpdateSettings(UserSettings),
     Updated,
+    Close,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -695,6 +709,7 @@ pub enum MessageChannel {
         time: String,
         typ: String,
     },
+    SettingsChanged,
 }
 
 pub fn get_path_local() -> PathBuf {

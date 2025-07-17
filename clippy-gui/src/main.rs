@@ -5,11 +5,10 @@
 
 use clipboard_img_widget::item_card_image;
 use clipboard_widget::item_card;
-#[cfg(target_family = "unix")]
 use clippy::{
     APP_ID, Data, LoginUserCred, NewUser, NewUserOtp, SystemTheam, UserSettings,
     get_global_update_bool, get_path, get_path_pending, get_path_pined, is_valid_email,
-    is_valid_otp, is_valid_password, is_valid_username, log_eprintln, set_global_update_bool,
+    is_valid_otp, is_valid_password, is_valid_username, log_error, set_global_update_bool,
 };
 use clippy_gui::{Thumbnail, Waiting, set_lock};
 use custom_egui_widget::toggle;
@@ -22,7 +21,10 @@ use egui::{
     Align, Button, Frame, Layout, Margin, RichText, Sense, Stroke, TextEdit, TextStyle, Theme,
     TopBottomPanel, Vec2,
 };
+use env_logger::{Builder, Env};
 use http::{check_user, login, signin, signin_otp_auth};
+use log::error;
+use log::info;
 use std::{
     fs::{self},
     io::Error,
@@ -279,6 +281,9 @@ impl Clipboard {
     }
 }
 impl App for Clipboard {
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        log_error!(send_process(clippy::MessageIPC::Close));
+    }
     fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
         //if this the furst frame create a thread and monitor the clipboard & state changes
         if self.first_run {
@@ -406,7 +411,7 @@ impl App for Clipboard {
                                             );
                                             if button.clicked() {
                                                 self.settings.remove_user();
-                                                log_eprintln!(send_process(clippy::MessageIPC::UpdateSettings(
+                                                log_error!(send_process(clippy::MessageIPC::UpdateSettings(
                                                     self.settings.clone(),
                                                 )));
                                             }
@@ -930,7 +935,7 @@ impl App for Clipboard {
                                                 )
                                                 .clicked()
                                             {
-                                                log_eprintln!(send_process(clippy::MessageIPC::UpdateSettings(
+                                                log_error!(send_process(clippy::MessageIPC::UpdateSettings(
                                                     self.settings.clone(),
                                                 )));
                                                 if let Some(theam) = ctx.system_theme() {
@@ -951,7 +956,7 @@ impl App for Clipboard {
                                                 )
                                                 .changed()
                                             {
-                                                log_eprintln!(send_process(clippy::MessageIPC::UpdateSettings(
+                                                log_error!(send_process(clippy::MessageIPC::UpdateSettings(
                                                     self.settings.clone(),
                                                 )));
                                                 ctx.set_visuals(egui::Visuals::light());
@@ -964,7 +969,7 @@ impl App for Clipboard {
                                                 )
                                                 .clicked()
                                             {
-                                                log_eprintln!(send_process(clippy::MessageIPC::UpdateSettings(
+                                                log_error!(send_process(clippy::MessageIPC::UpdateSettings(
                                                     self.settings.clone(),
                                                 )));
                                                 ctx.set_visuals(egui::Visuals::dark());
@@ -981,7 +986,7 @@ impl App for Clipboard {
                                     ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
                                         if ui.add(toggle(&mut true)).changed() {
                                             self.settings.max_clipboard = None;
-                                                log_eprintln!(send_process(clippy::MessageIPC::UpdateSettings(
+                                                log_error!(send_process(clippy::MessageIPC::UpdateSettings(
                                                     self.settings.clone(),
                                                 )));
                                         }
@@ -996,7 +1001,7 @@ impl App for Clipboard {
                                             .changed()
                                         {
                                             self.settings.max_clipboard = Some(val);
-                                                log_eprintln!(send_process(clippy::MessageIPC::UpdateSettings(
+                                                log_error!(send_process(clippy::MessageIPC::UpdateSettings(
                                                     self.settings.clone(),
                                                 )));
                                         }
@@ -1008,7 +1013,7 @@ impl App for Clipboard {
                                     ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
                                         if ui.add(toggle(&mut false)).changed() {
                                             self.settings.max_clipboard = Some(100);
-                                                log_eprintln!(send_process(clippy::MessageIPC::UpdateSettings(
+                                                log_error!(send_process(clippy::MessageIPC::UpdateSettings(
                                                     self.settings.clone(),
                                                 )));
                                         }
@@ -1021,12 +1026,26 @@ impl App for Clipboard {
                                 ui.label("Store Image Thumbnails").on_hover_text(note);
                                 ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
                                     if ui.add(toggle(&mut self.settings.store_image)).changed() {
-                                                log_eprintln!(send_process(clippy::MessageIPC::UpdateSettings(
+                                                log_error!(send_process(clippy::MessageIPC::UpdateSettings(
                                                     self.settings.clone(),
                                                 )));
                                     }
                                 });
                             });
+
+                            let note = "Show window in the top";
+                                   ui.horizontal(|ui| {
+                                       ui.label("Always on top").on_hover_text(note);
+                                       ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
+                                           if ui.add(toggle(&mut self.settings.always_on_top)).changed() {
+                                            if self.settings.always_on_top{
+                                            }
+                                                       log_error!(send_process(clippy::MessageIPC::UpdateSettings(
+                                                           self.settings.clone(),
+                                                       )));
+                                           }
+                                       });
+                                   });
 
                             let note = "Clicking any clipboard item will copy \
                      its content and close the app.";
@@ -1034,7 +1053,7 @@ impl App for Clipboard {
                                 ui.label("Click to Copy and Quit").on_hover_text(note);
                                 ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
                                     if ui.add(toggle(&mut self.settings.click_on_quit)).changed() {
-                                                log_eprintln!(send_process(clippy::MessageIPC::UpdateSettings(
+                                                log_error!(send_process(clippy::MessageIPC::UpdateSettings(
                                                     self.settings.clone(),
                                                 )));
                                     }
@@ -1049,7 +1068,7 @@ impl App for Clipboard {
                                             .add(toggle(&mut self.settings.paste_on_click))
                                             .changed()
                                         {
-                                                log_eprintln!(send_process(clippy::MessageIPC::UpdateSettings(
+                                                log_error!(send_process(clippy::MessageIPC::UpdateSettings(
                                                     self.settings.clone(),
                                                 )));
                                         }
@@ -1065,7 +1084,7 @@ impl App for Clipboard {
                                     ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
                                         if ui.add(toggle(&mut self.settings.disable_sync)).changed()
                                         {
-                                                log_eprintln!(send_process(clippy::MessageIPC::UpdateSettings(
+                                                log_error!(send_process(clippy::MessageIPC::UpdateSettings(
                                                     self.settings.clone(),
                                                 )));
                                         }
@@ -1076,7 +1095,7 @@ impl App for Clipboard {
                                     ui.label("Placeholder");
                                     ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
                                         if ui.add(toggle(&mut true)).changed() {
-                                                log_eprintln!(send_process(clippy::MessageIPC::UpdateSettings(
+                                                log_error!(send_process(clippy::MessageIPC::UpdateSettings(
                                                     self.settings.clone(),
                                                 )));
                                         }
@@ -1114,7 +1133,7 @@ impl App for Clipboard {
                             Waiting::Login(Ok(usercred)) => {
                                 self.settings.set_user(usercred.clone());
                                 self.show_login_window = false;
-                                log_eprintln!(send_process(clippy::MessageIPC::UpdateSettings(
+                                log_error!(send_process(clippy::MessageIPC::UpdateSettings(
                                     self.settings.clone(),
                                 )));
                                 *val = Waiting::None;
@@ -1135,7 +1154,7 @@ impl App for Clipboard {
                                 self.show_createuser_window = false;
                                 self.show_createuser_auth_window = false;
                                 self.settings.set_user(usercred.clone());
-                                log_eprintln!(send_process(clippy::MessageIPC::UpdateSettings(
+                                log_error!(send_process(clippy::MessageIPC::UpdateSettings(
                                     self.settings.clone(),
                                 )));
                                 *val = Waiting::None;
@@ -1348,6 +1367,7 @@ impl App for Clipboard {
 }
 
 fn setup() -> Result<(), Error> {
+    Builder::from_env(Env::default().filter_or("LOG", "info")).init();
     #[cfg(target_os = "windows")]
     {
         use std::{ffi::OsString, process::Command};
@@ -1363,17 +1383,15 @@ fn setup() -> Result<(), Error> {
             .next()
             .is_some();
         if !clippy_running {
-            println!("Starting clippy service");
+            info!("Starting clippy service");
             let _ = Command::new("cmd")
                 .args(["/C", "start", "", "C:\\Program Files\\clippy\\clippy.exe"])
                 .spawn()?;
         } else {
-            println!("Clippy is running!")
+            info!("Clippy is running!")
         }
     }
 
-    // initialize ipc id
-    #[cfg(target_family = "unix")]
     init_stream();
 
     Ok(())
@@ -1381,7 +1399,7 @@ fn setup() -> Result<(), Error> {
 
 fn main() -> Result<(), eframe::Error> {
     // this fn make sure the clippy service is running
-    log_eprintln!(setup());
+    log_error!(setup());
 
     let ui = Clipboard::new();
 
@@ -1389,12 +1407,20 @@ fn main() -> Result<(), eframe::Error> {
         eframe::icon_data::from_png_bytes(include_bytes!("../../assets/icons/clippy-32-32.png"))
             .expect("The icon data must be valid");
 
+    let mut viewport = ViewportBuilder::default()
+        .with_inner_size(Vec2::new(600.0, 800.0))
+        .with_app_id(APP_ID)
+        .with_icon(icon)
+        .with_min_inner_size(Vec2::new(300.0, 300.0));
+
+    viewport = if ui.settings.always_on_top {
+        viewport.with_always_on_top()
+    } else {
+        viewport
+    };
+
     let options = NativeOptions {
-        viewport: ViewportBuilder::default()
-            .with_inner_size(Vec2::new(600.0, 800.0))
-            .with_app_id(APP_ID)
-            .with_icon(icon)
-            .with_min_inner_size(Vec2::new(300.0, 300.0)),
+        viewport,
         ..Default::default()
     };
 

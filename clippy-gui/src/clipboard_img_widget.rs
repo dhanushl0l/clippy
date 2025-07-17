@@ -1,13 +1,13 @@
-use clippy::{Data, EditData, log_eprintln, set_global_bool};
+use crate::ipc::ipc::send_process;
+use clippy::{Data, EditData, log_error, set_global_bool};
 use clippy_gui::set_lock;
 use egui::{self, *};
+use log::error;
 use std::{
     fs,
     path::PathBuf,
     sync::{Arc, Mutex},
 };
-
-use crate::ipc::ipc::send_process;
 
 pub fn item_card_image(
     data: &mut Data,
@@ -38,7 +38,7 @@ pub fn item_card_image(
                 if ui.add(egui::ImageButton::new(texture)).clicked() {
                     set_global_bool(true);
 
-                    log_eprintln!(send_process(clippy::MessageIPC::Paste(data.clone())));
+                    log_error!(send_process(clippy::MessageIPC::Paste(data.clone())));
 
                     if click_on_quit {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -52,13 +52,13 @@ pub fn item_card_image(
                         if pin_response.clicked() {
                             if pin_response.clicked() {
                                 data.change_pined();
-                                log_eprintln!(fs::remove_file(path));
+                                log_error!(fs::remove_file(path));
                                 if let Some(file_name) = path.file_name().and_then(|f| f.to_str()) {
                                     let msg = clippy::MessageIPC::Edit(EditData::new(
                                         data.clone(),
                                         file_name.to_string(),
                                     ));
-                                    log_eprintln!(send_process(msg));
+                                    log_error!(send_process(msg));
                                 }
                                 set_lock!(changed, true);
                             }
@@ -66,7 +66,7 @@ pub fn item_card_image(
 
                         let delete_response = ui.selectable_label(false, "🗑");
                         if delete_response.clicked() {
-                            log_eprintln!(fs::remove_file(path));
+                            log_error!(fs::remove_file(path));
                             set_lock!(changed, true);
                         }
 
