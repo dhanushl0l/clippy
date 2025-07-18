@@ -23,8 +23,7 @@ use egui::{
 };
 use env_logger::{Builder, Env};
 use http::{check_user, login, signin, signin_otp_auth};
-use log::error;
-use log::info;
+use log::{debug, error};
 use std::{
     fs::{self},
     io::Error,
@@ -1370,6 +1369,7 @@ fn setup() -> Result<(), Error> {
     Builder::from_env(Env::default().filter_or("LOG", "info")).init();
     #[cfg(target_os = "windows")]
     {
+        use log::info;
         use std::{ffi::OsString, process::Command};
         use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
         let mut sys = System::new_all();
@@ -1392,7 +1392,13 @@ fn setup() -> Result<(), Error> {
         }
     }
 
-    init_stream();
+    if let Err(e) = init_stream() {
+        error!(
+            "clippy-gui cannot run without the Clippy backend. Please start `clippy`, not `clippy-gui`."
+        );
+        debug!("Details: {}", e);
+        process::exit(1);
+    }
 
     Ok(())
 }

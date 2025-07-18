@@ -5,11 +5,14 @@ use std::{error::Error, thread, time::Duration};
 
 #[cfg(target_family = "unix")]
 pub fn copy_to_unix(data: Data) -> Result<(), String> {
-    if std::env::var("WAYLAND_DISPLAY").is_ok() {
-        copy_to_clipboard_wl(data)
-    } else {
-        copy_to_clipboard(data).map_err(|err| format!("{}", err))
+    #[cfg(target_os = "linux")]
+    {
+        if std::env::var("WAYLAND_DISPLAY").is_ok() {
+            return copy_to_clipboard_wl(data);
+        }
     }
+
+    copy_to_clipboard(data).map_err(|err| format!("{}", err))
 }
 
 #[cfg(target_os = "linux")]

@@ -47,7 +47,7 @@ fn read_clipboard_wayland(tx: &Sender<MessageChannel>) {
     for _ in stream.paste_stream().flatten().flatten() {
         match read_wayland_clipboard(tx) {
             Ok(_) => (),
-            Err(err) => warn!("{}", err),
+            Err(err) => log::warn!("{}", err),
         }
     }
 }

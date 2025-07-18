@@ -1,8 +1,7 @@
 #[cfg(target_family = "unix")]
 pub mod ipc {
     use crate::write_clipboard::copy_to_unix;
-    use crate::{GUI_BIN, MessageChannel, MessageIPC};
-    use crate::{MessageIPC, get_path_local};
+    use crate::{GUI_BIN, MessageChannel, MessageIPC, get_path_local};
     use log::{debug, error};
     use serde_json::Deserializer;
     use std::io::{BufReader, Read};
@@ -62,7 +61,10 @@ pub mod ipc {
                         };
                     }
                     MessageIPC::Updated => {
-                        tx.send(MessageChannel::SettingsChanged)?;
+                        if let Err(e) = tx.try_send(MessageChannel::SettingsChanged) {
+                            error!("Unable to send modification");
+                            debug!("{}", e);
+                        };
                     }
                     MessageIPC::New(data) => {
                         let time = chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
