@@ -2,7 +2,7 @@
 pub mod ipc {
     use crate::write_clipboard::copy_to_unix;
     use crate::{GUI_BIN, MessageChannel, MessageIPC, get_path_local};
-    use log::{debug, error};
+    use log::{debug, error, warn};
     use serde_json::Deserializer;
     use std::io::{BufReader, Read};
     use std::os::fd::{FromRawFd, IntoRawFd};
@@ -72,6 +72,10 @@ pub mod ipc {
                     }
                     MessageIPC::UpdateSettings(settings) => {
                         settings.write_local().unwrap();
+                        if let Err(e) = tx.try_send(MessageChannel::SettingsChanged) {
+                            warn!("Unable to store Settings");
+                            debug!("{}", e);
+                        };
                     }
                     MessageIPC::Edit(data) => {
                         let time = chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
@@ -110,7 +114,7 @@ pub mod ipc {
     }
 }
 
-#[cfg(not(target_family = "unix"))]
+#[cfg(target_family = "windows")]
 pub mod ipc {
     use interprocess::os::windows::named_pipe::{
         DuplexPipeStream, PipeListener, PipeListenerOptions, pipe_mode,
@@ -191,11 +195,10 @@ pub mod ipc {
                         }
                         MessageIPC::Updated => {
                             if let Err(e) = tx.try_send(MessageChannel::SettingsChanged) {
-                                println!("{e}");
+                                error!("{e}");
                             };
                         }
                         MessageIPC::New(data) => {
-                            println!("new");
                             let time = chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
                             data.write_to_json(tx, time).unwrap();
                         }

@@ -1367,31 +1367,6 @@ impl App for Clipboard {
 
 fn setup() -> Result<(), Error> {
     Builder::from_env(Env::default().filter_or("LOG", "info")).init();
-    #[cfg(target_os = "windows")]
-    {
-        use log::info;
-        use std::{ffi::OsString, process::Command};
-        use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
-        let mut sys = System::new_all();
-        sys.refresh_processes_specifics(
-            ProcessesToUpdate::All,
-            true,
-            ProcessRefreshKind::everything(),
-        );
-        let clippy_running = sys
-            .processes_by_name(&OsString::from("clippy.exe"))
-            .next()
-            .is_some();
-        if !clippy_running {
-            info!("Starting clippy service");
-            let _ = Command::new("cmd")
-                .args(["/C", "start", "", "C:\\Program Files\\clippy\\clippy.exe"])
-                .spawn()?;
-        } else {
-            info!("Clippy is running!")
-        }
-    }
-
     if let Err(e) = init_stream() {
         error!(
             "clippy-gui cannot run without the Clippy backend. Please start `clippy`, not `clippy-gui`."

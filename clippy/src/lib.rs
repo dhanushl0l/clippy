@@ -1,6 +1,7 @@
 pub mod encryption_decryption;
 pub mod http;
 pub mod ipc;
+pub mod local;
 pub mod macros;
 pub mod read_clipboard;
 pub mod user;
@@ -107,8 +108,6 @@ impl Data {
 
         let mut file = File::create(file_path)?;
         file.write_all(json_data.as_bytes())?;
-
-        set_global_update_bool(true);
 
         match tx.try_send(MessageChannel::Edit {
             time,
@@ -375,6 +374,12 @@ impl UserSettings {
 
     pub fn is_login(&self) -> bool {
         !(self.sync == None)
+    }
+
+    pub fn update(&mut self) -> Result<(), Box<dyn Error>> {
+        let new_self = Self::build_user()?;
+        *self = new_self;
+        Ok(())
     }
 
     pub fn build_user() -> Result<Self, Box<dyn Error>> {

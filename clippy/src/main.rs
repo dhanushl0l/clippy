@@ -5,11 +5,12 @@
 
 use clipboard_rs::{ClipboardWatcher, ClipboardWatcherContext};
 use clippy::ipc::ipc::{ipc_check, startup};
+use clippy::local::start_local;
 use clippy::user::start_cloud;
 use clippy::{MessageChannel, UserSettings, read_clipboard};
 use env_logger::{Builder, Env};
-use log::debug;
-use log::{error, info};
+use log::error;
+use log::{debug, warn};
 use std::error::Error;
 use std::{process, thread};
 use tokio::sync::mpsc::Sender;
@@ -95,22 +96,28 @@ fn main() {
         }
     };
 
-    let (tx, rx) = tokio::sync::mpsc::channel::<MessageChannel>(30);
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<MessageChannel>(30);
 
-    match UserSettings::build_user() {
-        Ok(usersettings) => {
-            if !usersettings.disable_sync {
-                if let Some(sync) = usersettings.get_sync() {
-                    start_cloud(rx, sync.clone(), usersettings);
-                } else {
+    thread::spawn(move || {
+        loop {
+            match UserSettings::build_user() {
+                Ok(usersettings) => {
+                    if usersettings.disable_sync {
+                        start_local(&mut rx, usersettings);
+                    } else {
+                        if let Some(_sync) = usersettings.get_sync() {
+                            start_cloud(&mut rx, usersettings);
+                        } else {
+                            start_local(&mut rx, usersettings);
+                        }
+                    }
                 }
-            } else {
+                Err(err) => {
+                    warn!("user not logged in: {}", err);
+                }
             }
         }
-        Err(err) => {
-            info!("user not logged in: {}", err);
-        }
-    }
+    });
 
     // this thread reads the gui clipboard entry && settings change
     {

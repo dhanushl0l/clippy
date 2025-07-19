@@ -1,6 +1,6 @@
 use crate::{MessageChannel, write_clipboard};
 use crate::{
-    MessageType, Pending, Resopnse, UserCred, UserData, UserSettings, extract_zip,
+    MessageType, Pending, Resopnse, UserData, UserSettings, extract_zip,
     http::{SERVER_WS, get_token, get_token_serv, health},
     read_data_by_id, remove, set_global_update_bool,
 };
@@ -16,7 +16,7 @@ use bytes::{Bytes, BytesMut};
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, error, info, warn};
 use reqwest::{self, Client};
-use std::{error::Error, sync::Arc, thread, time::Duration};
+use std::{error::Error, sync::Arc, time::Duration};
 use tokio::{
     fs::File,
     io::AsyncReadExt,
@@ -25,67 +25,67 @@ use tokio::{
     time::{Instant, sleep},
 };
 
-pub fn start_cloud(
-    mut rx: Receiver<MessageChannel>,
-    usercred: UserCred,
-    usersettings: UserSettings,
-) {
-    thread::spawn(move || {
-        let mut pending = Pending::build().unwrap_or_else(|e| {
-            error!("{}", e);
-            Pending::new()
-        });
-        let user_data = UserData::build();
-        let client = Arc::new(Client::new());
+pub fn start_cloud(rx: &mut Receiver<MessageChannel>, mut usersettings: UserSettings) {
+    let mut pending = Pending::build().unwrap_or_else(|e| {
+        error!("{}", e);
+        Pending::new()
+    });
+    let user_data = UserData::build();
+    let client = Arc::new(Client::new());
 
-        actix_rt::System::new().block_on(async {
-            loop {
-                log::debug!("starting WebSocket client");
-                health(&client, &mut rx, &mut pending).await;
-                if let Err(e) = get_token_serv(&usercred, &client).await {
-                    error!("unable to connect to server");
-                    debug!("{}", e);
-                    health(&client, &mut rx, &mut pending).await;
-                    continue;
-                };
-                let token = get_token();
-                let config_ws = awc::Client::builder()
-                    .max_http_version(awc::http::Version::HTTP_11)
-                    .finish();
-                let result = config_ws
-                    .ws(SERVER_WS)
-                    .set_header(header::AUTHORIZATION, format!("Bearer {}", token))
-                    .connect()
-                    .await;
-
-                let (_res, mut ws) = match result {
-                    Ok((resp, conn)) => (resp, conn),
-                    Err(e) => {
-                        error!("Client connect error: {e:?}");
-                        health(&client, &mut rx, &mut pending).await;
-                        continue;
-                    }
-                };
-
-                if let Err(e) = check_uptodate_state(&mut ws, &user_data).await {
-                    error!("Unable to connect to server");
-                    debug!("{}", e);
-                };
-                if let Err(e) =
-                    handle_connection(&mut ws, &user_data, &usersettings, &mut pending, &mut rx)
-                        .await
-                {
-                    error!("Unable to connect to server");
-                    debug!("{}", e);
-                };
-
-                pending = Pending::build().unwrap_or_else(|e| {
-                    error!("{}", e);
-                    Pending::new()
-                });
-                health(&client, &mut rx, &mut pending).await;
+    actix_rt::System::new().block_on(async {
+        loop {
+            let Some(usercred) = usersettings.get_sync() else {
+                break;
+            };
+            if usersettings.disable_sync {
+                break;
             }
-        })
+
+            log::debug!("starting WebSocket client");
+            health(&client, rx, &mut pending).await;
+            if let Err(e) = get_token_serv(&usercred, &client).await {
+                error!("unable to connect to server");
+                debug!("{}", e);
+                health(&client, rx, &mut pending).await;
+                continue;
+            };
+            let token = get_token();
+            let config_ws = awc::Client::builder()
+                .max_http_version(awc::http::Version::HTTP_11)
+                .finish();
+            let result = config_ws
+                .ws(SERVER_WS)
+                .set_header(header::AUTHORIZATION, format!("Bearer {}", token))
+                .connect()
+                .await;
+
+            let (_res, mut ws) = match result {
+                Ok((resp, conn)) => (resp, conn),
+                Err(e) => {
+                    error!("Client connect error: {e:?}");
+                    health(&client, rx, &mut pending).await;
+                    continue;
+                }
+            };
+
+            if let Err(e) = check_uptodate_state(&mut ws, &user_data).await {
+                error!("Unable to connect to server");
+                debug!("{}", e);
+            };
+            if let Err(e) =
+                handle_connection(&mut ws, &user_data, &mut usersettings, &mut pending, rx).await
+            {
+                error!("Unable to connect to server");
+                debug!("{}", e);
+            };
+
+            pending = Pending::build().unwrap_or_else(|e| {
+                error!("{}", e);
+                Pending::new()
+            });
+            health(&client, rx, &mut pending).await;
+        }
     });
 }
 
@@ -121,7 +121,7 @@ async fn check_uptodate_state<T: AsyncRead + AsyncWrite + Unpin + 'static>(
 async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
     ws: &mut Framed<T, Codec>,
     user_data: &UserData,
-    usersettings: &UserSettings,
+    usersettings: &mut UserSettings,
     pending: &mut Pending,
     rx: &mut Receiver<MessageChannel>,
 ) -> Result<(), Box<dyn Error>> {
@@ -177,10 +177,12 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
                     pending.add(path, time, typ, None);
                 }
                 MessageChannel::Edit { path, old_id, time, typ } => {
-                    println!("path {} old_id{} new_time{} typ{}",path,old_id,time,typ);
+                    debug!("path {} old_id {} new_time {} typ {}",path,old_id,time,typ);
                     pending.add(path, time, typ, Some(old_id));
                 }
                 MessageChannel::SettingsChanged => {
+                    *usersettings = UserSettings::build_user()?;
+                    debug!("change settings");
                     break Ok(());
                 }
         }
