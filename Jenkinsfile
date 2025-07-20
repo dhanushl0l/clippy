@@ -3,7 +3,7 @@ pipeline {
     stages {
         stage("Git Checkout Stage") {
             steps {
-                git branch: 'testing', url: 'https://github.com/rajeshrj-git/clippy.git'
+                git branch: 'testing', url: 'https://github.com/dhanushl0l/clippy.git'
                 echo 'Checkout Successful ✅'
             }
         }
