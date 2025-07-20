@@ -54,8 +54,8 @@ pub mod ipc {
         for msg in stream {
             if let Ok(val) = msg {
                 match val {
-                    MessageIPC::Paste(data) => {
-                        if let Err(e) = copy_to_unix(data) {
+                    MessageIPC::Paste(data, paste_on_click) => {
+                        if let Err(e) = copy_to_unix(data, paste_on_click) {
                             error!("Unable to write clipboard");
                             debug!("{}", e);
                         };
@@ -80,7 +80,8 @@ pub mod ipc {
                     MessageIPC::Edit(data) => {
                         let time = chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
                         let id = data.id;
-                        data.data.re_write_json(tx, time, id).unwrap();
+                        let path = data.path;
+                        data.data.re_write_json(tx, time, id, path).unwrap();
                     }
                     MessageIPC::Close => {
                         break;

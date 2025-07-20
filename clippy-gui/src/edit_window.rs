@@ -52,13 +52,13 @@ impl Clipboard {
                                     if let Ok(mut data) = serde_json::from_str::<Data>(&val) {
                                         data.change_data(&self.show_data_popup.1);
                                         data.pined = self.show_data_popup.3;
-                                        log_error!(fs::remove_file(path));
                                         if let Some(file_name) =
                                             path.file_name().and_then(|f| f.to_str())
                                         {
                                             let msg = clippy::MessageIPC::Edit(EditData::new(
                                                 data,
                                                 file_name.to_string(),
+                                                path.to_path_buf(),
                                             ));
                                             log_error!(send_process(msg));
                                         }

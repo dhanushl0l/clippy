@@ -4,21 +4,21 @@ use clipboard_rs::{Clipboard, ClipboardContext, RustImageData, common::RustImage
 use std::{error::Error, thread, time::Duration};
 
 #[cfg(target_family = "unix")]
-pub fn copy_to_unix(data: Data) -> Result<(), String> {
+pub fn copy_to_unix(data: Data, paste_on_click: bool) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
         if std::env::var("WAYLAND_DISPLAY").is_ok() {
-            return copy_to_clipboard_wl(data);
+            return copy_to_clipboard_wl(data, paste_on_click);
         }
     }
 
-    copy_to_clipboard(data).map_err(|err| format!("{}", err))
+    copy_to_clipboard(data, paste_on_click).map_err(|err| format!("{}", err))
 }
 
 #[cfg(target_os = "linux")]
-fn copy_to_clipboard_wl(data: Data) -> Result<(), String> {
+fn copy_to_clipboard_wl(data: Data, paste_on_click: bool) -> Result<(), String> {
     set_global_bool(true);
-    push_to_clipboard_wl(data, false, false)
+    push_to_clipboard_wl(data, false, paste_on_click)
 }
 
 #[cfg(target_os = "linux")]
@@ -78,9 +78,12 @@ pub fn push_to_clipboard_wl_command(data: Data) -> Result<(), String> {
     Ok(())
 }
 
-pub fn copy_to_clipboard(data: Data) -> Result<(), Box<dyn Error + Send + Sync>> {
+pub fn copy_to_clipboard(
+    data: Data,
+    paste_on_click: bool,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     set_global_bool(true);
-    push_to_clipboard(data, false)
+    push_to_clipboard(data, paste_on_click)
 }
 
 pub fn push_to_clipboard(

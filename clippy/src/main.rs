@@ -114,6 +114,8 @@ fn main() {
                 }
                 Err(err) => {
                     warn!("user not logged in: {}", err);
+                    let usersettings = UserSettings::new();
+                    start_local(&mut rx, usersettings);
                 }
             }
         }

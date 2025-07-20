@@ -1,8 +1,8 @@
-use crate::{MessageChannel, write_clipboard};
+use crate::{Data, MessageChannel, ResopnseServerToClient, ToByteString, log_error};
 use crate::{
-    MessageType, Pending, Resopnse, UserData, UserSettings, extract_zip,
+    MessageType, Pending, ResopnseClientToServer, UserData, UserSettings,
     http::{SERVER_WS, get_token, get_token_serv, health},
-    read_data_by_id, remove, set_global_update_bool,
+    remove, set_global_update_bool,
 };
 use actix_codec::Framed;
 use actix_codec::{AsyncRead, AsyncWrite};
@@ -14,7 +14,7 @@ use awc::{
 };
 use bytes::{Bytes, BytesMut};
 use futures_util::{SinkExt, StreamExt};
-use log::{debug, error, info, warn};
+use log::{debug, error, info};
 use reqwest::{self, Client};
 use std::{error::Error, sync::Arc, time::Duration};
 use tokio::{
@@ -70,13 +70,13 @@ pub fn start_cloud(rx: &mut Receiver<MessageChannel>, mut usersettings: UserSett
             };
 
             if let Err(e) = check_uptodate_state(&mut ws, &user_data).await {
-                error!("Unable to connect to server");
+                error!("Unable to check client state");
                 debug!("{}", e);
             };
             if let Err(e) =
                 handle_connection(&mut ws, &user_data, &mut usersettings, &mut pending, rx).await
             {
-                error!("Unable to connect to server");
+                error!("Unable to maintain connection");
                 debug!("{}", e);
             };
 
@@ -89,28 +89,28 @@ pub fn start_cloud(rx: &mut Receiver<MessageChannel>, mut usersettings: UserSett
     });
 }
 
-fn past_last(last: &str) {
-    let data = read_data_by_id(last);
-    match data {
-        Ok(val) => {
-            #[cfg(not(target_os = "linux"))]
-            write_clipboard::copy_to_clipboard(val).unwrap();
+// fn past_last(last: &str, paste_on_click: bool) {
+//     let data = read_data_by_id(last);
+//     match data {
+//         Ok(val) => {
+//             #[cfg(not(target_os = "linux"))]
+//             write_clipboard::copy_to_clipboard(val).unwrap();
 
-            #[cfg(target_os = "linux")]
-            write_clipboard::copy_to_unix(val).unwrap();
-        }
-        Err(err) => {
-            warn!("{}", err)
-        }
-    }
-}
+//             #[cfg(target_os = "linux")]
+//             write_clipboard::copy_to_unix(val, paste_on_click).unwrap();
+//         }
+//         Err(err) => {
+//             warn!("{}", err)
+//         }
+//     }
+// }
 
 async fn check_uptodate_state<T: AsyncRead + AsyncWrite + Unpin + 'static>(
     ws: &mut Framed<T, Codec>,
     user_data: &UserData,
 ) -> Result<(), Box<dyn Error>> {
     let state = user_data.get_30();
-    let data = Resopnse::CheckVersionArr(state);
+    let data = ResopnseClientToServer::CheckVersionArr(state);
     Ok(ws
         .send(ws::Message::Text(
             serde_json::to_string(&data).unwrap().into(),
@@ -141,7 +141,15 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
 
             Some(msg) = ws.next() => {
                 last_pong = Instant::now();
-                if let Err(e) = handle_mag(msg?, pending, usersettings, user_data, ws, &mut last_pong, &mut buffer, &mut current_type).await{
+                let msg = match msg {
+                    Ok(va) => va,
+                    Err(e) => {
+                        // to do
+                        debug!("{}",e);
+                        continue;
+                    }
+                };
+                if let Err(e) = handle_mag(msg, pending, usersettings, user_data, ws, &mut last_pong, &mut buffer, &mut current_type).await{
                     error!("{}",e);
                 };
             }
@@ -152,7 +160,7 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
                         let mut file_data = String::new();
                         match file.read_to_string(&mut file_data).await {
                             Ok(_) => {
-                                let  buffer = Resopnse::Data { data: file_data, id: id.clone(), last,is_it_edit: value.is_it_edit.clone() };
+                                let  buffer = ResopnseClientToServer::Data { data: file_data, id: id.clone(), last,is_it_edit: value.is_it_edit.clone() };
                                 if ws.send(ws::Message::Text(buffer.to_bytestring().unwrap())).await.is_err() {
                                     return Err("Unable to connect to server".into());
                                 }
@@ -200,9 +208,9 @@ async fn process_text<T: AsyncRead + AsyncWrite + Unpin + 'static>(
     ws: &mut Framed<T, Codec>,
     last_pong: &mut Instant,
 ) {
-    let state: Resopnse = serde_json::from_slice(&bin).unwrap();
+    let state: ResopnseServerToClient = serde_json::from_slice(&bin).unwrap();
     match state {
-        Resopnse::Success { old, new } => {
+        ResopnseServerToClient::Success { old, new } => {
             let value = match pending.remove(&old) {
                 Some(v) => v,
                 None => {
@@ -217,9 +225,9 @@ async fn process_text<T: AsyncRead + AsyncWrite + Unpin + 'static>(
             info!("Surcess sending new data");
             set_global_update_bool(true);
         }
-        Resopnse::Outdated => {
+        ResopnseServerToClient::Outdated => {
             let state = user_data.get_30();
-            let data = Resopnse::CheckVersionArr(state);
+            let data = ResopnseClientToServer::CheckVersionArr(state);
             if let Err(e) = ws
                 .send(ws::Message::Text(
                     serde_json::to_string(&data).unwrap().into(),
@@ -229,20 +237,17 @@ async fn process_text<T: AsyncRead + AsyncWrite + Unpin + 'static>(
                 error!("unable to send initial state {}", e);
             };
         }
+        ResopnseServerToClient::Data {
+            data,
+            is_it_last,
+            new_id,
+        } => {
+            let data: Data = serde_json::from_str(&data).unwrap();
+            log_error!(data.just_write_paste(&new_id, is_it_last, usersettings.paste_on_click));
+            user_data.add(new_id, usersettings.max_clipboard);
+        }
         _ => {}
     }
-    *last_pong = Instant::now();
-}
-
-async fn process_bin(bin: Bytes, user_data: &UserData, last_pong: &mut Instant) {
-    let val = extract_zip(bin).unwrap();
-    if let Some(val) = val.last() {
-        if *val > user_data.last_one() {
-            past_last(val);
-        }
-    }
-    user_data.add_vec(val);
-    set_global_update_bool(true);
     *last_pong = Instant::now();
 }
 
@@ -260,9 +265,7 @@ async fn handle_mag<T: AsyncRead + AsyncWrite + Unpin + 'static>(
         ws::Frame::Text(txt) => {
             process_text(txt, pending, usersettings, user_data, ws, last_pong).await;
         }
-        ws::Frame::Binary(bin) => {
-            process_bin(bin, user_data, last_pong).await;
-        }
+        ws::Frame::Binary(_bin) => {}
         ws::Frame::Ping(p) => {
             if ws.send(ws::Message::Pong(p)).await.is_err() {
                 return Err("Unable to connect to server".into());
@@ -300,7 +303,7 @@ async fn handle_mag<T: AsyncRead + AsyncWrite + Unpin + 'static>(
                             process_text(complete, pending, usersettings, user_data, ws, last_pong)
                                 .await
                         }
-                        MessageType::Binary => process_bin(complete, user_data, last_pong).await,
+                        MessageType::Binary => {}
                     }
                 } else {
                     error!("Received LAST without FIRST. Dropping.");

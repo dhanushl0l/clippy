@@ -9,11 +9,10 @@ pub mod write_clipboard;
 
 use base64::Engine;
 use base64::engine::general_purpose;
-use bytes::Bytes;
 use bytestring::ByteString;
 use encryption_decryption::{decrypt_file, encrept_file};
 use image::{ImageReader, load_from_memory};
-use log::{debug, error, info, warn};
+use log::{debug, error, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::error::Error;
@@ -29,9 +28,11 @@ use std::{
     io::{self},
     path::PathBuf,
 };
-use tar::{Archive, Builder};
 use tokio::sync::Notify;
 use tokio::sync::mpsc::Sender;
+
+#[cfg(target_family = "unix")]
+use crate::write_clipboard::copy_to_unix;
 
 pub const APP_ID: &str = "org.clippy.clippy";
 pub const API_KEY: Option<&str> = option_env!("KEY");
@@ -62,6 +63,23 @@ impl Data {
         }
     }
 
+    pub fn just_write_paste(&self, id: &str, copy: bool, paste: bool) -> Result<(), io::Error> {
+        let path = get_path_pending();
+        fs::create_dir_all(&path)?;
+        let file_path = &path.join(id);
+        let mut file = File::create(file_path)?;
+        let json_data = serde_json::to_vec(self)?;
+        file.write_all(&json_data)?;
+        set_global_update_bool(true);
+        save_image(&id, &general_purpose::STANDARD.decode(&self.data).unwrap())?;
+        if copy {
+            #[cfg(target_family = "unix")]
+            copy_to_unix(self.clone(), paste)
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        }
+        Ok(())
+    }
+
     pub fn write_to_json(
         &self,
         tx: &Sender<MessageChannel>,
@@ -71,10 +89,10 @@ impl Data {
         fs::create_dir_all(&path)?;
         let file_path = &path.join(&time);
 
-        let json_data = serde_json::to_string_pretty(self)?;
+        let json_data = serde_json::to_vec(self)?;
 
         let mut file = File::create(file_path)?;
-        file.write_all(json_data.as_bytes())?;
+        file.write_all(&json_data)?;
 
         set_global_update_bool(true);
 
@@ -99,12 +117,20 @@ impl Data {
         tx: &Sender<MessageChannel>,
         time: String,
         old_id: String,
+        path: PathBuf,
     ) -> Result<(), io::Error> {
+        log_error!(fs::remove_file(path));
+        let path = get_path_image();
+        let old_path = path.join(&format!("{}.png", old_id));
+        let new_path = path.join(&format!("{}.png", time));
+        if old_path.is_file() {
+            fs::rename(&old_path, &new_path)?;
+        }
         let path = get_path_pending();
         fs::create_dir_all(&path)?;
         let file_path = &path.join(&time);
 
-        let json_data = serde_json::to_string_pretty(self)?;
+        let json_data = serde_json::to_string(self)?;
 
         let mut file = File::create(file_path)?;
         file.write_all(json_data.as_bytes())?;
@@ -569,26 +595,6 @@ impl Pending {
         self.data.clear();
     }
 
-    pub fn get_zip(&self) -> Result<(Vec<u8>, usize), ()> {
-        let mut buffer = Vec::new();
-        {
-            let mut tar = Builder::new(&mut buffer);
-
-            for (id, value) in self.data.iter() {
-                let path = &value.path;
-                if !path.is_file() {
-                    warn!("Unable to locate {}", id);
-                    continue;
-                }
-                tar.append_path_with_name(path, path.file_name().unwrap())
-                    .unwrap();
-            }
-            tar.finish().unwrap();
-        }
-
-        Ok((buffer, self.len()))
-    }
-
     pub fn pop(&mut self, id: &str) {
         self.data.remove(id);
     }
@@ -648,15 +654,11 @@ impl NewUserOtp {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-pub enum Resopnse {
+pub enum ResopnseClientToServer {
     Updated,
     Outdated,
     CheckVersion(String),
     CheckVersionArr(Vec<String>),
-    Success {
-        old: String,
-        new: String,
-    },
     Error(String),
     Data {
         data: String,
@@ -666,11 +668,30 @@ pub enum Resopnse {
     },
 }
 
-impl Resopnse {
-    pub fn to_bytestring(&self) -> Result<ByteString, serde_json::Error> {
+pub trait ToByteString: Serialize {
+    fn to_bytestring(&self) -> Result<ByteString, serde_json::Error> {
         let json = serde_json::to_string(self)?;
         Ok(ByteString::from(json))
     }
+}
+
+impl ToByteString for ResopnseClientToServer {}
+impl ToByteString for ResopnseServerToClient {}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub enum ResopnseServerToClient {
+    Data {
+        data: String,
+        is_it_last: bool,
+        new_id: String,
+    },
+    Edit(String),
+    Success {
+        old: String,
+        new: String,
+    },
+    Updated,
+    Outdated,
 }
 
 pub enum MessageType {
@@ -682,7 +703,7 @@ pub enum MessageType {
 pub enum MessageIPC {
     None,
     OpentGUI,
-    Paste(Data),
+    Paste(Data, bool),
     New(Data),
     Edit(EditData),
     UpdateSettings(UserSettings),
@@ -694,11 +715,12 @@ pub enum MessageIPC {
 pub struct EditData {
     data: Data,
     id: String,
+    path: PathBuf,
 }
 
 impl EditData {
-    pub fn new(data: Data, id: String) -> Self {
-        Self { data, id }
+    pub fn new(data: Data, id: String, path: PathBuf) -> Self {
+        Self { data, id, path }
     }
 }
 
@@ -913,79 +935,6 @@ pub fn cache_path() -> PathBuf {
     path
 }
 
-pub fn extract_zip(data: Bytes) -> Result<Vec<String>, Box<dyn Error>> {
-    let target_dir = get_path();
-    let mut id = Vec::new();
-    let reader = std::io::Cursor::new(data);
-    let mut archive = Archive::new(reader);
-
-    debug!("Extracting into {}", target_dir.display());
-
-    for (i, entry) in archive.entries()?.enumerate() {
-        debug!("Processing entry index: {}", i);
-        let mut file = match entry {
-            Ok(f) => f,
-            Err(e) => {
-                error!("Failed to read entry {}: {}", i, e);
-                continue;
-            }
-        };
-
-        let path = match file.path() {
-            Ok(p) => p.to_path_buf(),
-            Err(e) => {
-                error!("Invalid path at entry {}: {}", i, e);
-                continue;
-            }
-        };
-
-        let name = match path.file_name().and_then(|n| n.to_str()) {
-            Some(n) => n.to_string(),
-            None => {
-                error!("Invalid file name at entry {}: {:?}", i, path);
-                continue;
-            }
-        };
-
-        let mut out_path = target_dir.clone();
-        out_path.push(&name);
-        id.push(name.clone());
-
-        if let Some(parent) = out_path.parent() {
-            if let Err(e) = fs::create_dir_all(parent) {
-                error!(
-                    "Directory creation failed for {}: {}",
-                    out_path.display(),
-                    e
-                );
-                continue;
-            }
-        }
-
-        match File::create(&out_path) {
-            Ok(mut out_file) => {
-                if let Err(e) = std::io::copy(&mut file, &mut out_file) {
-                    error!("Copy failed for {}: {}", out_path.display(), e);
-                    continue;
-                }
-            }
-            Err(e) => {
-                error!("File creation failed for {}: {}", out_path.display(), e);
-                continue;
-            }
-        }
-
-        info!("Extracted file: {}", out_path.display());
-    }
-
-    if let Err(e) = store_image(&id, target_dir.clone()) {
-        error!("store_image failed: {}", e);
-    }
-
-    info!("Extraction done, total files: {}", id.len());
-    Ok(id)
-}
-
 pub fn store_image(id: &[String], target_dir: PathBuf) -> Result<(), Box<dyn Error>> {
     for i in id {
         let mut path = target_dir.clone();
@@ -1150,27 +1099,21 @@ pub fn is_valid_otp(otp: &str) -> bool {
     }
 }
 
-pub fn remove(mut path: PathBuf, typ: String, time: &str, thumbnail: bool) {
-    match fs::rename(&path, get_path().join(&time)) {
-        Ok(_) => (),
-        Err(err) => error!("{:?}", err),
+pub fn remove(path: PathBuf, typ: String, time: &str, thumbnail: bool) {
+    if let Err(err) = fs::rename(&path, get_path().join(&time)) {
+        error!("{:?}", err)
     };
 
-    if thumbnail {
-        if typ.starts_with("image/") {
-            let file_name = format!(
-                "{}.png",
-                path.file_name()
-                    .unwrap()
-                    .to_os_string()
-                    .into_string()
-                    .unwrap()
-            );
-            path.pop();
-            path.pop();
-            path.push("image");
-            path.push(format!("{}", file_name));
-            fs::rename(path, get_path_image().join(format!("{}.png", time))).unwrap();
+    if thumbnail && typ.starts_with("image/") {
+        if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+            let image_path = get_path_image();
+            let old_img_file_name = format!("{}.png", file_name);
+            let old_img = image_path.join(&old_img_file_name);
+            let new_image = image_path.join(format!("{}.png", time));
+
+            if let Err(e) = fs::rename(&old_img, &new_image) {
+                log::error!("Failed to rename file: {}", e);
+            }
         }
     }
 }

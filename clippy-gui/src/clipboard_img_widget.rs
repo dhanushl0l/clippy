@@ -1,5 +1,5 @@
 use crate::ipc::ipc::send_process;
-use clippy::{Data, EditData, log_error, set_global_bool};
+use clippy::{Data, EditData, UserSettings, log_error, set_global_bool};
 use clippy_gui::set_lock;
 use egui::{self, *};
 use log::error;
@@ -14,7 +14,7 @@ pub fn item_card_image(
     ui: &mut Ui,
     texture: &egui::TextureHandle,
     pinned: &mut bool,
-    click_on_quit: bool,
+    settings: &UserSettings,
     changed: Arc<Mutex<bool>>,
     path: &PathBuf,
     ctx: &Context,
@@ -38,9 +38,12 @@ pub fn item_card_image(
                 if ui.add(egui::ImageButton::new(texture)).clicked() {
                     set_global_bool(true);
 
-                    log_error!(send_process(clippy::MessageIPC::Paste(data.clone())));
+                    log_error!(send_process(clippy::MessageIPC::Paste(
+                        data.clone(),
+                        settings.paste_on_click
+                    )));
 
-                    if click_on_quit {
+                    if settings.click_on_quit {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     }
                 }
@@ -52,11 +55,11 @@ pub fn item_card_image(
                         if pin_response.clicked() {
                             if pin_response.clicked() {
                                 data.change_pined();
-                                log_error!(fs::remove_file(path));
                                 if let Some(file_name) = path.file_name().and_then(|f| f.to_str()) {
                                     let msg = clippy::MessageIPC::Edit(EditData::new(
                                         data.clone(),
                                         file_name.to_string(),
+                                        path.to_path_buf(),
                                     ));
                                     log_error!(send_process(msg));
                                 }

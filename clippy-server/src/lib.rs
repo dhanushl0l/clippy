@@ -15,13 +15,11 @@ use sha2::{Digest, Sha256};
 use sqlx::prelude::FromRow;
 use std::{
     collections::{BTreeSet, HashMap, hash_map::Entry},
-    error::Error,
     fs::{self},
     io::{self, Write},
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::{Arc, Mutex, OnceLock},
 };
-use tar::Builder;
 use tokio::sync::{self, broadcast::Sender};
 use ws_connection::ws_connection;
 
@@ -34,7 +32,18 @@ pub static DB_CONF: OnceLock<String> = OnceLock::new();
 
 #[derive(Debug, Clone)]
 pub struct UserState {
-    data: Arc<Mutex<HashMap<String, BTreeSet<String>>>>,
+    data: Arc<Mutex<HashMap<String, User>>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct User {
+    state: BTreeSet<String>,
+    edits: Vec<Edit>,
+}
+
+#[derive(Debug, Clone)]
+pub enum Edit {
+    Remove(String),
 }
 
 impl UserState {
@@ -42,6 +51,25 @@ impl UserState {
         Self {
             data: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    pub fn add_edit(&self, username: &str, edit: Edit) -> Result<(), String> {
+        let mut map = self.data.lock().map_err(|_| "Mutex poisoned")?;
+        let user = map
+            .get_mut(username)
+            .ok_or("unable to identify user".to_string())?;
+        match &edit {
+            Edit::Remove(id) => {
+                if user.state.remove(id) {
+                    match remove_db_file(username, id) {
+                        Ok(_) => (),
+                        Err(err) => debug!("{}", err),
+                    };
+                }
+            }
+        }
+        user.edits.push(edit);
+        Ok(())
     }
 
     pub fn entry(&self, username: &str) -> Result<(), String> {
@@ -52,7 +80,11 @@ impl UserState {
             .map_err(|e| format!("Failed to create dir {}: {}", dir_path, e))?;
 
         if !map.contains_key(username) {
-            map.insert(username.to_string(), BTreeSet::new());
+            let user = User {
+                state: BTreeSet::new(),
+                edits: Vec::new(),
+            };
+            map.insert(username.to_string(), user);
             debug!("{:?}", self);
         }
 
@@ -66,21 +98,21 @@ impl UserState {
     pub fn update(&self, username: &str, id: &str) {
         let mut map = self.data.lock().unwrap();
         if let Some(set) = map.get_mut(username) {
-            let len = set.len();
+            let len = set.state.len();
             if len > 29 {
                 let remove_count = len - 29;
-                let to_remove: Vec<_> = set.iter().take(remove_count).cloned().collect();
+                let to_remove: Vec<_> = set.state.iter().take(remove_count).cloned().collect();
                 for val in to_remove {
                     debug!("removing {:?}", val);
                     match remove_db_file(username, &val) {
                         Ok(_) => (),
                         Err(err) => error!("{}", err),
                     };
-                    set.remove(&val);
+                    set.state.remove(&val);
                 }
             }
 
-            set.insert(id.to_string());
+            set.state.insert(id.to_string());
         } else {
             error!("Unabe to update user state: {}", id);
         }
@@ -97,7 +129,7 @@ impl UserState {
 
         let data = guard.get(username);
         if let Some(val) = data {
-            match val.last() {
+            match val.state.last() {
                 Some(last) => {
                     debug!("{},{}", id, last);
                     last == id
@@ -119,8 +151,9 @@ impl UserState {
             .get(username)
             .ok_or_else(|| HttpResponse::Unauthorized().body("Error: authentication failed"))?;
 
-        if let Some(pos) = tree.iter().position(|x| x == id) {
+        if let Some(pos) = tree.state.iter().position(|x| x == id) {
             Ok(tree
+                .state
                 .iter()
                 .skip(pos + 1)
                 .map(|x| format!("{}/{}/{}", DATABASE_PATH, username, x))
@@ -128,6 +161,7 @@ impl UserState {
         } else {
             if !map.is_empty() {
                 Ok(tree
+                    .state
                     .iter()
                     .map(|x| format!("{}/{}/{}", DATABASE_PATH, username, x))
                     .collect())
@@ -137,35 +171,38 @@ impl UserState {
         }
     }
 
-    pub fn get(&self, username: &str, id: &[String]) -> Option<Vec<String>> {
+    pub fn get(&self, username: &str, id: &[String]) -> Option<Vec<(String, String)>> {
         let map = self.data.lock().unwrap();
 
         let tree = map.get(username)?;
 
         let mut temp = Vec::new();
 
-        for i in tree {
+        for i in tree.state.iter() {
             if !id.contains(i) {
-                temp.push(format!("{}/{}/{}", DATABASE_PATH, username, i));
+                temp.push((
+                    format!("{}/{}/{}", DATABASE_PATH, username, i),
+                    i.to_string(),
+                ));
             }
         }
 
         Some(temp)
     }
 
-    pub fn remove(&self, username: &str, id: &str) -> Result<(), Box<dyn Error>> {
-        let mut map = self.data.lock().or_else(|_| Err("Unable to lock cred"))?;
-        let tree = map
-            .get_mut(username)
-            .ok_or_else(|| "Unable to identify user")?;
-        if tree.remove(id) {
-            match remove_db_file(username, id) {
-                Ok(_) => (),
-                Err(err) => debug!("{}", err),
-            };
-        }
-        Ok(())
-    }
+    // pub fn remove(&self, username: &str, id: &str) -> Result<(), Box<dyn Error>> {
+    //     let mut map = self.data.lock().or_else(|_| Err("Unable to lock cred"))?;
+    //     let tree = map
+    //         .get_mut(username)
+    //         .ok_or_else(|| "Unable to identify user")?;
+    //     if tree.state.remove(id) {
+    //         match remove_db_file(username, id) {
+    //             Ok(_) => (),
+    //             Err(err) => debug!("{}", err),
+    //         };
+    //     }
+    //     Ok(())
+    // }
 }
 
 #[derive(Debug, Clone)]
@@ -318,21 +355,6 @@ pub fn get_filename(id: i64, mut path: PathBuf) -> String {
         path.push(&file_name);
     }
     file_name
-}
-
-pub fn to_zip(files: Vec<String>) -> Result<Vec<u8>, io::Error> {
-    let mut buffer = Vec::new();
-    {
-        let mut tar = Builder::new(&mut buffer);
-
-        for file in &files {
-            let path = Path::new(file);
-            tar.append_path(path)?;
-        }
-
-        tar.finish()?;
-    }
-    Ok(buffer)
 }
 
 #[derive(Deserialize)]
@@ -504,6 +526,7 @@ impl Room {
 #[derive(Debug, Clone)]
 pub enum ServResopnse {
     New(String),
+    Remove(String),
 }
 pub fn get_auth(username: &str, exp: i64) -> Result<String, jsonwebtoken::errors::Error> {
     let now = Utc::now();

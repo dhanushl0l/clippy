@@ -7,7 +7,6 @@ edition = "2024"
 reqwest = { version = "0.12.15", features = ["default", "multipart", "json"] }
 clipboard-rs = "0.3.0"
 chrono = "0.4.40"
-tar = "0.4.44"
 bytes = "1.10.1"
 env_logger = "0.11.8"
 base64 = "0.22.1"
