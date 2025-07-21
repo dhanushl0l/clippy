@@ -7,13 +7,13 @@ use std::{error::Error, process, sync::Mutex, thread, time::Duration};
 use tokio::{fs::File, io::AsyncReadExt, sync::mpsc::Receiver};
 
 #[cfg(debug_assertions)]
-pub const SERVER: &str = "http://127.0.0.1:7777";
+pub const SERVER: &str = "http://192.168.1.175:7777";
 
 #[cfg(not(debug_assertions))]
 pub const SERVER: &str = "https://clippy.dhanu.cloud";
 
 #[cfg(debug_assertions)]
-pub const SERVER_WS: &str = "ws://0.0.0.0:7777/connect";
+pub const SERVER_WS: &str = "ws://192.168.1.175:7777/connect";
 
 #[cfg(not(debug_assertions))]
 pub const SERVER_WS: &str = "wss://clippy.dhanu.cloud/connect";

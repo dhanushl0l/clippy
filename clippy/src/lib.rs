@@ -64,14 +64,16 @@ impl Data {
     }
 
     pub fn just_write_paste(&self, id: &str, copy: bool, paste: bool) -> Result<(), io::Error> {
-        let path = get_path_pending();
+        let path = get_path();
         fs::create_dir_all(&path)?;
         let file_path = &path.join(id);
         let mut file = File::create(file_path)?;
         let json_data = serde_json::to_vec(self)?;
         file.write_all(&json_data)?;
         set_global_update_bool(true);
-        save_image(&id, &general_purpose::STANDARD.decode(&self.data).unwrap())?;
+        if self.typ.starts_with("image/") {
+            save_image(&id, &general_purpose::STANDARD.decode(&self.data).unwrap())?;
+        }
         if copy {
             #[cfg(target_family = "unix")]
             copy_to_unix(self.clone(), paste)
@@ -161,7 +163,7 @@ impl Data {
     }
 
     pub fn get_image_thumbnail(&self, id: &PathBuf) -> Option<(Vec<u8>, (u32, u32))> {
-        let path = get_image_path(id);
+        let path = get_image_path(id)?;
         let image = if path.is_file() {
             ImageReader::open(path).ok()?.decode().ok()?
         } else {
@@ -950,11 +952,11 @@ pub fn store_image(id: &[String], target_dir: PathBuf) -> Result<(), Box<dyn Err
     Ok(())
 }
 
-pub fn get_image_path(id: &PathBuf) -> PathBuf {
+pub fn get_image_path(id: &PathBuf) -> Option<PathBuf> {
     let mut path = get_path_image();
-    let file_nema = format!("{}.png", id.file_name().unwrap().to_str().unwrap());
+    let file_nema = format!("{}.png", id.file_name()?.to_str()?);
     path.push(file_nema);
-    path
+    Some(path)
 }
 
 pub fn set_global_bool(value: bool) {

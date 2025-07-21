@@ -1,4 +1,6 @@
-use crate::{Data, MessageChannel, ResopnseServerToClient, ToByteString, log_error};
+use crate::{
+    Data, MessageChannel, ResopnseServerToClient, ToByteString, get_image_path, get_path, log_error,
+};
 use crate::{
     MessageType, Pending, ResopnseClientToServer, UserData, UserSettings,
     http::{SERVER_WS, get_token, get_token_serv, health},
@@ -17,6 +19,7 @@ use futures_util::{SinkExt, StreamExt};
 use log::{debug, error, info};
 use reqwest::{self, Client};
 use std::{error::Error, sync::Arc, time::Duration};
+use tokio::fs;
 use tokio::{
     fs::File,
     io::AsyncReadExt,
@@ -45,7 +48,7 @@ pub fn start_cloud(rx: &mut Receiver<MessageChannel>, mut usersettings: UserSett
             log::debug!("starting WebSocket client");
             health(&client, rx, &mut pending).await;
             if let Err(e) = get_token_serv(&usercred, &client).await {
-                error!("unable to connect to server");
+                error!("unable to get secure key from server");
                 debug!("{}", e);
                 health(&client, rx, &mut pending).await;
                 continue;
@@ -57,6 +60,7 @@ pub fn start_cloud(rx: &mut Receiver<MessageChannel>, mut usersettings: UserSett
             let result = config_ws
                 .ws(SERVER_WS)
                 .set_header(header::AUTHORIZATION, format!("Bearer {}", token))
+                .max_frame_size(30 * 1024 * 1024)
                 .connect()
                 .await;
 
@@ -162,7 +166,7 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
                             Ok(_) => {
                                 let  buffer = ResopnseClientToServer::Data { data: file_data, id: id.clone(), last,is_it_edit: value.is_it_edit.clone() };
                                 if ws.send(ws::Message::Text(buffer.to_bytestring().unwrap())).await.is_err() {
-                                    return Err("Unable to connect to server".into());
+                                    return Err("Unable to send data to server".into());
                                 }
                                 pending.change_state(&id);
                                 last_pong = Instant::now();
@@ -243,8 +247,20 @@ async fn process_text<T: AsyncRead + AsyncWrite + Unpin + 'static>(
             new_id,
         } => {
             let data: Data = serde_json::from_str(&data).unwrap();
-            log_error!(data.just_write_paste(&new_id, is_it_last, usersettings.paste_on_click));
+            log_error!(data.just_write_paste(&new_id, is_it_last, false));
             user_data.add(new_id, usersettings.max_clipboard);
+        }
+        ResopnseServerToClient::Edit(id) => {
+            let file_path = get_path().join(id);
+            let image_path = get_image_path(&file_path);
+            fs::remove_file(file_path).await.unwrap();
+            if let Some(path) = image_path {
+                if let Ok(meta) = fs::metadata(&path).await {
+                    if meta.is_file() {
+                        let _ = fs::remove_file(path).await;
+                    }
+                }
+            }
         }
         _ => {}
     }
@@ -268,7 +284,7 @@ async fn handle_mag<T: AsyncRead + AsyncWrite + Unpin + 'static>(
         ws::Frame::Binary(_bin) => {}
         ws::Frame::Ping(p) => {
             if ws.send(ws::Message::Pong(p)).await.is_err() {
-                return Err("Unable to connect to server".into());
+                return Err("Unable to send pong to server".into());
             }
         }
         ws::Frame::Pong(_) => {}

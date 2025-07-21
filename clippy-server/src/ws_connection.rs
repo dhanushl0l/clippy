@@ -83,10 +83,7 @@ pub async fn ws_connection(
                                         };
                                     }
                                     ResopnseClientToServer::Data{data,id,last,is_it_edit} => {
-                                        if let Some(val) = is_it_edit {
-                                            state.add_edit(&user,crate::Edit::Remove(val)).unwrap();
-                                        }
-                                        handle_bin(&user,&state,&tx,&mut session,data,id,last,&mut old).await;
+                                        handle_bin(&user,&state,&tx,&mut session,data,id,last,&mut old,is_it_edit).await;
                                     }
                                     _ => {}
                                 }
@@ -130,6 +127,10 @@ pub async fn ws_connection(
                                     if let Err(e) =  session.text(serde_json::to_string(&status).unwrap()).await {
                                         debug!("Unable to send response {}",e);
                                     };
+                                    let status = ResopnseServerToClient::Outdated;
+                                    if let Err(e) =  session.text(serde_json::to_string(&status).unwrap()).await {
+                                        debug!("Unable to send response {}",e);
+                                    };
                                 }
                             }
                         }
@@ -164,6 +165,7 @@ async fn handle_bin(
     id: String,
     last: bool,
     old: &mut String,
+    is_it_edit: Option<String>,
 ) {
     let mut path: PathBuf = PathBuf::new().join(format!("{}/{}/", DATABASE_PATH, user));
     match std::fs::create_dir_all(&path) {
@@ -177,11 +179,19 @@ async fn handle_bin(
     file.write_all(data.as_bytes()).unwrap();
     state.update(&user, &file_name);
     debug!("Saved file: {id}");
-    if last {
+    if let Some(val) = is_it_edit {
+        *old = file_name.clone();
+        state
+            .add_edit(&user, crate::Edit::Remove(val.clone()))
+            .unwrap();
+        if let Err(e) = tx.send(ServResopnse::Remove(val)) {
+            error!("error sending state: {}", e);
+        };
+    } else if last {
+        *old = file_name.clone();
         if let Err(e) = tx.send(ServResopnse::New(file_name.clone())) {
             error!("error sending state: {}", e);
         };
-        *old = file_name.clone();
     }
     let file: ResopnseServerToClient = ResopnseServerToClient::Success {
         old: id.to_string(),
@@ -207,7 +217,7 @@ async fn send_to_client(
                     .text(
                         ResopnseServerToClient::Data {
                             data: buf,
-                            is_it_last: (data.len() == i - 1),
+                            is_it_last: (i == data.len() - 1),
                             new_id: new_id.to_string(),
                         }
                         .to_bytestring()
