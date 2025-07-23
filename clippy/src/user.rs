@@ -1,5 +1,6 @@
 use crate::{
-    Data, MessageChannel, ResopnseServerToClient, ToByteString, get_image_path, get_path, log_error,
+    Data, Edit, MessageChannel, ResopnseServerToClient, ToByteString, get_image_path, get_path,
+    log_error,
 };
 use crate::{
     MessageType, Pending, ResopnseClientToServer, UserData, UserSettings,
@@ -134,73 +135,125 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
     let mut last_pong = Instant::now();
     loop {
         select! {
-            _ = sleep(Duration::from_secs(1)) => {
-                if last_pong.elapsed() > Duration::from_secs(30) {
-                    error!("No pong in time. Disconnecting.");
-                    return Err("Server is out".into());
-                } else if last_pong.elapsed() > Duration::from_secs(5) {
-                    let _ = ws.send(Message::Ping(Bytes::new())).await;
-                }
-            }
-
-            Some(msg) = ws.next() => {
-                last_pong = Instant::now();
-                let msg = match msg {
-                    Ok(va) => va,
-                    Err(e) => {
-                        // to do
-                        debug!("{}",e);
-                        continue;
+                _ = sleep(Duration::from_secs(1)) => {
+                    if last_pong.elapsed() > Duration::from_secs(30) {
+                        error!("No pong in time. Disconnecting.");
+                        return Err("Server is out".into());
+                    } else if last_pong.elapsed() > Duration::from_secs(5) {
+                        let _ = ws.send(Message::Ping(Bytes::new())).await;
                     }
-                };
-                if let Err(e) = handle_mag(msg, pending, usersettings, user_data, ws, &mut last_pong, &mut buffer, &mut current_type).await{
-                    error!("{}",e);
-                };
-            }
+                }
 
-            Some((last,id, value)) = pending.next() => {
-                match File::open(&value.path).await {
-                    Ok(mut file) => {
-                        let mut file_data = String::new();
-                        match file.read_to_string(&mut file_data).await {
-                            Ok(_) => {
-                                let  buffer = ResopnseClientToServer::Data { data: file_data, id: id.clone(), last,is_it_edit: value.is_it_edit.clone() };
-                                if ws.send(ws::Message::Text(buffer.to_bytestring().unwrap())).await.is_err() {
-                                    return Err("Unable to send data to server".into());
-                                }
-                                pending.change_state(&id);
-                                last_pong = Instant::now();
+                Some(msg) = ws.next() => {
+                    last_pong = Instant::now();
+                    let msg = match msg {
+                        Ok(va) => va,
+                        Err(e) => {
+                            // to do
+                            debug!("{}",e);
+                            continue;
+                        }
+                    };
+                    if let Err(e) = handle_mag(msg, pending, usersettings, user_data, ws, &mut last_pong, &mut buffer, &mut current_type).await{
+                        error!("{}",e);
+                    };
+                }
+
+                Some((last,id, value)) = pending.next() => {
+        match value {
+            Edit::New { path, typ: _ } => match File::open(&path).await {
+                Ok(mut file) => {
+                    let mut file_data = String::new();
+                    match file.read_to_string(&mut file_data).await {
+                        Ok(_) => {
+                            let buffer = ResopnseClientToServer::Data {
+                                data: file_data,
+                                id: id.clone(),
+                                last,
+                                is_it_edit: None,
+                            };
+                            if ws
+                                .send(ws::Message::Text(buffer.to_bytestring().unwrap()))
+                                .await
+                                .is_err()
+                            {
+                                return Err("Unable to send data to server".into());
                             }
-                            Err(e) => {
-                                error!("Failed to read file data: {}", e);
-                                pending.pop(&id);
-                            }
+                            pending.change_state(&id);
+                            last_pong = Instant::now();
+                        }
+                        Err(e) => {
+                            error!("Failed to read file data: {}", e);
+                            pending.pop(&id);
                         }
                     }
-                    Err(e) => {
-                        error!("Failed to open file {:?}: {}", value.path, e);
-                        pending.pop(&id);
+                }
+                Err(e) => {
+                    error!("Failed to open file {:?}: {}", value, e);
+                    pending.pop(&id);
+                }
+            },
+            Edit::Edit {
+                path,
+                typ: _,
+                new_id,
+            } => match File::open(&path).await {
+                Ok(mut file) => {
+                    let mut file_data = String::new();
+                    match file.read_to_string(&mut file_data).await {
+                        Ok(_) => {
+                            let buffer = ResopnseClientToServer::Data {
+                                data: file_data,
+                                id: id.clone(),
+                                last,
+                                is_it_edit: Some(new_id.clone()),
+                            };
+                            if ws
+                                .send(ws::Message::Text(buffer.to_bytestring().unwrap()))
+                                .await
+                                .is_err()
+                            {
+                                return Err("Unable to send data to server".into());
+                            }
+                            pending.change_state(&id);
+                            last_pong = Instant::now();
+                        }
+                        Err(e) => {
+                            error!("Failed to read file data: {}", e);
+                            pending.pop(&id);
+                        }
                     }
                 }
-            }
-            Some(va) = rx.recv() => {
-            match va {
-                MessageChannel::New { path, time, typ } => {
-                    pending.add(path, time, typ, None);
+                Err(e) => {
+                    error!("Failed to open file {:?}: {}", value, e);
+                    pending.pop(&id);
                 }
-                MessageChannel::Edit { path, old_id, time, typ } => {
-                    debug!("path {} old_id {} new_time {} typ {}",path,old_id,time,typ);
-                    pending.add(path, time, typ, Some(old_id));
-                }
-                MessageChannel::SettingsChanged => {
-                    *usersettings = UserSettings::build_user()?;
-                    debug!("change settings");
-                    break Ok(());
-                }
+            },
+            Edit::Remove { id } => {}
         }
-            }
+                }
 
-        }
+                Some(va) = rx.recv() => {
+                match va {
+                    MessageChannel::New { path, time, typ } => {
+                        pending.add(time, Edit::New { path: path.into(), typ, }, crate::DataState::WaitingToSend);
+                    }
+                    MessageChannel::Edit { path, old_id, time, typ } => {
+                        debug!("path {} old_id {} new_time {} typ {}",path,old_id,time,typ);
+                        pending.add(old_id, Edit::Edit { path: path.into(), typ: typ, new_id: time }, crate::DataState::WaitingToSend);
+                    }
+                    MessageChannel::SettingsChanged => {
+                        *usersettings = UserSettings::build_user()?;
+                        debug!("change settings");
+                        break Ok(());
+                    },
+                    MessageChannel::Remove(id)  => {
+                        pending.add(id.clone(), Edit::Remove { id }, crate::DataState::WaitingToSend);
+                    }
+            }
+                }
+
+            }
     }
 }
 
@@ -215,7 +268,7 @@ async fn process_text<T: AsyncRead + AsyncWrite + Unpin + 'static>(
     let state: ResopnseServerToClient = serde_json::from_slice(&bin).unwrap();
     match state {
         ResopnseServerToClient::Success { old, new } => {
-            let value = match pending.remove(&old) {
+            let (edit, state) = match pending.remove(&old) {
                 Some(v) => v,
                 None => {
                     debug!("Error removing pending data");
@@ -224,8 +277,17 @@ async fn process_text<T: AsyncRead + AsyncWrite + Unpin + 'static>(
                 }
             };
 
-            remove(value.path, value.typ, &new, usersettings.store_image);
-            user_data.add(new, usersettings.max_clipboard);
+            match edit {
+                Edit::New { path, typ } => {
+                    remove(path, typ, &new.clone().unwrap(), usersettings.store_image);
+                    user_data.add(new.unwrap(), usersettings.max_clipboard);
+                }
+                Edit::Edit { path, typ, new_id } => {
+                    remove(path, typ, &new.clone().unwrap(), usersettings.store_image);
+                    user_data.add(new.unwrap(), usersettings.max_clipboard);
+                }
+                Edit::Remove { id } => {}
+            }
             info!("Surcess sending new data");
             set_global_update_bool(true);
         }
@@ -249,18 +311,6 @@ async fn process_text<T: AsyncRead + AsyncWrite + Unpin + 'static>(
             let data: Data = serde_json::from_str(&data).unwrap();
             log_error!(data.just_write_paste(&new_id, is_it_last, false));
             user_data.add(new_id, usersettings.max_clipboard);
-        }
-        ResopnseServerToClient::Edit(id) => {
-            let file_path = get_path().join(id);
-            let image_path = get_image_path(&file_path);
-            fs::remove_file(file_path).await.unwrap();
-            if let Some(path) = image_path {
-                if let Ok(meta) = fs::metadata(&path).await {
-                    if meta.is_file() {
-                        let _ = fs::remove_file(path).await;
-                    }
-                }
-            }
         }
         _ => {}
     }

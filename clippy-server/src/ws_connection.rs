@@ -8,7 +8,7 @@ use std::{
 use actix_web::web::{self, Bytes};
 use actix_ws::{AggregatedMessage, AggregatedMessageStream, Session};
 use chrono::Utc;
-use clippy::{ResopnseClientToServer, ResopnseServerToClient, ToByteString};
+use clippy::{Edit, ResopnseClientToServer, ResopnseServerToClient, ToByteString};
 use futures_util::StreamExt;
 use log::{debug, error};
 use tokio::{
@@ -17,12 +17,12 @@ use tokio::{
     time::{Instant, sleep},
 };
 
-use crate::{DATABASE_PATH, RoomManager, ServResopnse, UserState, get_filename};
+use crate::{DATABASE_PATH, MessageMPC, RoomManager, UserState, get_filename};
 
 pub async fn ws_connection(
     mut session: Session,
     mut msg_stream: AggregatedMessageStream,
-    tx: Sender<ServResopnse>,
+    tx: Sender<MessageMPC>,
     state: actix_web::web::Data<UserState>,
     user: String,
     room: web::Data<RoomManager>,
@@ -30,7 +30,7 @@ pub async fn ws_connection(
 ) {
     let mut last_pong = Instant::now();
     let mut rx = tx.subscribe();
-    let mut old = String::new();
+    let mut old = MessageMPC::None;
 
     loop {
         select! {
@@ -112,18 +112,10 @@ pub async fn ws_connection(
             result = rx.recv() => {
                 match result {
                     Ok(val) => {
-                        match val {
-                            ServResopnse::New(new) => {
-                                if new != old {
-                                    let status = ResopnseServerToClient::Outdated;
-                                    if let Err(e) =  session.text(serde_json::to_string(&status).unwrap()).await {
-                                        debug!("Unable to send response {}",e);
-                                    };
-                                }
-                            },
-                            ServResopnse::Remove(remove) => {
-                                if remove != old {
-                                    let status = ResopnseServerToClient::Edit(remove);
+                        if val != old {
+                            match val {
+                                MessageMPC::Remove(id) => {
+                                    let status = ResopnseServerToClient::Remove(id);
                                     if let Err(e) =  session.text(serde_json::to_string(&status).unwrap()).await {
                                         debug!("Unable to send response {}",e);
                                     };
@@ -131,8 +123,24 @@ pub async fn ws_connection(
                                     if let Err(e) =  session.text(serde_json::to_string(&status).unwrap()).await {
                                         debug!("Unable to send response {}",e);
                                     };
-                                }
+                                },
+                                MessageMPC::New(id) =>{
+                                    let path = format!("{}/{}/{}", DATABASE_PATH, &user, id);
+                                    if let Ok(mut file) = File::open(path){
+                                        let mut buf = String::new();
+                                            if let Err(e) = file.read_to_string(&mut buf) {
+                                                error!("{}", e);
+                                                continue;
+                                            };
+                                        let status = ResopnseServerToClient::Data { data: buf, is_it_last: true, new_id: id };
+                                        if let Err(e) =  session.text(serde_json::to_string(&status).unwrap()).await {
+                                            debug!("Unable to send response {}",e);
+                                        };
+                                    }
+                                },
+                                MessageMPC::None => {}
                             }
+
                         }
                     }
                     Err(e) => {
@@ -159,12 +167,12 @@ pub async fn ws_connection(
 async fn handle_bin(
     user: &str,
     state: &actix_web::web::Data<UserState>,
-    tx: &Sender<ServResopnse>,
+    tx: &Sender<MessageMPC>,
     session: &mut Session,
     data: String,
     id: String,
     last: bool,
-    old: &mut String,
+    old: &mut MessageMPC,
     is_it_edit: Option<String>,
 ) {
     let mut path: PathBuf = PathBuf::new().join(format!("{}/{}/", DATABASE_PATH, user));
@@ -179,23 +187,21 @@ async fn handle_bin(
     file.write_all(data.as_bytes()).unwrap();
     state.update(&user, &file_name);
     debug!("Saved file: {id}");
-    if let Some(val) = is_it_edit {
-        *old = file_name.clone();
-        state
-            .add_edit(&user, crate::Edit::Remove(val.clone()))
-            .unwrap();
-        if let Err(e) = tx.send(ServResopnse::Remove(val)) {
+    if let Some(edit) = is_it_edit {
+        *old = MessageMPC::Remove(edit.clone());
+        state.add_edit(&user, Edit::Remove { id: edit }).unwrap();
+        if let Err(e) = tx.send(old.clone()) {
             error!("error sending state: {}", e);
         };
     } else if last {
-        *old = file_name.clone();
-        if let Err(e) = tx.send(ServResopnse::New(file_name.clone())) {
+        *old = MessageMPC::New(file_name.clone());
+        if let Err(e) = tx.send(old.clone()) {
             error!("error sending state: {}", e);
         };
     }
     let file: ResopnseServerToClient = ResopnseServerToClient::Success {
         old: id.to_string(),
-        new: file_name.clone(),
+        new: Some(file_name),
     };
     let file_str = serde_json::to_string(&file).unwrap();
     session.text(file_str).await.unwrap();

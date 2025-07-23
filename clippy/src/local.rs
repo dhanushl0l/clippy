@@ -36,6 +36,7 @@ pub fn start_local(rx: &mut Receiver<MessageChannel>, mut usersettings: UserSett
                     usersettings = UserSettings::build_user().unwrap();
                     break;
                 }
+                MessageChannel::Remove(_id) => {}
             }
         }
     });

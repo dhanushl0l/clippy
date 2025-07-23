@@ -4,7 +4,7 @@ use actix_web::{HttpResponse, rt, web};
 use actix_ws::{AggregatedMessageStream, Session};
 use base64::{Engine, engine::general_purpose};
 use chrono::{Duration, Utc};
-use clippy::{LoginUserCred, NewUserOtp};
+use clippy::{Edit, LoginUserCred, NewUserOtp};
 use futures_util::StreamExt;
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use log::{debug, error};
@@ -41,11 +41,6 @@ pub struct User {
     edits: Vec<Edit>,
 }
 
-#[derive(Debug, Clone)]
-pub enum Edit {
-    Remove(String),
-}
-
 impl UserState {
     pub fn new() -> Self {
         Self {
@@ -59,7 +54,7 @@ impl UserState {
             .get_mut(username)
             .ok_or("unable to identify user".to_string())?;
         match &edit {
-            Edit::Remove(id) => {
+            Edit::Remove { id } => {
                 if user.state.remove(id) {
                     match remove_db_file(username, id) {
                         Ok(_) => (),
@@ -67,6 +62,7 @@ impl UserState {
                     };
                 }
             }
+            _ => {}
         }
         user.edits.push(edit);
         Ok(())
@@ -435,7 +431,7 @@ pub struct RoomManager {
 #[derive(Debug)]
 pub struct Room {
     clients: sync::Mutex<Vec<rt::task::JoinHandle<()>>>,
-    tx: Sender<ServResopnse>,
+    tx: Sender<MessageMPC>,
 }
 
 impl RoomManager {
@@ -509,7 +505,7 @@ impl Room {
         &mut self,
         session: Session,
         msg_stream: AggregatedMessageStream,
-        tx: Sender<ServResopnse>,
+        tx: Sender<MessageMPC>,
         state: actix_web::web::Data<UserState>,
         user: String,
         room: web::Data<RoomManager>,
@@ -523,10 +519,11 @@ impl Room {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum ServResopnse {
+#[derive(Debug, Clone, PartialEq)]
+pub enum MessageMPC {
     New(String),
     Remove(String),
+    None,
 }
 pub fn get_auth(username: &str, exp: i64) -> Result<String, jsonwebtoken::errors::Error> {
     let now = Utc::now();

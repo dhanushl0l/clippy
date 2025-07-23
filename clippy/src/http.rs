@@ -125,7 +125,14 @@ pub async fn health(client: &Client, rx: &mut Receiver<MessageChannel>, pending:
                 while let Ok(val) = rx.try_recv() {
                     match val {
                         MessageChannel::New { path, time, typ } => {
-                            pending.add(path, time, typ, None);
+                            pending.add(
+                                time,
+                                crate::Edit::New {
+                                    path: path.into(),
+                                    typ,
+                                },
+                                crate::DataState::WaitingToSend,
+                            );
                         }
                         MessageChannel::Edit {
                             old_id,
@@ -133,11 +140,20 @@ pub async fn health(client: &Client, rx: &mut Receiver<MessageChannel>, pending:
                             typ,
                             path,
                         } => {
-                            pending.add(path, time, typ, Some(old_id));
+                            pending.add(
+                                old_id,
+                                crate::Edit::Edit {
+                                    path: path.into(),
+                                    typ,
+                                    new_id: time,
+                                },
+                                crate::DataState::WaitingToSend,
+                            );
                         }
                         MessageChannel::SettingsChanged => {
                             unimplemented!("to do")
                         }
+                        MessageChannel::Remove(id) => {}
                     }
                 }
                 debug!("ubale to connect :{:?}|{}", client, err);
@@ -147,7 +163,14 @@ pub async fn health(client: &Client, rx: &mut Receiver<MessageChannel>, pending:
         while let Ok(val) = rx.try_recv() {
             match val {
                 MessageChannel::New { path, time, typ } => {
-                    pending.add(path, time, typ, None);
+                    pending.add(
+                        time,
+                        crate::Edit::New {
+                            path: path.into(),
+                            typ,
+                        },
+                        crate::DataState::WaitingToSend,
+                    );
                 }
                 MessageChannel::Edit {
                     old_id,
@@ -155,11 +178,20 @@ pub async fn health(client: &Client, rx: &mut Receiver<MessageChannel>, pending:
                     typ,
                     path,
                 } => {
-                    pending.add(old_id, time, typ, Some(path));
+                    pending.add(
+                        old_id,
+                        crate::Edit::Edit {
+                            path: path.into(),
+                            typ,
+                            new_id: time,
+                        },
+                        crate::DataState::WaitingToSend,
+                    );
                 }
                 MessageChannel::SettingsChanged => {
                     unimplemented!("to do")
                 }
+                MessageChannel::Remove(id) => {}
             }
         }
     }

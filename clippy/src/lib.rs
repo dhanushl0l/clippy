@@ -320,6 +320,12 @@ impl UserData {
             .unwrap_or(&"".to_string())
             .clone()
     }
+
+    pub fn remove(&self, id: &str) {
+        if let Ok(mut va) = self.data.lock() {
+            va.remove(id);
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
@@ -492,28 +498,33 @@ pub enum DataState {
     SentButNotAcked,
 }
 
-#[derive(Debug)]
-pub struct Value {
-    path: PathBuf,
-    typ: String,
-    pub is_it_edit: Option<String>,
-    state: DataState,
-}
+// #[derive(Debug)]
+// pub struct Value {
+//     path: PathBuf,
+//     typ: String,
+//     pub edit: Option<Edit>,
+//     state: DataState,
+// }
 
-impl Value {
-    fn new(path: PathBuf, typ: String, is_it_edit: Option<String>) -> Self {
-        Self {
-            path,
-            typ,
-            is_it_edit,
-            state: DataState::WaitingToSend,
-        }
-    }
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub enum Edit {
+    New {
+        path: PathBuf,
+        typ: String,
+    },
+    Edit {
+        path: PathBuf,
+        typ: String,
+        new_id: String,
+    },
+    Remove {
+        id: String,
+    },
 }
 
 #[derive(Debug)]
 pub struct Pending {
-    data: BTreeMap<String, Value>,
+    data: BTreeMap<String, (Edit, DataState)>,
     notify: Arc<Notify>,
 }
 
@@ -523,6 +534,10 @@ impl Pending {
             data: BTreeMap::new(),
             notify: Arc::new(Notify::new()),
         }
+    }
+
+    pub fn add(&mut self, id: String, edit: Edit, state: DataState) {
+        self.data.insert(id, (edit, state));
     }
 
     pub fn build() -> Result<Self, io::Error> {
@@ -537,7 +552,16 @@ impl Pending {
             } else {
                 continue;
             };
-            temp.insert(file_name, Value::new(path, data.typ, None));
+            temp.insert(
+                file_name,
+                (
+                    Edit::New {
+                        path,
+                        typ: data.typ,
+                    },
+                    DataState::WaitingToSend,
+                ),
+            );
         }
         Ok(Self {
             data: temp,
@@ -550,16 +574,16 @@ impl Pending {
     }
 
     // here the bool mean is it the final data if true the server sends the data to all the connected clients immediately
-    pub async fn next(&self) -> Option<(bool, String, &Value)> {
+    pub async fn next(&self) -> Option<(bool, String, &Edit)> {
         loop {
-            let mut found: Option<(&String, &Value)> = None;
+            let mut found: Option<(&String, &Edit)> = None;
             let mut count = 0;
 
             for (k, v) in &self.data {
-                if v.state == DataState::WaitingToSend {
+                if v.1 == DataState::WaitingToSend {
                     count += 1;
                     if found.is_none() {
-                        found = Some((k, v));
+                        found = Some((k, &v.0));
                     } else {
                         break;
                     }
@@ -575,21 +599,15 @@ impl Pending {
         }
     }
 
-    pub fn add(&mut self, path: String, id: String, typ: String, is_it_edit: Option<String>) {
-        self.notify.notify_one();
-        self.data
-            .insert(id, Value::new(PathBuf::from(path), typ, is_it_edit));
-    }
-
     pub fn is_empty(&self) -> bool {
         self.data.is_empty()
     }
 
-    pub fn get(&self, id: &str) -> Option<&Value> {
+    pub fn get(&self, id: &str) -> Option<&(Edit, DataState)> {
         self.data.get(id)
     }
 
-    pub fn remove(&mut self, id: &str) -> Option<Value> {
+    pub fn remove(&mut self, id: &str) -> Option<(Edit, DataState)> {
         self.data.remove(id)
     }
 
@@ -601,10 +619,10 @@ impl Pending {
         self.data.remove(id);
     }
 
-    pub fn get_pending(&self) -> Vec<(&String, &Value)> {
+    pub fn get_pending(&self) -> Vec<(&String, &Edit)> {
         let mut temp = Vec::new();
         for (id, value) in self.data.iter() {
-            temp.push((id, value));
+            temp.push((id, &value.0));
         }
         temp
     }
@@ -612,7 +630,7 @@ impl Pending {
     pub fn change_state(&mut self, id: &str) {
         let temp = self.data.get_mut(id);
         if let Some(val) = temp {
-            val.state = DataState::SentButNotAcked;
+            val.1 = DataState::SentButNotAcked;
         }
     }
 }
@@ -668,6 +686,7 @@ pub enum ResopnseClientToServer {
         last: bool,
         is_it_edit: Option<String>,
     },
+    Remove(String),
 }
 
 pub trait ToByteString: Serialize {
@@ -687,11 +706,11 @@ pub enum ResopnseServerToClient {
         is_it_last: bool,
         new_id: String,
     },
-    Edit(String),
     Success {
         old: String,
-        new: String,
+        new: Option<String>,
     },
+    Remove(String),
     Updated,
     Outdated,
 }
@@ -709,6 +728,7 @@ pub enum MessageIPC {
     New(Data),
     Edit(EditData),
     UpdateSettings(UserSettings),
+    Delete(PathBuf, String),
     Updated,
     Close,
 }
@@ -738,6 +758,7 @@ pub enum MessageChannel {
         time: String,
         typ: String,
     },
+    Remove(String),
     SettingsChanged,
 }
 
