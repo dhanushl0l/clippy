@@ -1,12 +1,11 @@
 #[cfg(target_family = "unix")]
 pub mod ipc {
     use crate::write_clipboard::copy_to_unix;
-    use crate::{GUI_BIN, MessageChannel, MessageIPC, get_image_path, get_path_local};
+    use crate::{GUI_BIN, MessageChannel, MessageIPC, get_image_path, get_path_local, log_error};
     use log::{debug, error, warn};
     use serde_json::Deserializer;
     use std::io::{BufReader, Read};
     use std::os::fd::{FromRawFd, IntoRawFd};
-    use std::path;
     use std::process::{Command, Stdio};
     use std::{env, fs, io::Write, process};
     use std::{
@@ -87,10 +86,10 @@ pub mod ipc {
                     MessageIPC::Delete(path, id) => {
                         let img_path = get_image_path(&path);
                         if let Some(path) = img_path {
-                            fs::remove_file(path);
+                            log_error!(fs::remove_file(path));
                         }
-                        fs::remove_file(path);
-                        tx.try_send(MessageChannel::Remove(id));
+                        log_error!(fs::remove_file(path));
+                        log_error!(tx.try_send(MessageChannel::Remove(id)));
                     }
                     MessageIPC::Close => {
                         break;

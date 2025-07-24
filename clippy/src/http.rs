@@ -7,13 +7,13 @@ use std::{error::Error, process, sync::Mutex, thread, time::Duration};
 use tokio::{fs::File, io::AsyncReadExt, sync::mpsc::Receiver};
 
 #[cfg(debug_assertions)]
-pub const SERVER: &str = "http://192.168.1.175:7777";
+pub const SERVER: &str = "http://127.0.0.1:7777";
 
 #[cfg(not(debug_assertions))]
 pub const SERVER: &str = "https://clippy.dhanu.cloud";
 
 #[cfg(debug_assertions)]
-pub const SERVER_WS: &str = "ws://192.168.1.175:7777/connect";
+pub const SERVER_WS: &str = "ws://127.0.0.1:7777/connect";
 
 #[cfg(not(debug_assertions))]
 pub const SERVER_WS: &str = "wss://clippy.dhanu.cloud/connect";
@@ -94,7 +94,11 @@ pub async fn get_token_serv(user: &UserCred, client: &Client) -> Result<(), Box<
     }
 }
 
-pub async fn health(client: &Client, rx: &mut Receiver<MessageChannel>, pending: &mut Pending) {
+pub async fn health(
+    client: &Client,
+    rx: &mut Receiver<MessageChannel>,
+    pending: &mut Pending,
+) -> bool {
     let mut log = true;
     loop {
         let response = client
@@ -107,7 +111,7 @@ pub async fn health(client: &Client, rx: &mut Receiver<MessageChannel>, pending:
                 if response.status().is_success() && response.status().as_u16() == 200 {
                     if let Ok(text) = response.text().await {
                         if text == "SERVER_ACTIVE" {
-                            break;
+                            break false;
                         }
                     } else {
                         warn!("Server is out");
@@ -122,40 +126,6 @@ pub async fn health(client: &Client, rx: &mut Receiver<MessageChannel>, pending:
                 }
             }
             Err(err) => {
-                while let Ok(val) = rx.try_recv() {
-                    match val {
-                        MessageChannel::New { path, time, typ } => {
-                            pending.add(
-                                time,
-                                crate::Edit::New {
-                                    path: path.into(),
-                                    typ,
-                                },
-                                crate::DataState::WaitingToSend,
-                            );
-                        }
-                        MessageChannel::Edit {
-                            old_id,
-                            time,
-                            typ,
-                            path,
-                        } => {
-                            pending.add(
-                                old_id,
-                                crate::Edit::Edit {
-                                    path: path.into(),
-                                    typ,
-                                    new_id: time,
-                                },
-                                crate::DataState::WaitingToSend,
-                            );
-                        }
-                        MessageChannel::SettingsChanged => {
-                            unimplemented!("to do")
-                        }
-                        MessageChannel::Remove(id) => {}
-                    }
-                }
                 debug!("ubale to connect :{:?}|{}", client, err);
                 thread::sleep(time::Duration::from_secs(5));
             }
@@ -191,7 +161,9 @@ pub async fn health(client: &Client, rx: &mut Receiver<MessageChannel>, pending:
                 MessageChannel::SettingsChanged => {
                     unimplemented!("to do")
                 }
-                MessageChannel::Remove(id) => {}
+                MessageChannel::Remove(id) => {
+                    pending.add(id, crate::Edit::Remove, crate::DataState::WaitingToSend);
+                }
             }
         }
     }

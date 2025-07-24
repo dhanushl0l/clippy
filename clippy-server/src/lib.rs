@@ -4,7 +4,7 @@ use actix_web::{HttpResponse, rt, web};
 use actix_ws::{AggregatedMessageStream, Session};
 use base64::{Engine, engine::general_purpose};
 use chrono::{Duration, Utc};
-use clippy::{Edit, LoginUserCred, NewUserOtp};
+use clippy::{Edit, EditState, LoginUserCred, NewUserOtp};
 use futures_util::StreamExt;
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use log::{debug, error};
@@ -15,6 +15,7 @@ use sha2::{Digest, Sha256};
 use sqlx::prelude::FromRow;
 use std::{
     collections::{BTreeSet, HashMap, hash_map::Entry},
+    error::Error,
     fs::{self},
     io::{self, Write},
     path::PathBuf,
@@ -38,7 +39,7 @@ pub struct UserState {
 #[derive(Debug, Clone)]
 pub struct User {
     state: BTreeSet<String>,
-    edits: Vec<Edit>,
+    edits: Vec<EditState>,
 }
 
 impl UserState {
@@ -48,13 +49,13 @@ impl UserState {
         }
     }
 
-    pub fn add_edit(&self, username: &str, edit: Edit) -> Result<(), String> {
+    pub fn remove_and_add_edit(&self, username: &str, edit: EditState) -> Result<(), String> {
         let mut map = self.data.lock().map_err(|_| "Mutex poisoned")?;
         let user = map
             .get_mut(username)
             .ok_or("unable to identify user".to_string())?;
         match &edit {
-            Edit::Remove { id } => {
+            EditState::Remove(id) => {
                 if user.state.remove(id) {
                     match remove_db_file(username, id) {
                         Ok(_) => (),
@@ -186,19 +187,19 @@ impl UserState {
         Some(temp)
     }
 
-    // pub fn remove(&self, username: &str, id: &str) -> Result<(), Box<dyn Error>> {
-    //     let mut map = self.data.lock().or_else(|_| Err("Unable to lock cred"))?;
-    //     let tree = map
-    //         .get_mut(username)
-    //         .ok_or_else(|| "Unable to identify user")?;
-    //     if tree.state.remove(id) {
-    //         match remove_db_file(username, id) {
-    //             Ok(_) => (),
-    //             Err(err) => debug!("{}", err),
-    //         };
-    //     }
-    //     Ok(())
-    // }
+    pub fn remove(&self, username: &str, id: &str) -> Result<(), Box<dyn Error>> {
+        let mut map = self.data.lock().or_else(|_| Err("Unable to lock cred"))?;
+        let tree = map
+            .get_mut(username)
+            .ok_or_else(|| "Unable to identify user")?;
+        if tree.state.remove(id) {
+            match remove_db_file(username, id) {
+                Ok(_) => (),
+                Err(err) => debug!("{}", err),
+            };
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone)]

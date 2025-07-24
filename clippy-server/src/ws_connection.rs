@@ -8,7 +8,7 @@ use std::{
 use actix_web::web::{self, Bytes};
 use actix_ws::{AggregatedMessage, AggregatedMessageStream, Session};
 use chrono::Utc;
-use clippy::{Edit, ResopnseClientToServer, ResopnseServerToClient, ToByteString};
+use clippy::{Edit, EditState, ResopnseClientToServer, ResopnseServerToClient, ToByteString};
 use futures_util::StreamExt;
 use log::{debug, error};
 use tokio::{
@@ -84,7 +84,10 @@ pub async fn ws_connection(
                                     }
                                     ResopnseClientToServer::Data{data,id,last,is_it_edit} => {
                                         handle_bin(&user,&state,&tx,&mut session,data,id,last,&mut old,is_it_edit).await;
-                                    }
+                                    },
+                                    ResopnseClientToServer::Remove(id) => {
+                                        state.remove_and_add_edit(&user, clippy::EditState::Remove(id));
+                                    },
                                     _ => {}
                                 }
                             }
@@ -189,7 +192,9 @@ async fn handle_bin(
     debug!("Saved file: {id}");
     if let Some(edit) = is_it_edit {
         *old = MessageMPC::Remove(edit.clone());
-        state.add_edit(&user, Edit::Remove { id: edit }).unwrap();
+        state
+            .remove_and_add_edit(&user, EditState::Remove(id.clone()))
+            .unwrap();
         if let Err(e) = tx.send(old.clone()) {
             error!("error sending state: {}", e);
         };

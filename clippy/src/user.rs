@@ -1,11 +1,11 @@
 use crate::{
-    Data, Edit, MessageChannel, ResopnseServerToClient, ToByteString, get_image_path, get_path,
-    log_error,
+    Data, Edit, MessageChannel, ResopnseServerToClient, ToByteString, log_error,
+    rewrite_pending_to_data,
 };
 use crate::{
     MessageType, Pending, ResopnseClientToServer, UserData, UserSettings,
     http::{SERVER_WS, get_token, get_token_serv, health},
-    remove, set_global_update_bool,
+    set_global_update_bool,
 };
 use actix_codec::Framed;
 use actix_codec::{AsyncRead, AsyncWrite};
@@ -20,7 +20,6 @@ use futures_util::{SinkExt, StreamExt};
 use log::{debug, error, info};
 use reqwest::{self, Client};
 use std::{error::Error, sync::Arc, time::Duration};
-use tokio::fs;
 use tokio::{
     fs::File,
     io::AsyncReadExt,
@@ -229,7 +228,13 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
                     pending.pop(&id);
                 }
             },
-            Edit::Remove { id } => {}
+            Edit::Remove => {
+                let buffer = ResopnseClientToServer::Remove(id.clone());
+                if ws.send(ws::Message::Text(buffer.to_bytestring().unwrap())).await.is_err() {
+                    return Err("Unable to send data to server".into());
+                }
+                pending.change_state(&id)
+            }
         }
                 }
 
@@ -248,7 +253,7 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
                         break Ok(());
                     },
                     MessageChannel::Remove(id)  => {
-                        pending.add(id.clone(), Edit::Remove { id }, crate::DataState::WaitingToSend);
+                        pending.add(id.clone(), Edit::Remove, crate::DataState::WaitingToSend);
                     }
             }
                 }
@@ -268,7 +273,7 @@ async fn process_text<T: AsyncRead + AsyncWrite + Unpin + 'static>(
     let state: ResopnseServerToClient = serde_json::from_slice(&bin).unwrap();
     match state {
         ResopnseServerToClient::Success { old, new } => {
-            let (edit, state) = match pending.remove(&old) {
+            let (edit, _state) = match pending.remove(&old) {
                 Some(v) => v,
                 None => {
                     debug!("Error removing pending data");
@@ -279,14 +284,26 @@ async fn process_text<T: AsyncRead + AsyncWrite + Unpin + 'static>(
 
             match edit {
                 Edit::New { path, typ } => {
-                    remove(path, typ, &new.clone().unwrap(), usersettings.store_image);
+                    rewrite_pending_to_data(
+                        path,
+                        typ,
+                        &new.clone().unwrap(),
+                        usersettings.store_image,
+                    );
                     user_data.add(new.unwrap(), usersettings.max_clipboard);
                 }
                 Edit::Edit { path, typ, new_id } => {
-                    remove(path, typ, &new.clone().unwrap(), usersettings.store_image);
-                    user_data.add(new.unwrap(), usersettings.max_clipboard);
+                    rewrite_pending_to_data(
+                        path,
+                        typ,
+                        &new.clone().unwrap(),
+                        usersettings.store_image,
+                    );
+                    user_data.add(new_id, usersettings.max_clipboard);
                 }
-                Edit::Remove { id } => {}
+                Edit::Remove => {
+                    user_data.remove(&old);
+                }
             }
             info!("Surcess sending new data");
             set_global_update_bool(true);

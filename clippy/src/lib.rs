@@ -124,19 +124,16 @@ impl Data {
         log_error!(fs::remove_file(path));
         let path = get_path_image();
         let old_path = path.join(&format!("{}.png", old_id));
-        let new_path = path.join(&format!("{}.png", time));
         if old_path.is_file() {
+            let new_path = path.join(&format!("{}.png", time));
             fs::rename(&old_path, &new_path)?;
         }
         let path = get_path_pending();
         fs::create_dir_all(&path)?;
         let file_path = &path.join(&time);
-
         let json_data = serde_json::to_string(self)?;
-
         let mut file = File::create(file_path)?;
         file.write_all(json_data.as_bytes())?;
-
         match tx.try_send(MessageChannel::Edit {
             time,
             old_id,
@@ -326,6 +323,14 @@ impl UserData {
             va.remove(id);
         }
     }
+    pub fn remove_and_remove_file(&self, id: &str) -> Result<(), std::io::Error> {
+        if let Ok(mut va) = self.data.lock() {
+            va.remove(id);
+        }
+        let mut path = get_path();
+        path.push(id);
+        fs::remove_file(path)
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
@@ -498,13 +503,10 @@ pub enum DataState {
     SentButNotAcked,
 }
 
-// #[derive(Debug)]
-// pub struct Value {
-//     path: PathBuf,
-//     typ: String,
-//     pub edit: Option<Edit>,
-//     state: DataState,
-// }
+#[derive(Debug, Clone)]
+pub enum EditState {
+    Remove(String),
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum Edit {
@@ -512,14 +514,13 @@ pub enum Edit {
         path: PathBuf,
         typ: String,
     },
+    // edit represent add new entry and remove the old one
     Edit {
         path: PathBuf,
         typ: String,
         new_id: String,
     },
-    Remove {
-        id: String,
-    },
+    Remove,
 }
 
 #[derive(Debug)]
@@ -711,6 +712,10 @@ pub enum ResopnseServerToClient {
         new: Option<String>,
     },
     Remove(String),
+    Edit_Replace {
+        old_id: String,
+        new_id: String,
+    },
     Updated,
     Outdated,
 }
@@ -1122,7 +1127,7 @@ pub fn is_valid_otp(otp: &str) -> bool {
     }
 }
 
-pub fn remove(path: PathBuf, typ: String, time: &str, thumbnail: bool) {
+pub fn rewrite_pending_to_data(path: PathBuf, typ: String, time: &str, thumbnail: bool) {
     if let Err(err) = fs::rename(&path, get_path().join(&time)) {
         error!("{:?}", err)
     };

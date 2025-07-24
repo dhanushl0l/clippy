@@ -1,5 +1,4 @@
 use std::{
-    fs,
     path::PathBuf,
     sync::{Arc, Mutex},
 };
@@ -77,8 +76,14 @@ pub fn item_card(
 
                         let delete_response = ui.selectable_label(false, "🗑");
                         if delete_response.clicked() {
-                            log_error!(fs::remove_file(path));
-                            set_lock!(changed, true);
+                            if let Some(file_name) = path.file_name().and_then(|f| f.to_str()) {
+                                let msg = clippy::MessageIPC::Delete(
+                                    path.to_path_buf(),
+                                    file_name.to_string(),
+                                );
+                                log_error!(send_process(msg));
+                                set_lock!(changed, true);
+                            }
                         }
 
                         let view_all = ui.selectable_label(false, "💬");
