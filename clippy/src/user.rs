@@ -84,10 +84,6 @@ pub fn start_cloud(rx: &mut Receiver<MessageChannel>, mut usersettings: UserSett
                 debug!("{}", e);
             };
 
-            pending = Pending::build().unwrap_or_else(|e| {
-                error!("{}", e);
-                Pending::new()
-            });
             health(&client, rx, &mut pending).await;
         }
     });
@@ -302,7 +298,7 @@ async fn process_text<T: AsyncRead + AsyncWrite + Unpin + 'static>(
                     user_data.add(new_id, usersettings.max_clipboard);
                 }
                 Edit::Remove => {
-                    user_data.remove(&old);
+                    user_data.remove_and_remove_file(&old).unwrap();
                 }
             }
             info!("Surcess sending new data");
@@ -328,6 +324,20 @@ async fn process_text<T: AsyncRead + AsyncWrite + Unpin + 'static>(
             let data: Data = serde_json::from_str(&data).unwrap();
             log_error!(data.just_write_paste(&new_id, is_it_last, false));
             user_data.add(new_id, usersettings.max_clipboard);
+        }
+        ResopnseServerToClient::Remove(id) => {
+            user_data.remove_and_remove_file(&id).unwrap();
+        }
+        ResopnseServerToClient::Edit_Replace {
+            data,
+            is_it_last,
+            old_id,
+            new_id,
+        } => {
+            let data: Data = serde_json::from_str(&data).unwrap();
+            log_error!(data.just_write_paste(&new_id, is_it_last, false));
+            user_data.add(new_id, usersettings.max_clipboard);
+            user_data.remove_and_remove_file(&old_id).unwrap();
         }
         _ => {}
     }

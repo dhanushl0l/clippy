@@ -503,11 +503,6 @@ pub enum DataState {
     SentButNotAcked,
 }
 
-#[derive(Debug, Clone)]
-pub enum EditState {
-    Remove(String),
-}
-
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum Edit {
     New {
@@ -713,6 +708,8 @@ pub enum ResopnseServerToClient {
     },
     Remove(String),
     Edit_Replace {
+        data: String,
+        is_it_last: bool,
         old_id: String,
         new_id: String,
     },

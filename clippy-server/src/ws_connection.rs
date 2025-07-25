@@ -8,7 +8,7 @@ use std::{
 use actix_web::web::{self, Bytes};
 use actix_ws::{AggregatedMessage, AggregatedMessageStream, Session};
 use chrono::Utc;
-use clippy::{Edit, EditState, ResopnseClientToServer, ResopnseServerToClient, ToByteString};
+use clippy::{ResopnseClientToServer, ResopnseServerToClient, ToByteString};
 use futures_util::StreamExt;
 use log::{debug, error};
 use tokio::{
@@ -86,7 +86,8 @@ pub async fn ws_connection(
                                         handle_bin(&user,&state,&tx,&mut session,data,id,last,&mut old,is_it_edit).await;
                                     },
                                     ResopnseClientToServer::Remove(id) => {
-                                        state.remove_and_add_edit(&user, clippy::EditState::Remove(id));
+                                        state.remove_and_add_edit(&user, &id).unwrap();
+                                        old = MessageMPC::Remove(id);
                                     },
                                     _ => {}
                                 }
@@ -118,17 +119,17 @@ pub async fn ws_connection(
                         if val != old {
                             match val {
                                 MessageMPC::Remove(id) => {
-                                    let status = ResopnseServerToClient::Remove(id);
+                                    let status = ResopnseServerToClient::Remove(id.clone());
                                     if let Err(e) =  session.text(serde_json::to_string(&status).unwrap()).await {
                                         debug!("Unable to send response {}",e);
                                     };
-                                    let status = ResopnseServerToClient::Outdated;
+                                    let status = ResopnseServerToClient::Remove(id);
                                     if let Err(e) =  session.text(serde_json::to_string(&status).unwrap()).await {
                                         debug!("Unable to send response {}",e);
                                     };
                                 },
                                 MessageMPC::New(id) =>{
-                                    let path = format!("{}/{}/{}", DATABASE_PATH, &user, id);
+                                    let path = format!("{}/{}/{}", DATABASE_PATH, user, id);
                                     if let Ok(mut file) = File::open(path){
                                         let mut buf = String::new();
                                             if let Err(e) = file.read_to_string(&mut buf) {
@@ -141,6 +142,20 @@ pub async fn ws_connection(
                                         };
                                     }
                                 },
+                                MessageMPC::Edit{old_id, new_id} => {
+                                    let path = format!("{}/{}/{}", DATABASE_PATH, user, new_id);
+                                    if let Ok(mut file) = File::open(path){
+                                        let mut buf = String::new();
+                                            if let Err(e) = file.read_to_string(&mut buf) {
+                                                error!("{}", e);
+                                                continue;
+                                            };
+                                        let status = ResopnseServerToClient::Edit_Replace { data: buf, is_it_last: true, old_id, new_id };
+                                        if let Err(e) =  session.text(serde_json::to_string(&status).unwrap()).await {
+                                            debug!("Unable to send response {}",e);
+                                        };
+                                    }
+                                }
                                 MessageMPC::None => {}
                             }
 
@@ -183,7 +198,6 @@ async fn handle_bin(
         Ok(_) => {}
         Err(e) => error!("unable to create user dir {}", e),
     };
-
     let file_name = get_filename(Utc::now().timestamp(), path.clone());
     path.push(&file_name);
     let mut file = File::create(&path).unwrap();
@@ -191,10 +205,11 @@ async fn handle_bin(
     state.update(&user, &file_name);
     debug!("Saved file: {id}");
     if let Some(edit) = is_it_edit {
-        *old = MessageMPC::Remove(edit.clone());
-        state
-            .remove_and_add_edit(&user, EditState::Remove(id.clone()))
-            .unwrap();
+        *old = MessageMPC::Edit {
+            old_id: edit,
+            new_id: id.clone(),
+        };
+        state.remove_and_add_edit(&user, &id).unwrap();
         if let Err(e) = tx.send(old.clone()) {
             error!("error sending state: {}", e);
         };
