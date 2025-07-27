@@ -208,7 +208,7 @@ impl Data {
         let lines = data.lines().take(10).map(|line| {
             let line = line.trim();
             if line.len() > 100 {
-                format!("{}..", &line[..70])
+                format!("{}..", &line.chars().take(77).collect::<String>())
             } else {
                 line.trim().to_string()
             }
@@ -503,11 +503,6 @@ pub enum DataState {
     SentButNotAcked,
 }
 
-#[derive(Debug, Clone)]
-pub enum EditState {
-    Remove(String),
-}
-
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum Edit {
     New {
@@ -700,7 +695,7 @@ pub trait ToByteString: Serialize {
 impl ToByteString for ResopnseClientToServer {}
 impl ToByteString for ResopnseServerToClient {}
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum ResopnseServerToClient {
     Data {
         data: String,
@@ -712,7 +707,9 @@ pub enum ResopnseServerToClient {
         new: Option<String>,
     },
     Remove(String),
-    Edit_Replace {
+    EditReplace {
+        data: String,
+        is_it_last: bool,
         old_id: String,
         new_id: String,
     },

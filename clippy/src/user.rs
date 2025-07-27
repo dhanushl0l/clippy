@@ -84,30 +84,10 @@ pub fn start_cloud(rx: &mut Receiver<MessageChannel>, mut usersettings: UserSett
                 debug!("{}", e);
             };
 
-            pending = Pending::build().unwrap_or_else(|e| {
-                error!("{}", e);
-                Pending::new()
-            });
             health(&client, rx, &mut pending).await;
         }
     });
 }
-
-// fn past_last(last: &str, paste_on_click: bool) {
-//     let data = read_data_by_id(last);
-//     match data {
-//         Ok(val) => {
-//             #[cfg(not(target_os = "linux"))]
-//             write_clipboard::copy_to_clipboard(val).unwrap();
-
-//             #[cfg(target_os = "linux")]
-//             write_clipboard::copy_to_unix(val, paste_on_click).unwrap();
-//         }
-//         Err(err) => {
-//             warn!("{}", err)
-//         }
-//     }
-// }
 
 async fn check_uptodate_state<T: AsyncRead + AsyncWrite + Unpin + 'static>(
     ws: &mut Framed<T, Codec>,
@@ -302,7 +282,7 @@ async fn process_text<T: AsyncRead + AsyncWrite + Unpin + 'static>(
                     user_data.add(new_id, usersettings.max_clipboard);
                 }
                 Edit::Remove => {
-                    user_data.remove(&old);
+                    user_data.remove_and_remove_file(&old).unwrap();
                 }
             }
             info!("Surcess sending new data");
@@ -328,6 +308,20 @@ async fn process_text<T: AsyncRead + AsyncWrite + Unpin + 'static>(
             let data: Data = serde_json::from_str(&data).unwrap();
             log_error!(data.just_write_paste(&new_id, is_it_last, false));
             user_data.add(new_id, usersettings.max_clipboard);
+        }
+        ResopnseServerToClient::Remove(id) => {
+            log_error!(user_data.remove_and_remove_file(&id));
+        }
+        ResopnseServerToClient::EditReplace {
+            data,
+            is_it_last,
+            old_id,
+            new_id,
+        } => {
+            let data: Data = serde_json::from_str(&data).unwrap();
+            log_error!(data.just_write_paste(&new_id, is_it_last, false));
+            user_data.add(new_id, usersettings.max_clipboard);
+            log_error!(user_data.remove_and_remove_file(&old_id));
         }
         _ => {}
     }

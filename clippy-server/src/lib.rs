@@ -4,7 +4,7 @@ use actix_web::{HttpResponse, rt, web};
 use actix_ws::{AggregatedMessageStream, Session};
 use base64::{Engine, engine::general_purpose};
 use chrono::{Duration, Utc};
-use clippy::{Edit, EditState, LoginUserCred, NewUserOtp};
+use clippy::{LoginUserCred, NewUserOtp};
 use futures_util::StreamExt;
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use log::{debug, error};
@@ -39,7 +39,7 @@ pub struct UserState {
 #[derive(Debug, Clone)]
 pub struct User {
     state: BTreeSet<String>,
-    edits: Vec<EditState>,
+    remove: Vec<String>,
 }
 
 impl UserState {
@@ -49,23 +49,19 @@ impl UserState {
         }
     }
 
-    pub fn remove_and_add_edit(&self, username: &str, edit: EditState) -> Result<(), String> {
+    pub fn remove_and_add_edit(&self, username: &str, remove: &str) -> Result<(), String> {
         let mut map = self.data.lock().map_err(|_| "Mutex poisoned")?;
         let user = map
             .get_mut(username)
             .ok_or("unable to identify user".to_string())?;
-        match &edit {
-            EditState::Remove(id) => {
-                if user.state.remove(id) {
-                    match remove_db_file(username, id) {
-                        Ok(_) => (),
-                        Err(err) => debug!("{}", err),
-                    };
-                }
-            }
-            _ => {}
+
+        if user.state.remove(remove) {
+            match remove_db_file(username, remove) {
+                Ok(_) => (),
+                Err(err) => debug!("{}", err),
+            };
         }
-        user.edits.push(edit);
+        user.remove.push(remove.to_string());
         Ok(())
     }
 
@@ -79,7 +75,7 @@ impl UserState {
         if !map.contains_key(username) {
             let user = User {
                 state: BTreeSet::new(),
-                edits: Vec::new(),
+                remove: Vec::new(),
             };
             map.insert(username.to_string(), user);
             debug!("{:?}", self);
@@ -523,6 +519,7 @@ impl Room {
 #[derive(Debug, Clone, PartialEq)]
 pub enum MessageMPC {
     New(String),
+    Edit { old_id: String, new_id: String },
     Remove(String),
     None,
 }

@@ -58,7 +58,6 @@ pub fn push_to_clipboard_wl_command(data: Data) -> Result<(), String> {
     let data_u8 = if data.typ.starts_with("image/") {
         general_purpose::STANDARD.decode(&data.data).unwrap()
     } else {
-        println!("{}", data.typ);
         data.data.into_bytes()
     };
 

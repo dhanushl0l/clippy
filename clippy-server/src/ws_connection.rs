@@ -8,7 +8,7 @@ use std::{
 use actix_web::web::{self, Bytes};
 use actix_ws::{AggregatedMessage, AggregatedMessageStream, Session};
 use chrono::Utc;
-use clippy::{Edit, EditState, ResopnseClientToServer, ResopnseServerToClient, ToByteString};
+use clippy::{ResopnseClientToServer, ResopnseServerToClient, ToByteString};
 use futures_util::StreamExt;
 use log::{debug, error};
 use tokio::{
@@ -30,7 +30,7 @@ pub async fn ws_connection(
 ) {
     let mut last_pong = Instant::now();
     let mut rx = tx.subscribe();
-    let mut old = MessageMPC::None;
+    let mut old = true;
 
     loop {
         select! {
@@ -83,10 +83,12 @@ pub async fn ws_connection(
                                         };
                                     }
                                     ResopnseClientToServer::Data{data,id,last,is_it_edit} => {
-                                        handle_bin(&user,&state,&tx,&mut session,data,id,last,&mut old,is_it_edit).await;
+                                        handle_bin(&user, &state, &tx, &mut session, data, id, last, &mut old, is_it_edit).await;
                                     },
                                     ResopnseClientToServer::Remove(id) => {
-                                        state.remove_and_add_edit(&user, clippy::EditState::Remove(id));
+                                        state.remove_and_add_edit(&user, &id).unwrap();
+                                        old = false;
+                                        tx.send(MessageMPC::Remove(id)).unwrap();
                                     },
                                     _ => {}
                                 }
@@ -115,20 +117,16 @@ pub async fn ws_connection(
             result = rx.recv() => {
                 match result {
                     Ok(val) => {
-                        if val != old {
+                        if old {
                             match val {
                                 MessageMPC::Remove(id) => {
                                     let status = ResopnseServerToClient::Remove(id);
                                     if let Err(e) =  session.text(serde_json::to_string(&status).unwrap()).await {
                                         debug!("Unable to send response {}",e);
                                     };
-                                    let status = ResopnseServerToClient::Outdated;
-                                    if let Err(e) =  session.text(serde_json::to_string(&status).unwrap()).await {
-                                        debug!("Unable to send response {}",e);
-                                    };
                                 },
                                 MessageMPC::New(id) =>{
-                                    let path = format!("{}/{}/{}", DATABASE_PATH, &user, id);
+                                    let path = format!("{}/{}/{}", DATABASE_PATH, user, id);
                                     if let Ok(mut file) = File::open(path){
                                         let mut buf = String::new();
                                             if let Err(e) = file.read_to_string(&mut buf) {
@@ -141,10 +139,25 @@ pub async fn ws_connection(
                                         };
                                     }
                                 },
+                                MessageMPC::Edit{old_id, new_id} => {
+                                    let path = format!("{}/{}/{}", DATABASE_PATH, user, new_id);
+                                    if let Ok(mut file) = File::open(path){
+                                        let mut buf = String::new();
+                                            if let Err(e) = file.read_to_string(&mut buf) {
+                                                error!("{}", e);
+                                                continue;
+                                            };
+                                        let status = ResopnseServerToClient::EditReplace { data: buf, is_it_last: true, old_id, new_id };
+                                        if let Err(e) =  session.text(serde_json::to_string(&status).unwrap()).await {
+                                            debug!("Unable to send response {}",e);
+                                        };
+                                    }
+                                }
                                 MessageMPC::None => {}
                             }
 
                         }
+                        old = true;
                     }
                     Err(e) => {
                         error!("Broadcast receive error: {e}");
@@ -175,7 +188,7 @@ async fn handle_bin(
     data: String,
     id: String,
     last: bool,
-    old: &mut MessageMPC,
+    old: &mut bool,
     is_it_edit: Option<String>,
 ) {
     let mut path: PathBuf = PathBuf::new().join(format!("{}/{}/", DATABASE_PATH, user));
@@ -183,7 +196,6 @@ async fn handle_bin(
         Ok(_) => {}
         Err(e) => error!("unable to create user dir {}", e),
     };
-
     let file_name = get_filename(Utc::now().timestamp(), path.clone());
     path.push(&file_name);
     let mut file = File::create(&path).unwrap();
@@ -191,16 +203,18 @@ async fn handle_bin(
     state.update(&user, &file_name);
     debug!("Saved file: {id}");
     if let Some(edit) = is_it_edit {
-        *old = MessageMPC::Remove(edit.clone());
-        state
-            .remove_and_add_edit(&user, EditState::Remove(id.clone()))
-            .unwrap();
-        if let Err(e) = tx.send(old.clone()) {
+        *old = false;
+        let message = MessageMPC::Edit {
+            old_id: id.clone(),
+            new_id: file_name.clone(),
+        };
+        state.remove_and_add_edit(&user, &id).unwrap();
+        if let Err(e) = tx.send(message) {
             error!("error sending state: {}", e);
         };
     } else if last {
-        *old = MessageMPC::New(file_name.clone());
-        if let Err(e) = tx.send(old.clone()) {
+        *old = false;
+        if let Err(e) = tx.send(MessageMPC::New(file_name.clone())) {
             error!("error sending state: {}", e);
         };
     }
