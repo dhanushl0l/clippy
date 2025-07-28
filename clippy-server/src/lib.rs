@@ -166,11 +166,8 @@ impl UserState {
 
     pub fn get(&self, username: &str, id: &[String]) -> Option<Vec<(String, String)>> {
         let map = self.data.lock().unwrap();
-
         let tree = map.get(username)?;
-
         let mut temp = Vec::new();
-
         for i in tree.state.iter() {
             if !id.contains(i) {
                 temp.push((
@@ -181,6 +178,12 @@ impl UserState {
         }
 
         Some(temp)
+    }
+
+    pub fn get_remove(&self, username: &str) -> Vec<String> {
+        let map = self.data.lock().unwrap();
+        let tree = map.get(username).unwrap();
+        tree.remove.clone()
     }
 
     pub fn remove(&self, username: &str, id: &str) -> Result<(), Box<dyn Error>> {

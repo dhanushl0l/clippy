@@ -1,5 +1,5 @@
 use crate::ipc::ipc::send_process;
-use clippy::{Data, EditData, UserSettings, log_error, set_global_bool};
+use clippy::{Data, EditData, UserSettings, log_error};
 use clippy_gui::set_lock;
 use egui::{self, *};
 use log::error;
@@ -35,11 +35,9 @@ pub fn item_card_image(
 
             ui.vertical(|ui| {
                 if ui.add(egui::ImageButton::new(texture)).clicked() {
-                    set_global_bool(true);
-
                     log_error!(send_process(clippy::MessageIPC::Paste(
                         data.clone(),
-                        settings.paste_on_click
+                        settings.paste_on_click && settings.click_on_quit
                     )));
 
                     if settings.click_on_quit {

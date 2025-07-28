@@ -3,7 +3,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use clippy::{Data, EditData, UserSettings, log_error, set_global_bool};
+use clippy::{Data, EditData, UserSettings, log_error};
 use clippy_gui::set_lock;
 use egui::{self, *};
 use log::error;
@@ -32,7 +32,6 @@ pub fn item_card(
     frame
         .show(ui, |ui| {
             ui.set_max_height(100.0);
-
             if width >= 650.0 {
                 ui.set_width(600.0);
             }
@@ -45,13 +44,10 @@ pub fn item_card(
                     )
                     .clicked()
                 {
-                    set_global_bool(true);
-
                     log_error!(send_process(clippy::MessageIPC::Paste(
                         data.clone(),
-                        settings.paste_on_click
+                        settings.paste_on_click && settings.click_on_quit
                     )));
-
                     if settings.click_on_quit {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     }

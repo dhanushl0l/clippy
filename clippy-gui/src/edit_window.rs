@@ -67,7 +67,7 @@ impl Clipboard {
                             } else {
                                 log_error!(send_process(clippy::MessageIPC::New(Data::new(
                                     self.show_data_popup.1.to_string(),
-                                    "text/string".to_string(),
+                                    "text/plain;charset=utf-8".to_string(),
                                     "os".to_string(),
                                     true,
                                 ))));

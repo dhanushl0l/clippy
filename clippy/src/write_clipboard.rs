@@ -16,19 +16,9 @@ pub fn copy_to_unix(data: Data, paste_on_click: bool) -> Result<(), String> {
 }
 
 #[cfg(target_os = "linux")]
-fn copy_to_clipboard_wl(data: Data, paste_on_click: bool) -> Result<(), String> {
-    set_global_bool(true);
-    push_to_clipboard_wl(data, false, paste_on_click)
-}
-
-#[cfg(target_os = "linux")]
-pub fn push_to_clipboard_wl(
-    data: Data,
-    _forground: bool,
-    paste_on_click: bool,
-) -> Result<(), String> {
+pub fn copy_to_clipboard_wl(data: Data, paste_on_click: bool) -> Result<(), String> {
     use wayland_clipboard_listener::WlClipboardCopyStream;
-
+    set_global_bool(false);
     thread::spawn(move || {
         let context = if data.typ.starts_with("text") {
             data.data.into_bytes()
@@ -81,14 +71,7 @@ pub fn copy_to_clipboard(
     data: Data,
     paste_on_click: bool,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    set_global_bool(true);
-    push_to_clipboard(data, paste_on_click)
-}
-
-pub fn push_to_clipboard(
-    data: Data,
-    paste_on_click: bool,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
+    set_global_bool(false);
     let ctx = ClipboardContext::new()?;
 
     if data.typ.starts_with("image/") {

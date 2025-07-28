@@ -310,7 +310,10 @@ async fn process_text<T: AsyncRead + AsyncWrite + Unpin + 'static>(
             user_data.add(new_id, usersettings.max_clipboard);
         }
         ResopnseServerToClient::Remove(id) => {
-            log_error!(user_data.remove_and_remove_file(&id));
+            for id in id {
+                log_error!(user_data.remove_and_remove_file(&id));
+            }
+            set_global_update_bool(true)
         }
         ResopnseServerToClient::EditReplace {
             data,

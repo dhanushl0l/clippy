@@ -292,9 +292,11 @@ impl App for Clipboard {
                 loop {
                     thread::sleep(Duration::from_secs(1));
                     if get_global_update_bool() {
+                        while !ctxc.is_pointer_over_area() {
+                            thread::sleep(Duration::from_millis(500));
+                        }
                         if let Ok(mut va) = state.try_lock() {
                             *va = true;
-                        } else {
                         }
                         ctxc.request_repaint();
                     }

@@ -73,6 +73,10 @@ pub async fn ws_connection(
                                                         break;
                                                     };
                                                 }
+                                                let data = ResopnseServerToClient::Remove(state.get_remove(&user));
+                                                if let Err(e) = session.text(serde_json::to_string(&data).unwrap()).await{
+                                                    debug!("Unable to send response {}",e);
+                                                };
                                             },
                                             None =>  {
                                                 let status = ResopnseServerToClient::Updated;
@@ -120,7 +124,7 @@ pub async fn ws_connection(
                         if old {
                             match val {
                                 MessageMPC::Remove(id) => {
-                                    let status = ResopnseServerToClient::Remove(id);
+                                    let status = ResopnseServerToClient::Remove(vec![id]);
                                     if let Err(e) =  session.text(serde_json::to_string(&status).unwrap()).await {
                                         debug!("Unable to send response {}",e);
                                     };

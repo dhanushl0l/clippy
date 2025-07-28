@@ -30,7 +30,7 @@ pub fn read_wayland_clipboard(tx: &Sender<MessageChannel>) -> Result<(), std::io
     .map(|s| s.to_string())
     .collect();
 
-    set_global_bool(true);
+    set_global_bool(false);
 
     let mut stream = WlClipboardPasteStream::init(WlListenType::ListenOnCopy).unwrap();
     stream.set_priority(preferred_formats);
@@ -40,7 +40,7 @@ pub fn read_wayland_clipboard(tx: &Sender<MessageChannel>) -> Result<(), std::io
                 error!("{}", e);
             };
         } else {
-            set_global_bool(false);
+            set_global_bool(true);
         }
     }
     Ok(())
@@ -83,7 +83,7 @@ impl<'a> ClipboardHandler for Manager<'a> {
                 );
             }
         } else {
-            set_global_bool(false);
+            set_global_bool(true);
         }
     }
 }

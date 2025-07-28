@@ -1,7 +1,7 @@
 use log::error;
 use tokio::sync::mpsc::Receiver;
 
-use crate::{MessageChannel, Pending, UserData, UserSettings};
+use crate::{MessageChannel, Pending, UserData, UserSettings, log_error};
 
 pub fn start_local(rx: &mut Receiver<MessageChannel>, mut usersettings: UserSettings) {
     let pending = Pending::build().unwrap_or_else(|e| {
@@ -36,7 +36,9 @@ pub fn start_local(rx: &mut Receiver<MessageChannel>, mut usersettings: UserSett
                     usersettings = UserSettings::build_user().unwrap();
                     break;
                 }
-                MessageChannel::Remove(_id) => {}
+                MessageChannel::Remove(id) => {
+                    log_error!(user_data.remove_and_remove_file(&id));
+                }
             }
         }
     });

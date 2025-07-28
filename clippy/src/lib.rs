@@ -18,7 +18,7 @@ use std::collections::BTreeMap;
 use std::error::Error;
 use std::fs::create_dir;
 use std::io::{Read, Write};
-use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::{
     collections::BTreeSet,
@@ -36,7 +36,6 @@ use crate::write_clipboard::copy_to_unix;
 
 pub const APP_ID: &str = "org.clippy.clippy";
 pub const API_KEY: Option<&str> = option_env!("KEY");
-// pub static SETTINGS: Mutex<Option<UserSettings>> = Mutex::new(None);
 const IMAGE_DATA: &[u8] = include_bytes!("../../assets/gui_icons/image.png");
 #[cfg(debug_assertions)]
 const GUI_BIN: &str = "target/debug/clippy-gui";
@@ -44,6 +43,16 @@ const GUI_BIN: &str = "target/debug/clippy-gui";
 const GUI_BIN: &str = "clippy-gui";
 #[cfg(all(not(debug_assertions), not(target_family = "unix")))]
 const GUI_BIN: &str = "clippy-gui";
+
+static GLOBAL_BOOL: AtomicBool = AtomicBool::new(true);
+
+pub fn set_global_bool(value: bool) {
+    GLOBAL_BOOL.store(value, Ordering::SeqCst);
+}
+
+pub fn get_global_bool() -> bool {
+    GLOBAL_BOOL.load(Ordering::SeqCst)
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Data {
@@ -70,7 +79,6 @@ impl Data {
         let mut file = File::create(file_path)?;
         let json_data = serde_json::to_vec(self)?;
         file.write_all(&json_data)?;
-        set_global_update_bool(true);
         if self.typ.starts_with("image/") {
             save_image(&id, &general_purpose::STANDARD.decode(&self.data).unwrap())?;
         }
@@ -79,6 +87,7 @@ impl Data {
             copy_to_unix(self.clone(), paste)
                 .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
         }
+        set_global_update_bool(true);
         Ok(())
     }
 
@@ -96,8 +105,6 @@ impl Data {
         let mut file = File::create(file_path)?;
         file.write_all(&json_data)?;
 
-        set_global_update_bool(true);
-
         match tx.try_send(MessageChannel::New {
             path: file_path.to_str().unwrap().into(),
             typ: self.typ.clone(),
@@ -110,7 +117,7 @@ impl Data {
                 err
             ),
         }
-
+        set_global_update_bool(true);
         Ok(())
     }
 
@@ -147,7 +154,7 @@ impl Data {
                 err
             ),
         }
-
+        set_global_update_bool(true);
         Ok(())
     }
 
@@ -275,14 +282,15 @@ impl UserData {
                 let mut pined_path = get_path_pined();
                 for i in to_remove {
                     path.push(&i);
-                    let file = File::open(&path).unwrap();
-                    let clipboard: Data = serde_json::from_reader(file).unwrap();
-                    if clipboard.pined {
-                        pined_path.push(&i);
-                        fs::rename(&path, &pined_path).unwrap();
-                        pined_path.pop();
-                    } else {
-                        log_error!(fs::remove_file(&path));
+                    if let Ok(file) = File::open(&path) {
+                        let clipboard: Data = serde_json::from_reader(file).unwrap();
+                        if clipboard.pined {
+                            pined_path.push(&i);
+                            fs::rename(&path, &pined_path).unwrap();
+                            pined_path.pop();
+                        } else {
+                            log_error!(fs::remove_file(&path));
+                        }
                     }
                     path.pop();
                     data.remove(&i);
@@ -329,7 +337,7 @@ impl UserData {
         }
         let mut path = get_path();
         path.push(id);
-        fs::remove_file(path)
+        Ok(fs::remove_file(path)?)
     }
 }
 
@@ -706,7 +714,7 @@ pub enum ResopnseServerToClient {
         old: String,
         new: Option<String>,
     },
-    Remove(String),
+    Remove(Vec<String>),
     EditReplace {
         data: String,
         is_it_last: bool,
@@ -982,33 +990,6 @@ pub fn get_image_path(id: &PathBuf) -> Option<PathBuf> {
     Some(path)
 }
 
-pub fn set_global_bool(value: bool) {
-    let path = get_path_local();
-    if let Err(e) = fs::create_dir_all(path.parent().unwrap()) {
-        error!("Failed to create directories: {}", e);
-        return;
-    }
-
-    let path = Path::new(&path).join("OK");
-
-    if value {
-        if let Err(e) = fs::File::create(&path) {
-            error!("Failed to create state file: {}", e);
-        }
-    } else {
-        if let Err(e) = fs::remove_file(&path) {
-            error!("Failed to delete state file: {}", e);
-        }
-    }
-}
-
-// This tell the gui to refresh the db
-pub fn get_global_bool() -> bool {
-    let path = get_path_local();
-    let path = Path::new(&path).join("OK");
-    !path.exists()
-}
-
 pub fn set_global_update_bool(value: bool) {
     let mut path = get_path_local();
     if let Err(e) = fs::create_dir_all(path.parent().unwrap()) {
@@ -1036,12 +1017,11 @@ pub fn get_global_update_bool() -> bool {
 
 #[cfg(target_os = "linux")]
 pub fn copy_to_linux(data: Data, paste_on_click: bool) {
-    use write_clipboard::{push_to_clipboard, push_to_clipboard_wl};
-
+    use crate::write_clipboard::{copy_to_clipboard, copy_to_clipboard_wl};
     if std::env::var("WAYLAND_DISPLAY").is_ok() {
-        log_error!(push_to_clipboard_wl(data, false, paste_on_click));
+        log_error!(copy_to_clipboard_wl(data, paste_on_click));
     } else if std::env::var("DISPLAY").is_ok() {
-        log_error!(push_to_clipboard(data, paste_on_click));
+        log_error!(copy_to_clipboard(data, paste_on_click));
     }
 }
 
