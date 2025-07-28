@@ -511,9 +511,8 @@ impl Room {
         room: web::Data<RoomManager>,
     ) {
         let val = self.clients.get_mut();
-        let pos = val.len();
         val.push(rt::spawn(ws_connection(
-            session, msg_stream, tx, state, user, room, pos,
+            session, msg_stream, tx, state, user, room,
         )));
         debug!("total threads {}", val.len());
     }

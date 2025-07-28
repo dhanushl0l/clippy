@@ -26,7 +26,6 @@ pub async fn ws_connection(
     state: actix_web::web::Data<UserState>,
     user: String,
     room: web::Data<RoomManager>,
-    pos: usize,
 ) {
     let mut last_pong = Instant::now();
     let mut rx = tx.subscribe();
@@ -180,7 +179,6 @@ pub async fn ws_connection(
             }
         }
     }
-    room.remove(user, pos).await;
     error!("WebSocket session closed");
 }
 

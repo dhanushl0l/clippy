@@ -48,31 +48,35 @@ pub fn item_card_image(
                 ui.vertical_centered(|ui| {
                     ui.separator();
                     ui.horizontal(|ui| {
-                        let pin_response = ui.selectable_label(*pinned, "📌");
-                        if pin_response.clicked() {
+                        if *sync && settings.get_sync().is_none() || !*sync {
+                            let pin_response = ui.selectable_label(*pinned, "📌");
                             if pin_response.clicked() {
-                                data.change_pined();
-                                if let Some(file_name) = path.file_name().and_then(|f| f.to_str()) {
-                                    let msg = clippy::MessageIPC::Edit(EditData::new(
-                                        data.clone(),
-                                        file_name.to_string(),
-                                        path.to_path_buf(),
-                                    ));
-                                    log_error!(send_process(msg));
+                                if pin_response.clicked() {
+                                    data.change_pined();
+                                    if let Some(file_name) =
+                                        path.file_name().and_then(|f| f.to_str())
+                                    {
+                                        let msg = clippy::MessageIPC::Edit(EditData::new(
+                                            data.clone(),
+                                            file_name.to_string(),
+                                            path.to_path_buf(),
+                                        ));
+                                        log_error!(send_process(msg));
+                                    }
+                                    set_lock!(changed, true);
                                 }
-                                set_lock!(changed, true);
                             }
-                        }
 
-                        let delete_response = ui.selectable_label(false, "🗑");
-                        if delete_response.clicked() {
-                            if let Some(file_name) = path.file_name().and_then(|f| f.to_str()) {
-                                let msg = clippy::MessageIPC::Delete(
-                                    path.to_path_buf(),
-                                    file_name.to_string(),
-                                );
-                                log_error!(send_process(msg));
-                                set_lock!(changed, true);
+                            let delete_response = ui.selectable_label(false, "🗑");
+                            if delete_response.clicked() {
+                                if let Some(file_name) = path.file_name().and_then(|f| f.to_str()) {
+                                    let msg = clippy::MessageIPC::Delete(
+                                        path.to_path_buf(),
+                                        file_name.to_string(),
+                                    );
+                                    log_error!(send_process(msg));
+                                    set_lock!(changed, true);
+                                }
                             }
                         }
 
