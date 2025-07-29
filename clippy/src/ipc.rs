@@ -150,16 +150,19 @@ pub mod ipc {
     use interprocess::os::windows::named_pipe::{
         DuplexPipeStream, PipeListener, PipeListenerOptions, pipe_mode,
     };
-    use log::{debug, error};
+    use log::{debug, error, warn};
     use rand::{Rng, distr::Alphanumeric};
     use std::{
-        env,
-        io::{BufReader, Read, Write},
+        env, fs,
+        io::{BufReader, Error, Read, Write},
         process::{self, Stdio},
     };
     use tokio::sync::mpsc::Sender;
 
-    use crate::{GUI_BIN, MessageChannel, MessageIPC, write_clipboard::copy_to_clipboard};
+    use crate::{
+        GUI_BIN, MessageChannel, MessageIPC, get_image_path, log_error,
+        write_clipboard::copy_to_clipboard,
+    };
     use std::{io, process::Command};
     type PipelistenerTyp = PipeListener<
         interprocess::os::windows::named_pipe::pipe_mode::Bytes,
@@ -199,7 +202,7 @@ pub mod ipc {
             .take(16)
             .map(char::from)
             .collect();
-        let path = format!(r"\\.\pipe\clip-{}", random_str);
+        let path = format!(r"\\.\pipe\{}", random_str);
 
         let listener: PipelistenerTyp = PipeListenerOptions::new()
             .path(path.clone())
@@ -218,15 +221,16 @@ pub mod ipc {
                 let msg = serde_json::from_str(&buf);
                 if let Ok(val) = msg {
                     match val {
-                        MessageIPC::Paste(data) => {
-                            if let Err(e) = copy_to_clipboard(data) {
+                        MessageIPC::Paste(data, paste_on_click) => {
+                            if let Err(e) = copy_to_clipboard(data, paste_on_click) {
                                 error!("Unable to write clipboard");
                                 debug!("{}", e);
                             };
                         }
                         MessageIPC::Updated => {
                             if let Err(e) = tx.try_send(MessageChannel::SettingsChanged) {
-                                error!("{e}");
+                                error!("Unable to send modification");
+                                debug!("{}", e);
                             };
                         }
                         MessageIPC::New(data) => {
@@ -235,11 +239,24 @@ pub mod ipc {
                         }
                         MessageIPC::UpdateSettings(settings) => {
                             settings.write_local().unwrap();
+                            if let Err(e) = tx.try_send(MessageChannel::SettingsChanged) {
+                                error!("Unable to store Settings");
+                                debug!("{}", e);
+                            };
                         }
                         MessageIPC::Edit(data) => {
                             let time = chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
                             let id = data.id;
-                            data.data.re_write_json(tx, time, id).unwrap();
+                            let path = data.path;
+                            data.data.re_write_json(tx, time, id, path).unwrap();
+                        }
+                        MessageIPC::Delete(path, id) => {
+                            let img_path = get_image_path(&path);
+                            if let Some(path) = img_path {
+                                log_error!(fs::remove_file(path));
+                            }
+                            log_error!(fs::remove_file(path));
+                            log_error!(tx.try_send(MessageChannel::Remove(id)));
                         }
                         MessageIPC::Close => {
                             break;
@@ -254,7 +271,7 @@ pub mod ipc {
         Ok(process.kill()?)
     }
 
-    pub fn ipc_check(channel: PipelistenerTyp, rx: &Sender<MessageChannel>) {
+    pub fn ipc_check(channel: PipelistenerTyp, rx: &Sender<MessageChannel>) -> Result<(), Error> {
         for conn in channel.incoming() {
             if let Ok(val) = conn {
                 let mut reader = BufReader::new(val);
@@ -274,5 +291,6 @@ pub mod ipc {
                 }
             }
         }
+        Ok(())
     }
 }

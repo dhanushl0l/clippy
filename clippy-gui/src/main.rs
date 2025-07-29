@@ -1052,7 +1052,7 @@ impl App for Clipboard {
                                    });
 
                             let note = "Clicking any clipboard item will copy \
-                     its content and close the app.";
+                     its content and close the app."; 
                             ui.horizontal(|ui| {
                                 ui.label("Click to Copy and Quit").on_hover_text(note);
                                 ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
