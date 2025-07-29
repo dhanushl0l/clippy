@@ -105,7 +105,7 @@ fn main() {
                     if usersettings.disable_sync {
                         start_local(&mut rx, usersettings);
                     } else {
-                        if let Some(_sync) = usersettings.get_sync() {
+                        if usersettings.get_sync().is_some() {
                             start_cloud(&mut rx, usersettings);
                         } else {
                             start_local(&mut rx, usersettings);
@@ -125,7 +125,10 @@ fn main() {
     {
         let tx_c = tx.clone();
         thread::spawn(move || {
-            ipc_check(channel, &tx_c);
+            if let Err(e) = ipc_check(channel, &tx_c) {
+                error!("{}", e);
+                process::exit(1)
+            }
         });
     }
 

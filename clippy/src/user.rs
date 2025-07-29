@@ -304,11 +304,16 @@ async fn process_text<T: AsyncRead + AsyncWrite + Unpin + 'static>(
             data,
             is_it_last,
             new_id,
-        } => {
-            let data: Data = serde_json::from_str(&data).unwrap();
-            log_error!(data.just_write_paste(&new_id, is_it_last, false));
-            user_data.add(new_id, usersettings.max_clipboard);
-        }
+        } => match serde_json::from_str::<Data>(&data) {
+            Ok(data) => {
+                log_error!(data.just_write_paste(&new_id, is_it_last, false));
+                user_data.add(new_id, usersettings.max_clipboard);
+            }
+            Err(e) => {
+                error!("Unable to process the data");
+                debug!("{}", e)
+            }
+        },
         ResopnseServerToClient::Remove(id) => {
             for id in id {
                 log_error!(user_data.remove_and_remove_file(&id));
@@ -320,12 +325,17 @@ async fn process_text<T: AsyncRead + AsyncWrite + Unpin + 'static>(
             is_it_last,
             old_id,
             new_id,
-        } => {
-            let data: Data = serde_json::from_str(&data).unwrap();
-            log_error!(data.just_write_paste(&new_id, is_it_last, false));
-            user_data.add(new_id, usersettings.max_clipboard);
-            log_error!(user_data.remove_and_remove_file(&old_id));
-        }
+        } => match serde_json::from_str::<Data>(&data) {
+            Ok(data) => {
+                log_error!(data.just_write_paste(&new_id, is_it_last, false));
+                user_data.add(new_id, usersettings.max_clipboard);
+                log_error!(user_data.remove_and_remove_file(&old_id));
+            }
+            Err(e) => {
+                error!("Unable to process the data");
+                debug!("{}", e)
+            }
+        },
         _ => {}
     }
     *last_pong = Instant::now();

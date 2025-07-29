@@ -4,9 +4,11 @@ pub mod ipc {
     use crate::{GUI_BIN, MessageChannel, MessageIPC, get_image_path, get_path_local, log_error};
     use log::{debug, error, warn};
     use serde_json::Deserializer;
-    use std::io::{BufReader, Read};
+    use std::io::{BufReader, Error, Read};
     use std::os::fd::{FromRawFd, IntoRawFd};
     use std::process::{Command, Stdio};
+    use std::sync::{Arc, Mutex};
+    use std::thread;
     use std::{env, fs, io::Write, process};
     use std::{
         io,
@@ -104,22 +106,42 @@ pub mod ipc {
         Ok(process.kill()?)
     }
 
-    pub fn ipc_check(channel: UnixListener, rx: &Sender<MessageChannel>) {
+    pub fn ipc_check(channel: UnixListener, rx: &Sender<MessageChannel>) -> Result<(), Error> {
         let channel = channel;
+        let is_it_new = Arc::new(Mutex::new(None));
         for i in channel.incoming() {
             if let Ok(mut val) = i {
                 let mut buf = String::new();
-                val.read_to_string(&mut buf).unwrap();
-                match serde_json::from_str(&buf).unwrap() {
+                val.read_to_string(&mut buf)?;
+                match serde_json::from_str(&buf)? {
                     MessageIPC::OpentGUI => {
-                        if let Err(e) = start_gui(rx) {
-                            error!("{}", e);
-                        };
+                        let rx = rx.clone();
+                        if let Ok(mut guard) = is_it_new.lock() {
+                            if guard.is_none() {
+                                let is_it_new_clone = Arc::clone(&is_it_new);
+                                let rx_clone = rx.clone();
+
+                                let handle = thread::spawn(move || {
+                                    if let Err(e) = start_gui(&rx_clone) {
+                                        error!("Error opening clippy-gui: {}", e);
+                                    }
+
+                                    if let Ok(mut inner) = is_it_new_clone.lock() {
+                                        *inner = None;
+                                    }
+                                });
+
+                                *guard = Some(handle);
+                            }
+                        }
                     }
                     _ => {}
                 }
+            } else {
+                return Err(io::Error::other("Broken message"));
             }
         }
+        Err(io::Error::other("channel ended"))
     }
 }
 
