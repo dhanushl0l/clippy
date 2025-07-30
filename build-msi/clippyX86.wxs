@@ -9,8 +9,10 @@
 				<Shortcut Id="ApplicationDesktopShortcut"
 					Name="clippy"
 					Description="Clipboard manager"
-					Target="[INSTALLFOLDER32]clippy-gui.exe"
-					WorkingDirectory="INSTALLFOLDER32"/>
+					Target="[INSTALLFOLDER32]clippy.exe"
+					WorkingDirectory="INSTALLFOLDER32"
+					Icon="ClippyIconId"
+                    IconIndex="0"/>
 				<RemoveFolder Id="ApplicationProgramsFolder" On="uninstall"/>
 				<RegistryValue
 					Root="HKCU"

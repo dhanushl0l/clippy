@@ -21,5 +21,7 @@
 		<StandardDirectory Id="StartupFolder">
     		<Directory Id="AppStartupFolder" Name="!(bind.Property.ProductName)"/>
 		</StandardDirectory>
+
+		<Icon Id="ClippyIconId" SourceFile="../assets/win-ico/clippy.ico" />
 	</Fragment>
 </Wix>

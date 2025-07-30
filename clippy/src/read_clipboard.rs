@@ -1,5 +1,5 @@
-use crate::MessageChannel;
 use crate::{Data, get_global_bool, set_global_bool};
+use crate::{MessageChannel, UserSettings};
 use base64::{Engine, engine::general_purpose};
 use chrono::Utc;
 use clipboard_rs::common::RustImage;
@@ -90,6 +90,20 @@ impl<'a> ClipboardHandler for Manager<'a> {
 
 pub fn write_to_json(data: Vec<u8>, typ: String, device: String, tx: &Sender<MessageChannel>) {
     let time = Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
+
+    let store_image = match UserSettings::build_user() {
+        Ok(settings) => settings.store_image,
+        Err(_) => true,
+    };
+
+    if typ.starts_with("image/") && store_image {
+        use crate::save_image;
+
+        if let Err(e) = save_image(&time, &data) {
+            error!("Unable to write thumbnail");
+            debug!("{e}")
+        };
+    }
 
     let data = if data.len() > 15700268 {
         if typ.starts_with("image/") {

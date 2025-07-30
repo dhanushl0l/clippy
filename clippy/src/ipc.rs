@@ -156,6 +156,7 @@ pub mod ipc {
         env, fs,
         io::{BufReader, Error, Read, Write},
         process::{self, Stdio},
+        thread,
     };
     use tokio::sync::mpsc::Sender;
 
@@ -272,25 +273,28 @@ pub mod ipc {
     }
 
     pub fn ipc_check(channel: PipelistenerTyp, rx: &Sender<MessageChannel>) -> Result<(), Error> {
-        for conn in channel.incoming() {
-            if let Ok(val) = conn {
-                let mut reader = BufReader::new(val);
-                let mut buf = String::new();
-                if let Err(e) = reader.read_to_string(&mut buf) {
-                    error!("Problem reading pipe data try updating the app");
-                    debug!("{e}");
-                };
-                let rx = rx.clone();
-                match serde_json::from_str::<MessageIPC>(&buf) {
-                    Ok(MessageIPC::OpentGUI) => {
-                        if let Err(e) = start_gui(&rx) {
-                            error!("{}", e);
-                        };
+        loop {
+            for conn in channel.incoming() {
+                if let Ok(val) = conn {
+                    let mut reader = BufReader::new(val);
+                    let mut buf = String::new();
+                    if let Err(e) = reader.read_to_string(&mut buf) {
+                        error!("Problem reading pipe data try updating the app");
+                        debug!("{e}");
+                    };
+                    let rx = rx.clone();
+                    match serde_json::from_str::<MessageIPC>(&buf) {
+                        Ok(MessageIPC::OpentGUI) => {
+                            thread::spawn(move || {
+                                if let Err(e) = start_gui(&rx) {
+                                    error!("{}", e);
+                                };
+                            });
+                        }
+                        _ => {}
                     }
-                    _ => {}
                 }
             }
         }
-        Ok(())
     }
 }

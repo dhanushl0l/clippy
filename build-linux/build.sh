@@ -32,9 +32,9 @@ done
 
 # Ask for version if -v
 if [ "$MODE" == "version" ]; then
-  read -p "Enter version: " VER
-  NAME="clippy-$VER.tar.xz"
-  MODE="release"
+VER=$(grep '^version =' clippy/Cargo.toml | sed -E 's/version = "(.*)"/\1/')
+NAME="clippy-$VER.tar.xz"
+MODE="release"
 fi
 
 # Build
@@ -53,6 +53,7 @@ else
 fi
 
 # Create archive
-tar -cJf "$NAME" "${INCLUDE_FILES[@]}"
+mkdir -p /build
+tar -cJf "$NAME" "/build${INCLUDE_FILES[@]}"
 
 echo "Created archive: $NAME"
