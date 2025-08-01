@@ -30,7 +30,7 @@ use tokio::{
 
 pub fn start_cloud(rx: &mut Receiver<MessageChannel>, mut usersettings: UserSettings) {
     let mut pending = Pending::build().unwrap_or_else(|e| {
-        error!("{}", e);
+        error!("Unable to build pending state: {}", e);
         Pending::new()
     });
     let user_data = UserData::build();
@@ -134,7 +134,7 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
                         }
                     };
                     if let Err(e) = handle_mag(msg, pending, usersettings, user_data, ws, &mut last_pong, &mut buffer, &mut current_type).await{
-                        error!("{}",e);
+                        error!("Unable to process message: {}",e);
                     };
                 }
 

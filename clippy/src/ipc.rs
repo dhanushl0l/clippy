@@ -22,21 +22,19 @@ pub mod ipc {
         match UnixStream::connect(&path) {
             Ok(mut stream) => {
                 if env::var("CLIPPY_SERVICE").is_ok() {
-                    error!(
-                        "Another Clippy service is already running. Please stop it before starting a new one."
-                    );
-                    process::exit(1)
+                    eprintln!("Another Clippy service is already running. Please stop it first.");
+                    process::exit(1);
                 } else {
-                    stream.write(&serde_json::to_vec(&MessageIPC::OpentGUI)?)?;
-                    process::exit(0)
+                    let msg = serde_json::to_vec(&MessageIPC::OpentGUI)?;
+                    stream.write_all(&msg)?;
+                    process::exit(0);
                 }
             }
             Err(_) => {
                 fs::remove_file(&path)?;
-                let listener = UnixListener::bind(path)?;
-                return Ok(listener);
             }
-        };
+        }
+        UnixListener::bind(&path)
     }
 
     fn start_gui(tx: &Sender<MessageChannel>) -> Result<(), io::Error> {
@@ -130,7 +128,6 @@ pub mod ipc {
                                         *inner = None;
                                     }
                                 });
-
                                 *guard = Some(handle);
                             }
                         }
@@ -287,7 +284,7 @@ pub mod ipc {
                         Ok(MessageIPC::OpentGUI) => {
                             thread::spawn(move || {
                                 if let Err(e) = start_gui(&rx) {
-                                    error!("{}", e);
+                                    error!("Unable to start up gui app: {}", e);
                                 };
                             });
                         }

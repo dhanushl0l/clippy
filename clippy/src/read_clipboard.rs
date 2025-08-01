@@ -37,7 +37,7 @@ pub fn read_wayland_clipboard(tx: &Sender<MessageChannel>) -> Result<(), std::io
     for i in stream.paste_stream().flatten().flatten() {
         if get_global_bool() {
             if let Err(e) = parse_wayland_clipboard(i.context, tx) {
-                error!("{}", e);
+                error!("Unable read clipboard: {}", e);
             };
         } else {
             set_global_bool(true);

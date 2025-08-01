@@ -288,16 +288,11 @@ impl App for Clipboard {
         if self.first_run {
             let ctxc = ctx.clone();
             let state = self.changed.clone();
+            set_global_update_bool(false);
             std::thread::spawn(move || {
                 loop {
                     thread::sleep(Duration::from_secs(1));
                     if get_global_update_bool() {
-                        // fix for app is crashed in wayland
-                        // to do find a better approch
-
-                        // while !ctxc.is_pointer_over_area() {
-                        //     thread::sleep(Duration::from_millis(500));
-                        // }
                         if let Ok(mut va) = state.try_lock() {
                             *va = true;
                         }

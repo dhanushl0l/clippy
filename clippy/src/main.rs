@@ -91,7 +91,7 @@ fn main() {
         }
         Err(e) => {
             error!("Another instence of the app is active stop it and try again");
-            error!("{}", e);
+            debug!("{}", e);
             process::exit(1);
         }
     };
@@ -126,7 +126,7 @@ fn main() {
         let tx_c = tx.clone();
         thread::spawn(move || {
             if let Err(e) = ipc_check(channel, &tx_c) {
-                error!("{}", e);
+                error!("unable to start background channel {}", e);
                 process::exit(1)
             }
         });

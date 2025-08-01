@@ -1,11 +1,12 @@
-use log::error;
+use log::{debug, error};
 use tokio::sync::mpsc::Receiver;
 
 use crate::{MessageChannel, Pending, UserData, UserSettings, log_error};
 
 pub fn start_local(rx: &mut Receiver<MessageChannel>, mut usersettings: UserSettings) {
     let pending = Pending::build().unwrap_or_else(|e| {
-        error!("{}", e);
+        error!("unable to build pending data");
+        debug!("{}", e);
         Pending::new()
     });
     let user_data = UserData::build();

@@ -1106,7 +1106,7 @@ pub fn is_valid_otp(otp: &str) -> bool {
 
 pub fn rewrite_pending_to_data(path: PathBuf, typ: String, time: &str, thumbnail: bool) {
     if let Err(err) = fs::rename(&path, get_path().join(&time)) {
-        error!("{:?}", err)
+        error!("unable to rewrite data: {:?}", err)
     };
 
     if thumbnail && typ.starts_with("image/") {
