@@ -14,7 +14,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use sqlx::prelude::FromRow;
 use std::{
-    collections::{BTreeSet, HashMap, hash_map::Entry},
+    collections::{BTreeSet, HashMap, VecDeque, hash_map::Entry},
     error::Error,
     fs::{self},
     io::{self, Write},
@@ -26,6 +26,7 @@ use ws_connection::ws_connection;
 
 pub const DATABASE_PATH: &str = "data-base/users";
 const MAX_SIZE: usize = 10 * 1024 * 1024;
+const MAX_COUNT: usize = 30;
 pub static SMTP_USERNAME: OnceLock<String> = OnceLock::new();
 pub static SMTP_PASSWORD: OnceLock<String> = OnceLock::new();
 pub static SECRET_KEY: OnceLock<String> = OnceLock::new();
@@ -39,7 +40,7 @@ pub struct UserState {
 #[derive(Debug, Clone)]
 pub struct User {
     state: BTreeSet<String>,
-    remove: Vec<String>,
+    remove: VecDeque<String>,
 }
 
 impl UserState {
@@ -61,7 +62,12 @@ impl UserState {
                 Err(err) => debug!("{}", err),
             };
         }
-        user.remove.push(remove.to_string());
+
+        if user.remove.len() >= MAX_COUNT {
+            user.remove.pop_front();
+        }
+        user.remove.push_back(remove.to_string());
+
         Ok(())
     }
 
@@ -75,7 +81,7 @@ impl UserState {
         if !map.contains_key(username) {
             let user = User {
                 state: BTreeSet::new(),
-                remove: Vec::new(),
+                remove: VecDeque::new(),
             };
             map.insert(username.to_string(), user);
             debug!("{:?}", self);
@@ -180,7 +186,7 @@ impl UserState {
         Some(temp)
     }
 
-    pub fn get_remove(&self, username: &str) -> Vec<String> {
+    pub fn get_remove(&self, username: &str) -> VecDeque<String> {
         let map = self.data.lock().unwrap();
         let tree = map.get(username).unwrap();
         tree.remove.clone()

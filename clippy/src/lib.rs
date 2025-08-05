@@ -12,9 +12,9 @@ use base64::engine::general_purpose;
 use bytestring::ByteString;
 use encryption_decryption::{decrypt_file, encrept_file};
 use image::{ImageReader, load_from_memory};
-use log::{debug, error, warn};
+use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::error::Error;
 use std::fs::create_dir;
 use std::io::{Read, Write};
@@ -283,14 +283,21 @@ impl UserData {
                 for i in to_remove {
                     path.push(&i);
                     if let Ok(file) = File::open(&path) {
-                        let clipboard: Data = serde_json::from_reader(file).unwrap();
-                        if clipboard.pined {
-                            pined_path.push(&i);
-                            fs::rename(&path, &pined_path).unwrap();
-                            pined_path.pop();
+                        if let Ok(clipboard) = serde_json::from_reader::<_, Data>(file) {
+                            if clipboard.pined {
+                                pined_path.push(&i);
+                                fs::rename(&path, &pined_path).unwrap();
+                                pined_path.pop();
+                            } else {
+                                log_error!(fs::remove_file(&path));
+                            }
                         } else {
-                            log_error!(fs::remove_file(&path));
+                            println!("{:?} : to do find the cause of the error", path);
+                            error!("file is correpted!")
                         }
+                    } else {
+                        println!("{:?} : to do find the cause of the error", path);
+                        error!("file is correpted!")
                     }
                     path.pop();
                     data.remove(&i);
@@ -337,7 +344,16 @@ impl UserData {
         }
         let mut path = get_path();
         path.push(id);
-        Ok(fs::remove_file(path)?)
+        match fs::remove_file(path) {
+            Ok(_) => Ok(()),
+            Err(ref e) if e.kind() == std::io::ErrorKind::NotFound => {
+                info!("File is already removed");
+                Ok(())
+            }
+            Err(e) => {
+                return Err(e.into());
+            }
+        }
     }
 }
 
@@ -714,7 +730,7 @@ pub enum ResopnseServerToClient {
         old: String,
         new: Option<String>,
     },
-    Remove(Vec<String>),
+    Remove(VecDeque<String>),
     EditReplace {
         data: String,
         is_it_last: bool,

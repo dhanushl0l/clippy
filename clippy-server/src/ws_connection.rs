@@ -1,4 +1,5 @@
 use std::{
+    collections::VecDeque,
     fs::File,
     io::{Read, Write},
     path::PathBuf,
@@ -123,7 +124,9 @@ pub async fn ws_connection(
                         if old {
                             match val {
                                 MessageMPC::Remove(id) => {
-                                    let status = ResopnseServerToClient::Remove(vec![id]);
+                                    let mut vec = VecDeque::new();
+                                    vec.push_front(id);
+                                    let status = ResopnseServerToClient::Remove(vec);
                                     if let Err(e) =  session.text(serde_json::to_string(&status).unwrap()).await {
                                         debug!("Unable to send response {}",e);
                                     };
@@ -210,7 +213,7 @@ async fn handle_bin(
             old_id: id.clone(),
             new_id: file_name.clone(),
         };
-        state.remove_and_add_edit(&user, &id).unwrap();
+        state.remove_and_add_edit(&user, &edit).unwrap();
         if let Err(e) = tx.send(message) {
             error!("error sending state: {}", e);
         };

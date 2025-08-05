@@ -5,5 +5,5 @@ clippy-server/credentials/
 data-base/
 credentials/
 /build
-log.log
+log
 .env

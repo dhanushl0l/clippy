@@ -19,6 +19,7 @@ use bytes::{Bytes, BytesMut};
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, error, info};
 use reqwest::{self, Client};
+use std::io;
 use std::{error::Error, sync::Arc, time::Duration};
 use tokio::{
     fs::File,
@@ -249,16 +250,18 @@ async fn process_text<T: AsyncRead + AsyncWrite + Unpin + 'static>(
     user_data: &UserData,
     ws: &mut Framed<T, Codec>,
     last_pong: &mut Instant,
-) {
-    let state: ResopnseServerToClient = serde_json::from_slice(&bin).unwrap();
+) -> Result<(), io::Error> {
+    let state: ResopnseServerToClient = serde_json::from_slice(&bin)?;
     match state {
         ResopnseServerToClient::Success { old, new } => {
             let (edit, _state) = match pending.remove(&old) {
                 Some(v) => v,
                 None => {
-                    debug!("Error removing pending data");
                     debug!("{:?}", pending);
-                    return;
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        "Error removing pending data",
+                    ));
                 }
             };
 
@@ -273,16 +276,11 @@ async fn process_text<T: AsyncRead + AsyncWrite + Unpin + 'static>(
                     user_data.add(new.unwrap(), usersettings.max_clipboard);
                 }
                 Edit::Edit { path, typ, new_id } => {
-                    rewrite_pending_to_data(
-                        path,
-                        typ,
-                        &new.clone().unwrap(),
-                        usersettings.store_image,
-                    );
+                    rewrite_pending_to_data(path, typ, &new_id, usersettings.store_image);
                     user_data.add(new_id, usersettings.max_clipboard);
                 }
                 Edit::Remove => {
-                    user_data.remove_and_remove_file(&old).unwrap();
+                    user_data.remove_and_remove_file(&old)?;
                 }
             }
             info!("Surcess sending new data");
@@ -292,9 +290,7 @@ async fn process_text<T: AsyncRead + AsyncWrite + Unpin + 'static>(
             let state = user_data.get_30();
             let data = ResopnseClientToServer::CheckVersionArr(state);
             if let Err(e) = ws
-                .send(ws::Message::Text(
-                    serde_json::to_string(&data).unwrap().into(),
-                ))
+                .send(ws::Message::Text(serde_json::to_string(&data)?.into()))
                 .await
             {
                 error!("unable to send initial state {}", e);
@@ -339,6 +335,7 @@ async fn process_text<T: AsyncRead + AsyncWrite + Unpin + 'static>(
         _ => {}
     }
     *last_pong = Instant::now();
+    Ok(())
 }
 
 async fn handle_mag<T: AsyncRead + AsyncWrite + Unpin + 'static>(
@@ -353,7 +350,11 @@ async fn handle_mag<T: AsyncRead + AsyncWrite + Unpin + 'static>(
 ) -> Result<(), String> {
     match msg {
         ws::Frame::Text(txt) => {
-            process_text(txt, pending, usersettings, user_data, ws, last_pong).await;
+            if let Err(e) = process_text(txt, pending, usersettings, user_data, ws, last_pong).await
+            {
+                error!("Error saving data!");
+                debug!("{e}")
+            }
         }
         ws::Frame::Binary(_bin) => {}
         ws::Frame::Ping(p) => {
@@ -390,8 +391,19 @@ async fn handle_mag<T: AsyncRead + AsyncWrite + Unpin + 'static>(
                     let complete = buf.freeze();
                     match msg_type {
                         MessageType::Text => {
-                            process_text(complete, pending, usersettings, user_data, ws, last_pong)
-                                .await
+                            if let Err(e) = process_text(
+                                complete,
+                                pending,
+                                usersettings,
+                                user_data,
+                                ws,
+                                last_pong,
+                            )
+                            .await
+                            {
+                                error!("Error saving data!");
+                                debug!("{e}")
+                            };
                         }
                         MessageType::Binary => {}
                     }
