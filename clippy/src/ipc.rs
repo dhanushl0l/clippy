@@ -67,8 +67,8 @@ pub mod ipc {
                         };
                     }
                     MessageIPC::New(data) => {
-                        let time = chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
-                        data.write_to_json(tx, time).unwrap();
+                        let new_id = chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
+                        data.write_to_json(tx, new_id).unwrap();
                     }
                     MessageIPC::UpdateSettings(settings) => {
                         settings.write_local().unwrap();
@@ -78,10 +78,10 @@ pub mod ipc {
                         };
                     }
                     MessageIPC::Edit(data) => {
-                        let time = chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
-                        let id = data.id;
+                        let new_id = chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
+                        let old_id = data.id;
                         let path = data.path;
-                        data.data.re_write_json(tx, time, id, path).unwrap();
+                        data.data.re_write_json(tx, new_id, old_id, path).unwrap();
                     }
                     MessageIPC::Delete(path, id) => {
                         let img_path = get_image_path(&path);

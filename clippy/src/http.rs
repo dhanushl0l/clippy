@@ -1,4 +1,4 @@
-use crate::{MessageChannel, Pending, UserCred, UserSettings};
+use crate::{MessageChannel, UserCred, UserData, UserSettings};
 use core::time;
 use log::{debug, error, warn};
 use once_cell::sync::Lazy;
@@ -97,7 +97,7 @@ pub async fn get_token_serv(user: &UserCred, client: &Client) -> Result<(), Box<
 pub async fn health(
     client: &Client,
     rx: &mut Receiver<MessageChannel>,
-    pending: &mut Pending,
+    user_data: &UserData,
 ) -> bool {
     let mut log = true;
     loop {
@@ -133,14 +133,15 @@ pub async fn health(
         while let Ok(val) = rx.try_recv() {
             match val {
                 MessageChannel::New { path, time, typ } => {
-                    pending.add(
-                        time,
-                        crate::Edit::New {
-                            path: path.into(),
-                            typ,
-                        },
-                        crate::DataState::WaitingToSend,
-                    );
+                    user_data
+                        .add_pending(
+                            time,
+                            crate::Edit::New {
+                                path: path.into(),
+                                typ,
+                            },
+                        )
+                        .await;
                 }
                 MessageChannel::Edit {
                     old_id,
@@ -148,21 +149,22 @@ pub async fn health(
                     typ,
                     path,
                 } => {
-                    pending.add(
-                        old_id,
-                        crate::Edit::Edit {
-                            path: path.into(),
-                            typ,
-                            new_id: time,
-                        },
-                        crate::DataState::WaitingToSend,
-                    );
+                    user_data
+                        .add_pending(
+                            old_id,
+                            crate::Edit::Edit {
+                                path: path.into(),
+                                typ,
+                                new_id: time,
+                            },
+                        )
+                        .await;
                 }
                 MessageChannel::SettingsChanged => {
                     unimplemented!("to do")
                 }
                 MessageChannel::Remove(id) => {
-                    pending.add(id, crate::Edit::Remove, crate::DataState::WaitingToSend);
+                    user_data.add_pending(id, crate::Edit::Remove).await;
                 }
             }
         }

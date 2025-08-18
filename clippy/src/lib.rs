@@ -234,41 +234,151 @@ impl Data {
     }
 }
 
+#[derive(PartialEq, Debug)]
+pub enum DataState {
+    WaitingToSend,
+    SentButNotAcked,
+}
+
 #[derive(Debug, Clone)]
 pub struct UserData {
     data: Arc<Mutex<BTreeSet<String>>>,
+    pending: Arc<Mutex<BTreeMap<String, (Edit, DataState)>>>,
+    notify: Arc<Notify>,
 }
 
 impl UserData {
-    pub fn new() -> Self {
+    fn build() -> Self {
+        let mut data = BTreeSet::new();
+        let mut pending = BTreeMap::new();
+
+        Self::build_pending(&mut pending);
+        Self::build_data(&mut data);
+
+        let notify = Notify::new();
+
         Self {
-            data: Arc::new(Mutex::new(BTreeSet::new())),
+            data: Arc::new(Mutex::new(data)),
+            pending: Arc::new(Mutex::new(pending)),
+            notify: Arc::new(notify),
         }
     }
 
-    pub fn build() -> Self {
-        let mut temp = BTreeSet::new();
-
-        fs::create_dir_all(&get_path()).unwrap();
-
-        let folder_path = &get_path();
-
-        if let Ok(entries) = fs::read_dir(folder_path.as_path()) {
-            for entry in entries.flatten() {
-                if let Some(file_name) = entry.file_name().to_str() {
-                    temp.insert(file_name.to_string());
+    fn build_pending(pending: &mut BTreeMap<String, (Edit, DataState)>) {
+        let data_path = get_path_pending();
+        if let Ok(entries) = fs::read_dir(data_path) {
+            for dir in entries {
+                if let Ok(entry) = dir {
+                    if let Ok(metadata) = File::open(entry.path()) {
+                        if let Ok(data) = serde_json::from_reader::<File, Data>(metadata) {
+                            if let Some(name) = entry.file_name().to_str() {
+                                pending.insert(
+                                    name.to_string(),
+                                    (
+                                        Edit::New {
+                                            path: entry.path(),
+                                            typ: data.typ,
+                                        },
+                                        DataState::WaitingToSend,
+                                    ),
+                                );
+                            }
+                        }
+                    }
                 }
             }
         }
+    }
 
-        debug!("{:?}", temp);
+    fn build_data(data: &mut BTreeSet<String>) {
+        let data_path = get_path();
+        if let Ok(entries) = fs::read_dir(data_path) {
+            for dir in entries {
+                if let Ok(entry) = dir {
+                    if let Ok(metadata) = entry.metadata() {
+                        if metadata.is_file() {
+                            if let Some(name) = entry.file_name().to_str() {
+                                data.insert(name.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    fn get_sync_30(&self) -> Vec<String> {
+        self.data
+            .lock()
+            .unwrap()
+            .iter()
+            .rev()
+            .take(30)
+            .cloned()
+            .collect()
+    }
 
-        Self {
-            data: Arc::new(Mutex::new(temp)),
+    pub async fn next(&self) -> Option<(bool, String, Edit)> {
+        loop {
+            let mut found: Option<(&String, &Edit)> = None;
+            let mut count = 0;
+            let val = self.pending.lock().unwrap();
+            for (k, v) in val.iter() {
+                if v.1 == DataState::WaitingToSend {
+                    count += 1;
+                    if found.is_none() {
+                        found = Some((k, &v.0));
+                    } else {
+                        break;
+                    }
+                }
+            }
+
+            if let Some((k, v)) = found {
+                let is_last = count == 1;
+                return Some((is_last, k.clone(), v.clone()));
+            }
+
+            self.notify.notified().await;
         }
     }
 
-    pub fn add(&self, id: String, total: Option<u32>) {
+    async fn add_pending(&self, id: String, act: Edit) {
+        self.notify.notify_one();
+        self.pending
+            .lock()
+            .unwrap()
+            .insert(id, (act, DataState::WaitingToSend));
+    }
+
+    fn change_state(&self, id: &str) {
+        let mut data = self.pending.lock().unwrap();
+        if let Some(val) = data.get_mut(id) {
+            val.1 = DataState::SentButNotAcked
+        }
+    }
+
+    fn pop_pending(&self, id: &str) -> Option<(Edit, DataState)> {
+        let mut data = self.pending.lock().unwrap();
+        data.remove(id)
+    }
+
+    // fn pop_data(&self, id: &str) {
+    //     let mut data = self.data.lock().unwrap();
+    //     data.remove(id);
+    // }
+
+    pub fn get_30_data(&self) -> Vec<String> {
+        self.data
+            .lock()
+            .unwrap()
+            .iter()
+            .rev()
+            .take(30)
+            .cloned()
+            .collect()
+    }
+
+    pub fn add_data(&self, id: String, total: Option<u32>) {
         let mut data = self.data.lock().unwrap();
         data.insert(id);
         debug!("User clipboard count: {}", data.len());
@@ -307,37 +417,6 @@ impl UserData {
         }
     }
 
-    pub fn get_30(&self) -> Vec<String> {
-        self.data
-            .lock()
-            .unwrap()
-            .iter()
-            .rev()
-            .take(30)
-            .cloned()
-            .collect()
-    }
-
-    pub fn add_vec(&self, id: Vec<String>) {
-        for id in id {
-            self.data.lock().unwrap().insert(id);
-        }
-    }
-
-    pub fn last_one(&self) -> String {
-        self.data
-            .lock()
-            .unwrap()
-            .last()
-            .unwrap_or(&"".to_string())
-            .clone()
-    }
-
-    pub fn remove(&self, id: &str) {
-        if let Ok(mut va) = self.data.lock() {
-            va.remove(id);
-        }
-    }
     pub fn remove_and_remove_file(&self, id: &str) -> Result<(), std::io::Error> {
         if let Ok(mut va) = self.data.lock() {
             va.remove(id);
@@ -521,12 +600,6 @@ impl UserSettings {
     }
 }
 
-#[derive(PartialEq, Debug)]
-pub enum DataState {
-    WaitingToSend,
-    SentButNotAcked,
-}
-
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum Edit {
     New {
@@ -540,119 +613,6 @@ pub enum Edit {
         new_id: String,
     },
     Remove,
-}
-
-#[derive(Debug)]
-pub struct Pending {
-    data: BTreeMap<String, (Edit, DataState)>,
-    notify: Arc<Notify>,
-}
-
-impl Pending {
-    pub fn new() -> Self {
-        Self {
-            data: BTreeMap::new(),
-            notify: Arc::new(Notify::new()),
-        }
-    }
-
-    pub fn add(&mut self, id: String, edit: Edit, state: DataState) {
-        self.data.insert(id, (edit, state));
-    }
-
-    pub fn build() -> Result<Self, io::Error> {
-        let mut temp = BTreeMap::new();
-        for entry in fs::read_dir(get_path_pending())? {
-            let path: PathBuf = entry?.path();
-
-            let file_content = fs::read_to_string(&path)?;
-            let data: Data = serde_json::from_str(&file_content)?;
-            let file_name = if let Some(name) = path.file_name().and_then(|f| f.to_str()) {
-                name.to_string()
-            } else {
-                continue;
-            };
-            temp.insert(
-                file_name,
-                (
-                    Edit::New {
-                        path,
-                        typ: data.typ,
-                    },
-                    DataState::WaitingToSend,
-                ),
-            );
-        }
-        Ok(Self {
-            data: temp,
-            notify: Arc::new(Notify::new()),
-        })
-    }
-
-    pub fn len(&self) -> usize {
-        self.data.len()
-    }
-
-    // here the bool mean is it the final data if true the server sends the data to all the connected clients immediately
-    pub async fn next(&self) -> Option<(bool, String, &Edit)> {
-        loop {
-            let mut found: Option<(&String, &Edit)> = None;
-            let mut count = 0;
-
-            for (k, v) in &self.data {
-                if v.1 == DataState::WaitingToSend {
-                    count += 1;
-                    if found.is_none() {
-                        found = Some((k, &v.0));
-                    } else {
-                        break;
-                    }
-                }
-            }
-
-            if let Some((k, v)) = found {
-                let is_last = count == 1;
-                return Some((is_last, k.clone(), v));
-            }
-
-            self.notify.notified().await;
-        }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.data.is_empty()
-    }
-
-    pub fn get(&self, id: &str) -> Option<&(Edit, DataState)> {
-        self.data.get(id)
-    }
-
-    pub fn remove(&mut self, id: &str) -> Option<(Edit, DataState)> {
-        self.data.remove(id)
-    }
-
-    pub fn empty(&mut self) {
-        self.data.clear();
-    }
-
-    pub fn pop(&mut self, id: &str) {
-        self.data.remove(id);
-    }
-
-    pub fn get_pending(&self) -> Vec<(&String, &Edit)> {
-        let mut temp = Vec::new();
-        for (id, value) in self.data.iter() {
-            temp.push((id, &value.0));
-        }
-        temp
-    }
-
-    pub fn change_state(&mut self, id: &str) {
-        let temp = self.data.get_mut(id);
-        if let Some(val) = temp {
-            val.1 = DataState::SentButNotAcked;
-        }
-    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

@@ -3,7 +3,7 @@ use crate::{
     rewrite_pending_to_data,
 };
 use crate::{
-    MessageType, Pending, ResopnseClientToServer, UserData, UserSettings,
+    MessageType, ResopnseClientToServer, UserData, UserSettings,
     http::{SERVER_WS, get_token, get_token_serv, health},
     set_global_update_bool,
 };
@@ -21,19 +21,15 @@ use log::{debug, error, info};
 use reqwest::{self, Client};
 use std::io;
 use std::{error::Error, sync::Arc, time::Duration};
+use tokio::fs::File;
+use tokio::io::AsyncReadExt;
 use tokio::{
-    fs::File,
-    io::AsyncReadExt,
     select,
     sync::mpsc::Receiver,
     time::{Instant, sleep},
 };
 
 pub fn start_cloud(rx: &mut Receiver<MessageChannel>, mut usersettings: UserSettings) {
-    let mut pending = Pending::build().unwrap_or_else(|e| {
-        error!("Unable to build pending state: {}", e);
-        Pending::new()
-    });
     let user_data = UserData::build();
     let client = Arc::new(Client::new());
 
@@ -45,13 +41,12 @@ pub fn start_cloud(rx: &mut Receiver<MessageChannel>, mut usersettings: UserSett
             if usersettings.disable_sync {
                 break;
             }
-
             log::debug!("starting WebSocket client");
-            health(&client, rx, &mut pending).await;
+            health(&client, rx, &user_data).await;
             if let Err(e) = get_token_serv(&usercred, &client).await {
                 error!("unable to get secure key from server");
                 debug!("{}", e);
-                health(&client, rx, &mut pending).await;
+                health(&client, rx, &user_data).await;
                 continue;
             };
             let token = get_token();
@@ -69,7 +64,7 @@ pub fn start_cloud(rx: &mut Receiver<MessageChannel>, mut usersettings: UserSett
                 Ok((resp, conn)) => (resp, conn),
                 Err(e) => {
                     error!("Client connect error: {e:?}");
-                    health(&client, rx, &mut pending).await;
+                    health(&client, rx, &user_data).await;
                     continue;
                 }
             };
@@ -78,14 +73,12 @@ pub fn start_cloud(rx: &mut Receiver<MessageChannel>, mut usersettings: UserSett
                 error!("Unable to check client state");
                 debug!("{}", e);
             };
-            if let Err(e) =
-                handle_connection(&mut ws, &user_data, &mut usersettings, &mut pending, rx).await
-            {
+            if let Err(e) = handle_connection(&mut ws, &user_data, &mut usersettings, rx).await {
                 error!("Unable to maintain connection");
                 debug!("{}", e);
             };
 
-            health(&client, rx, &mut pending).await;
+            health(&client, rx, &user_data).await;
         }
     });
 }
@@ -94,7 +87,7 @@ async fn check_uptodate_state<T: AsyncRead + AsyncWrite + Unpin + 'static>(
     ws: &mut Framed<T, Codec>,
     user_data: &UserData,
 ) -> Result<(), Box<dyn Error>> {
-    let state = user_data.get_30();
+    let state = user_data.get_sync_30();
     let data = ResopnseClientToServer::CheckVersionArr(state);
     Ok(ws
         .send(ws::Message::Text(
@@ -107,7 +100,6 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
     ws: &mut Framed<T, Codec>,
     user_data: &UserData,
     usersettings: &mut UserSettings,
-    pending: &mut Pending,
     rx: &mut Receiver<MessageChannel>,
 ) -> Result<(), Box<dyn Error>> {
     let mut buffer: Option<BytesMut> = None;
@@ -115,137 +107,134 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
     let mut last_pong = Instant::now();
     loop {
         select! {
-                _ = sleep(Duration::from_secs(1)) => {
-                    if last_pong.elapsed() > Duration::from_secs(30) {
-                        error!("No pong in time. Disconnecting.");
-                        return Err("Server is out".into());
-                    } else if last_pong.elapsed() > Duration::from_secs(5) {
-                        let _ = ws.send(Message::Ping(Bytes::new())).await;
-                    }
+            _ = sleep(Duration::from_secs(1)) => {
+                if last_pong.elapsed() > Duration::from_secs(30) {
+                    error!("No pong in time. Disconnecting.");
+                    return Err("Server is out".into());
+                } else if last_pong.elapsed() > Duration::from_secs(5) {
+                    let _ = ws.send(Message::Ping(Bytes::new())).await;
                 }
-
-                Some(msg) = ws.next() => {
-                    last_pong = Instant::now();
-                    let msg = match msg {
-                        Ok(va) => va,
-                        Err(e) => {
-                            // to do
-                            debug!("{}",e);
-                            continue;
-                        }
-                    };
-                    if let Err(e) = handle_mag(msg, pending, usersettings, user_data, ws, &mut last_pong, &mut buffer, &mut current_type).await{
-                        error!("Unable to process message: {}",e);
-                    };
-                }
-
-                Some((last,id, value)) = pending.next() => {
-        match value {
-            Edit::New { path, typ: _ } => match File::open(&path).await {
-                Ok(mut file) => {
-                    let mut file_data = String::new();
-                    match file.read_to_string(&mut file_data).await {
-                        Ok(_) => {
-                            let buffer = ResopnseClientToServer::Data {
-                                data: file_data,
-                                id: id.clone(),
-                                last,
-                                is_it_edit: None,
-                            };
-                            if ws
-                                .send(ws::Message::Text(buffer.to_bytestring().unwrap()))
-                                .await
-                                .is_err()
-                            {
-                                return Err("Unable to send data to server".into());
-                            }
-                            pending.change_state(&id);
-                            last_pong = Instant::now();
-                        }
-                        Err(e) => {
-                            error!("Failed to read file data: {}", e);
-                            pending.pop(&id);
-                        }
-                    }
-                }
-                Err(e) => {
-                    error!("Failed to open file {:?}: {}", value, e);
-                    pending.pop(&id);
-                }
-            },
-            Edit::Edit {
-                path,
-                typ: _,
-                new_id,
-            } => match File::open(&path).await {
-                Ok(mut file) => {
-                    let mut file_data = String::new();
-                    match file.read_to_string(&mut file_data).await {
-                        Ok(_) => {
-                            let buffer = ResopnseClientToServer::Data {
-                                data: file_data,
-                                id: id.clone(),
-                                last,
-                                is_it_edit: Some(new_id.clone()),
-                            };
-                            if ws
-                                .send(ws::Message::Text(buffer.to_bytestring().unwrap()))
-                                .await
-                                .is_err()
-                            {
-                                return Err("Unable to send data to server".into());
-                            }
-                            pending.change_state(&id);
-                            last_pong = Instant::now();
-                        }
-                        Err(e) => {
-                            error!("Failed to read file data: {}", e);
-                            pending.pop(&id);
-                        }
-                    }
-                }
-                Err(e) => {
-                    error!("Failed to open file {:?}: {}", value, e);
-                    pending.pop(&id);
-                }
-            },
-            Edit::Remove => {
-                let buffer = ResopnseClientToServer::Remove(id.clone());
-                if ws.send(ws::Message::Text(buffer.to_bytestring().unwrap())).await.is_err() {
-                    return Err("Unable to send data to server".into());
-                }
-                pending.change_state(&id)
             }
+
+            Some(msg) = ws.next() => {
+                last_pong = Instant::now();
+                let msg = match msg {
+                    Ok(va) => va,
+                    Err(e) => {
+                        // to do
+                        debug!("{}",e);
+                        continue;
+                    }
+                };
+                if let Err(e) = handle_mag(msg, usersettings, user_data, ws, &mut last_pong, &mut buffer, &mut current_type).await{
+                    error!("Unable to process message: {}",e);
+                };
+            }
+
+            Some(va) = rx.recv() => {
+            match va {
+                MessageChannel::New { path, time, typ } => {
+                    user_data.add_pending(time, Edit::New { path: path.into(), typ, }).await;
+                }
+                MessageChannel::Edit { path, old_id, time, typ } => {
+                    debug!("path {} old_id {} new_time {} typ {}",path,old_id,time,typ);
+                    user_data.add_pending(old_id, Edit::Edit { path: path.into(), typ: typ, new_id: time }).await;
+                }
+                MessageChannel::SettingsChanged => {
+                    *usersettings = UserSettings::build_user()?;
+                    debug!("change settings");
+                    break Ok(());
+                },
+                MessageChannel::Remove(id)  => {
+                    user_data.add_pending(id.clone(), Edit::Remove).await;
+                }
         }
-                }
-
-                Some(va) = rx.recv() => {
-                match va {
-                    MessageChannel::New { path, time, typ } => {
-                        pending.add(time, Edit::New { path: path.into(), typ, }, crate::DataState::WaitingToSend);
+            }
+            Some((last, id, edit)) = user_data.next() => {
+                match edit {
+                    Edit::Remove => {
+                        let buffer = ResopnseClientToServer::Remove(id.clone());
+                        if ws
+                            .send(ws::Message::Text(buffer.to_bytestring().unwrap()))
+                            .await
+                            .is_err()
+                        {
+                            return Err("Unable to send data to server".into());
+                        }
                     }
-                    MessageChannel::Edit { path, old_id, time, typ } => {
-                        debug!("path {} old_id {} new_time {} typ {}",path,old_id,time,typ);
-                        pending.add(old_id, Edit::Edit { path: path.into(), typ: typ, new_id: time }, crate::DataState::WaitingToSend);
-                    }
-                    MessageChannel::SettingsChanged => {
-                        *usersettings = UserSettings::build_user()?;
-                        debug!("change settings");
-                        break Ok(());
+                    Edit::New { path, typ } => match File::open(&path).await {
+                        Ok(mut file) => {
+                            let mut file_data = String::new();
+                            match file.read_to_string(&mut file_data).await {
+                                Ok(_) => {
+                                    let buffer = ResopnseClientToServer::Data {
+                                        data: file_data,
+                                        id: id.clone(),
+                                        last,
+                                        is_it_edit: None,
+                                    };
+                                    if ws
+                                        .send(ws::Message::Text(buffer.to_bytestring().unwrap()))
+                                        .await
+                                        .is_err()
+                                    {
+                                        return Err("Unable to send data to server".into());
+                                    }
+                                    user_data.change_state(&id);
+                                    last_pong = Instant::now();
+                                }
+                                Err(e) => {
+                                    error!("Failed to read file data: {}", e);
+                                    user_data.pop_pending(&id);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to open file {:?}: {}", path, e);
+                            user_data.pop_pending(&id);
+                        }
                     },
-                    MessageChannel::Remove(id)  => {
-                        pending.add(id.clone(), Edit::Remove, crate::DataState::WaitingToSend);
-                    }
-            }
+                    Edit::Edit { path, typ, new_id } => match File::open(&path).await {
+                        Ok(mut file) => {
+                            let mut file_data = String::new();
+                            match file.read_to_string(&mut file_data).await {
+                                Ok(_) => {
+                                    let buffer = ResopnseClientToServer::Data {
+                                        data: file_data,
+                                        id: id.clone(),
+                                        last,
+                                        is_it_edit: Some(new_id.clone()),
+                                    };
+                                    if ws
+                                        .send(ws::Message::Text(buffer.to_bytestring().unwrap()))
+                                        .await
+                                        .is_err()
+                                    {
+                                        return Err("Unable to send data to server".into());
+                                    }
+                                    user_data.change_state(&id);
+                                    last_pong = Instant::now();
+                                }
+                                Err(e) => {
+                                    error!("Failed to read file data: {:?} {}", path, e);
+                                    user_data.pop_pending(&id);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to open file {:?}: {}", path, e);
+                            user_data.pop_pending(&id);
+                        }
+                    },
                 }
-
             }
+
+        }
     }
 }
 
 async fn process_text<T: AsyncRead + AsyncWrite + Unpin + 'static>(
     bin: Bytes,
-    pending: &mut Pending,
     usersettings: &UserSettings,
     user_data: &UserData,
     ws: &mut Framed<T, Codec>,
@@ -254,10 +243,10 @@ async fn process_text<T: AsyncRead + AsyncWrite + Unpin + 'static>(
     let state: ResopnseServerToClient = serde_json::from_slice(&bin)?;
     match state {
         ResopnseServerToClient::Success { old, new } => {
-            let (edit, _state) = match pending.remove(&old) {
+            let (edit, _state) = match user_data.pop_pending(&old) {
                 Some(v) => v,
                 None => {
-                    debug!("{:?}", pending);
+                    debug!("{:?}", user_data);
                     return Err(io::Error::new(
                         io::ErrorKind::Other,
                         "Error removing pending data",
@@ -273,11 +262,11 @@ async fn process_text<T: AsyncRead + AsyncWrite + Unpin + 'static>(
                         &new.clone().unwrap(),
                         usersettings.store_image,
                     );
-                    user_data.add(new.unwrap(), usersettings.max_clipboard);
+                    user_data.add_data(new.unwrap(), usersettings.max_clipboard);
                 }
                 Edit::Edit { path, typ, new_id } => {
                     rewrite_pending_to_data(path, typ, &new_id, usersettings.store_image);
-                    user_data.add(new_id, usersettings.max_clipboard);
+                    user_data.add_data(new_id, usersettings.max_clipboard);
                 }
                 Edit::Remove => {
                     user_data.remove_and_remove_file(&old)?;
@@ -287,7 +276,7 @@ async fn process_text<T: AsyncRead + AsyncWrite + Unpin + 'static>(
             set_global_update_bool(true);
         }
         ResopnseServerToClient::Outdated => {
-            let state = user_data.get_30();
+            let state = user_data.get_30_data();
             let data = ResopnseClientToServer::CheckVersionArr(state);
             if let Err(e) = ws
                 .send(ws::Message::Text(serde_json::to_string(&data)?.into()))
@@ -303,7 +292,7 @@ async fn process_text<T: AsyncRead + AsyncWrite + Unpin + 'static>(
         } => match serde_json::from_str::<Data>(&data) {
             Ok(data) => {
                 log_error!(data.just_write_paste(&new_id, is_it_last, false));
-                user_data.add(new_id, usersettings.max_clipboard);
+                user_data.add_data(new_id, usersettings.max_clipboard);
             }
             Err(e) => {
                 error!("Unable to process the data");
@@ -324,7 +313,7 @@ async fn process_text<T: AsyncRead + AsyncWrite + Unpin + 'static>(
         } => match serde_json::from_str::<Data>(&data) {
             Ok(data) => {
                 log_error!(data.just_write_paste(&new_id, is_it_last, false));
-                user_data.add(new_id, usersettings.max_clipboard);
+                user_data.add_data(new_id, usersettings.max_clipboard);
                 log_error!(user_data.remove_and_remove_file(&old_id));
             }
             Err(e) => {
@@ -340,7 +329,6 @@ async fn process_text<T: AsyncRead + AsyncWrite + Unpin + 'static>(
 
 async fn handle_mag<T: AsyncRead + AsyncWrite + Unpin + 'static>(
     msg: Frame,
-    pending: &mut Pending,
     usersettings: &UserSettings,
     user_data: &UserData,
     ws: &mut Framed<T, Codec>,
@@ -350,8 +338,7 @@ async fn handle_mag<T: AsyncRead + AsyncWrite + Unpin + 'static>(
 ) -> Result<(), String> {
     match msg {
         ws::Frame::Text(txt) => {
-            if let Err(e) = process_text(txt, pending, usersettings, user_data, ws, last_pong).await
-            {
+            if let Err(e) = process_text(txt, usersettings, user_data, ws, last_pong).await {
                 error!("Error saving data!");
                 debug!("{e}")
             }
@@ -391,15 +378,8 @@ async fn handle_mag<T: AsyncRead + AsyncWrite + Unpin + 'static>(
                     let complete = buf.freeze();
                     match msg_type {
                         MessageType::Text => {
-                            if let Err(e) = process_text(
-                                complete,
-                                pending,
-                                usersettings,
-                                user_data,
-                                ws,
-                                last_pong,
-                            )
-                            .await
+                            if let Err(e) =
+                                process_text(complete, usersettings, user_data, ws, last_pong).await
                             {
                                 error!("Error saving data!");
                                 debug!("{e}")
