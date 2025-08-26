@@ -1,0 +1,45 @@
+name: Create Release
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Read version from Cargo.toml
+        id: get_version
+        run: |
+          tomlPath="clippy/Cargo.toml"
+          versionLine=$(grep '^version\s*=' $tomlPath)
+          version=$(echo $versionLine | cut -d'"' -f2)
+          echo "version=$version" >> $GITHUB_OUTPUT
+
+      - name: Get merge commit info
+        id: merge_info
+        run: |
+          # Get last merge commit on main
+          COMMIT_SHA=$(git log -n 1 --merges --pretty=format:"%H")
+          echo "commit_sha=$COMMIT_SHA" >> $GITHUB_OUTPUT
+          # Get commit message
+          NAME=$(git log -1 --pretty=format:"%s" $COMMIT_SHA)
+          echo "name=$NAME" >> $GITHUB_OUTPUT
+          # Get commit body
+          BODY=$(git log -1 --pretty=format:"%b" $COMMIT_SHA)
+          echo "body=$BODY" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: "v${{ steps.get_version.outputs.version }}"
+          name: "${{ steps.merge_info.outputs.name }}"
+          body: "${{ steps.merge_info.outputs.body }}"
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

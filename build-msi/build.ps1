@@ -16,26 +16,32 @@ $wxsPath = "build-msi/Package.wxs"
 # Ensure output dir exists
 New-Item -ItemType Directory -Path "build" -Force | Out-Null
 
-# 32-bit
-cargo build --release --target i686-pc-windows-msvc --bin clippy --bin clippy-gui
-if ($?) {
-dotnet build build-msi -c Release -p:Platform=x86
-if ($?) {
-Copy-Item "build-msi/bin/x86/Release/en-US/clippy.msi" "build/clippy-x86-$version.msi"
-}}
+# Detect architecture
+$arch = if ([Environment]::Is64BitOperatingSystem) {
+    if ($env:PROCESSOR_ARCHITECTURE -eq "AMD64") { "x64" }
+    elseif ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" }
+    else { "x86" }  # fallback
+} else { "x86" }
 
-# 64-bit
-cargo build --release --target x86_64-pc-windows-msvc --bin clippy --bin clippy-gui
-if ($?) {
-dotnet build build-msi -c Release -p:Platform=x64
-if ($?) {
-Copy-Item "build-msi/bin/x64/Release/en-US/clippy.msi" "build/clippy-x64-$version.msi"
-}}
+Write-Host "Detected architecture: $arch"
 
-# ARM64
-cargo build --release --target aarch64-pc-windows-msvc --bin clippy --bin clippy-gui
-if ($?) {
-dotnet build build-msi -c Release -p:Platform=arm64
-if ($?) {
-Copy-Item "build-msi/bin/arm64/Release/en-US/clippy.msi" "build/clippy-arm64-$version.msi"
-}}
+# Build function
+function Build-Clippy($target, $platform) {
+    Write-Host "Building for $target ($platform)..."
+    cargo build --release --target $target --bin clippy --bin clippy-gui
+    if ($?) {
+        dotnet build build-msi -c Release -p:Platform=$platform
+        if ($?) {
+            $msiName = "clippy-$platform-$version.msi"
+            Copy-Item "build-msi/bin/$platform/Release/en-US/clippy.msi" "build/$msiName"
+            Write-Host "Build successful: build/$msiName"
+        }
+    }
+}
+
+switch ($arch) {
+    "x86"   { Build-Clippy "i686-pc-windows-msvc" "x86" }
+    "x64"   { Build-Clippy "x86_64-pc-windows-msvc" "x64" }
+    "arm64" { Build-Clippy "aarch64-pc-windows-msvc" "arm64" }
+    default { Write-Host "Unknown architecture: $arch" }
+}

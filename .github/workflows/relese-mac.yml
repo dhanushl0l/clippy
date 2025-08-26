@@ -1,0 +1,20 @@
+name: Build macOS (Placeholder)
+
+on:
+  workflow_run:
+    workflows: ["create release"]
+    types:
+      - completed
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Placeholder Message
+        run: |
+          echo "This is a placeholder workflow for macOS."
+          echo "If someone is interested in building, testing, and releasing clippy for macOS,"
+          echo "they can implement the workflow here."

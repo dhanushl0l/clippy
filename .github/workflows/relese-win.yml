@@ -1,0 +1,45 @@
+name: Build Releases
+
+on:
+  workflow_run:
+    workflows: ["create release"]
+    types:
+      - completed
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: ""
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        arch: [x86, x64, arm64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Install WiX Toolset
+        uses: microsoft/setup-wix@v1
+
+      - name: Install .NET SDK
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Build MSI
+        run: |
+          # Save matrix arch to environment variable
+          $env:ARCH = "${{ matrix.arch }}"
+          powershell.exe ./build-windows/build.ps1
+
+      - name: Upload Windows MSI
+        uses: softprops/action-gh-release@v1
+        with:
+          files: "build/clippy-${{ matrix.arch }}-*.msi"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
