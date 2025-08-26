@@ -14,9 +14,6 @@ Clippy is in the initial stages of development. If you're interested, contributi
 > Cloud sync functionality is currently broken in the alpha release. The API is under active development and may change frequently.  
 > Please wait for future releases for stable cloud sync support.
 
-We apologize for the delay in releasing the latest update. Due to unforeseen circumstances, we were unable to deliver it on time.
-The new release is now scheduled for 15/08/2025.
-
 ## Demo
 
 <img src="./assets/demo.png" width="400"/>
@@ -71,6 +68,15 @@ Download and install the `.msi` installer from the [Releases page](https://githu
 Clippy is licensed under the **GNU General Public License v2.0 (GPL-2.0-only)**.  
 See the [LICENSE](./LICENSE) file for more details.
 
+<<<<<<< HEAD
+## Stay Connected
+
+For discussions, updates, and questions, join our community:
+
+- Issues & Feature Requests: [GitHub Issues](https://github.com/dhanushl0l/clippy/issues)
+
+=======
+>>>>>>> testing
 ---
 
 ⭐ **Star this repo to show your support!**

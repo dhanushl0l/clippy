@@ -1,10 +1,13 @@
-name: Build macOS (Placeholder)
+name: Build Releases macOS (Placeholder)
 
 on:
   workflow_run:
-    workflows: ["create release"]
+    workflows: ["Create Release"]
     types:
       - completed
+
+permissions:
+  contents: write
 
 jobs:
   build-macos:

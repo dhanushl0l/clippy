@@ -25,7 +25,7 @@ while getopts "rd" opt; do
         ;;
     *)
         echo "Usage: $0 [-r] [-d]"
-        exit 1
+        MODE="debug"
         ;;
     esac
 done

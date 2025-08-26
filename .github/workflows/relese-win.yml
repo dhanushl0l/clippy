@@ -1,10 +1,13 @@
-name: Build Releases
+name: Build Releases Windows
 
 on:
   workflow_run:
-    workflows: ["create release"]
+    workflows: ["Create Release"]
     types:
       - completed
+
+permissions:
+  contents: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -13,33 +16,48 @@ env:
 jobs:
   build-windows:
     runs-on: windows-latest
-    strategy:
-      matrix:
-        arch: [x86, x64, arm64]
 
     steps:
       - uses: actions/checkout@v4
 
+      - name: Extract tag from release
+        id: extract_tag
+        shell: bash
+        run: |
+          TAG=$(gh api repos/${{ github.repository }}/releases \
+            --jq '.[0].tag_name')
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          targets: |
+            x86_64-pc-windows-msvc
+            i686-pc-windows-msvc
+            aarch64-pc-windows-msvc
 
       - name: Install WiX Toolset
-        uses: microsoft/setup-wix@v1
+        uses: microsoft/setup-msbuild@v1
 
       - name: Install .NET SDK
         uses: actions/setup-dotnet@v3
         with:
           dotnet-version: 8.0.x
 
-      - name: Build MSI
+      - name: Build MSI (x86, x64, arm64)
         run: |
-          # Save matrix arch to environment variable
-          $env:ARCH = "${{ matrix.arch }}"
-          powershell.exe ./build-windows/build.ps1
+          powershell.exe ./build-msi/build.ps1
 
-      - name: Upload Windows MSI
+      - name: Upload Windows MSI (all architectures)
         uses: softprops/action-gh-release@v1
         with:
-          files: "build/clippy-${{ matrix.arch }}-*.msi"
+          files: |
+            build/clippy-x86-*.msi
+            build/clippy-x64-*.msi
+            build/clippy-arm64-*.msi
+          tag_name: ${{ steps.extract_tag.outputs.tag }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
