@@ -1,4 +1,4 @@
-use log::{debug, error};
+use log::error;
 use tokio::sync::mpsc::Receiver;
 
 use crate::{MessageChannel, UserData, UserSettings, log_error};

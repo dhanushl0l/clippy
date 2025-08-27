@@ -153,6 +153,7 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
             Some((last, id, edit)) = user_data.next() => {
                 match edit {
                     Edit::Remove => {
+                        println!("re");
                         let buffer = ResopnseClientToServer::Remove(id.clone());
                         if ws
                             .send(ws::Message::Text(buffer.to_bytestring().unwrap()))
@@ -161,6 +162,7 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
                         {
                             return Err("Unable to send data to server".into());
                         }
+                        user_data.change_state(&id);
                     }
                     Edit::New { path, typ } => match File::open(&path).await {
                         Ok(mut file) => {

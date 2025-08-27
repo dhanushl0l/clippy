@@ -549,8 +549,13 @@ impl UserSettings {
         } else {
             None
         };
+        let key_bytes:String = match API_KEY{
+            Some(va) => va.to_string(),
+            None => env::var("KEY").expect("Environment variable KEY is not set").to_string()
+        };
+        
         if let Some(file) = file {
-            match decrypt_file(API_KEY.unwrap().as_bytes(), &file) {
+            match decrypt_file(key_bytes.as_bytes(), &file) {
                 Ok(va) => {
                     let data: UserCred =
                         serde_json::from_str(&String::from_utf8(va).unwrap()).unwrap();

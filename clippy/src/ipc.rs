@@ -1,9 +1,12 @@
 #[cfg(target_family = "unix")]
 pub mod ipc {
     use crate::write_clipboard::copy_to_unix;
-    use crate::{GUI_BIN, MessageChannel, MessageIPC, get_image_path, get_path_local, log_error};
+    use crate::{
+        API_KEY, GUI_BIN, MessageChannel, MessageIPC, get_image_path, get_path_local, log_error,
+    };
     use log::{debug, error, warn};
     use serde_json::Deserializer;
+    use std::fs::File;
     use std::io::{BufReader, Error, Read};
     use std::os::fd::{FromRawFd, IntoRawFd};
     use std::process::{Command, Stdio};
@@ -19,6 +22,9 @@ pub mod ipc {
     pub fn startup() -> Result<UnixListener, std::io::Error> {
         let mut path = get_path_local();
         path.push(".LOCK");
+        if let Err(e) = File::create(&path) {
+            debug!("{}", e);
+        }
         match UnixStream::connect(&path) {
             Ok(mut stream) => {
                 if env::var("CLIPPY_SERVICE").is_ok() {
@@ -43,6 +49,7 @@ pub mod ipc {
 
         let mut process = Command::new(GUI_BIN)
             .env("IPC", "0")
+            .env("KEY", API_KEY.unwrap())
             .stdin(unsafe { Stdio::from_raw_fd(child) })
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
