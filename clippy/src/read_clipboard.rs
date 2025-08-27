@@ -30,8 +30,6 @@ pub fn read_wayland_clipboard(tx: &Sender<MessageChannel>) -> Result<(), std::io
     .map(|s| s.to_string())
     .collect();
 
-    set_global_bool(false);
-
     let mut stream = WlClipboardPasteStream::init(WlListenType::ListenOnCopy).unwrap();
     stream.set_priority(preferred_formats);
     for i in stream.paste_stream().flatten().flatten() {
