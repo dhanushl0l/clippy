@@ -136,9 +136,9 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
                 MessageChannel::New { path, time, typ } => {
                     user_data.add_pending(time, Edit::New { path: path.into(), typ, }).await;
                 }
-                MessageChannel::Edit { path, old_id, time, typ } => {
-                    debug!("path {} old_id {} new_time {} typ {}",path,old_id,time,typ);
-                    user_data.add_pending(old_id, Edit::Edit { path: path.into(), typ: typ, new_id: time }).await;
+                MessageChannel::Edit { path, old_id, new_id, typ } => {
+                    debug!("path {} old_id {} new_time {} typ {}",path,old_id,new_id,typ);
+                    user_data.add_pending(old_id, Edit::Edit { path: path.into(), typ: typ, new_id, }).await;
                 }
                 MessageChannel::SettingsChanged => {
                     *usersettings = UserSettings::build_user()?;
@@ -153,7 +153,6 @@ async fn handle_connection<T: AsyncRead + AsyncWrite + Unpin + 'static>(
             Some((last, id, edit)) = user_data.next() => {
                 match edit {
                     Edit::Remove => {
-                        println!("re");
                         let buffer = ResopnseClientToServer::Remove(id.clone());
                         if ws
                             .send(ws::Message::Text(buffer.to_bytestring().unwrap()))
@@ -267,7 +266,8 @@ async fn process_text<T: AsyncRead + AsyncWrite + Unpin + 'static>(
                     user_data.add_data(new.unwrap(), usersettings.max_clipboard);
                 }
                 Edit::Edit { path, typ, new_id } => {
-                    rewrite_pending_to_data(path, typ, &new_id, usersettings.store_image);
+                    debug!("old edit data id: {:?}| new item id: {}", &path, new_id);
+                    rewrite_pending_to_data(path, typ, &new.unwrap(), usersettings.store_image);
                     user_data.add_data(new_id, usersettings.max_clipboard);
                 }
                 Edit::Remove => {

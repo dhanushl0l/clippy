@@ -124,7 +124,7 @@ impl Data {
     pub fn re_write_json(
         &self,
         tx: &Sender<MessageChannel>,
-        time: String,
+        new_id: String,
         old_id: String,
         path: PathBuf,
     ) -> Result<(), io::Error> {
@@ -132,17 +132,17 @@ impl Data {
         let path = get_path_image();
         let old_path = path.join(&format!("{}.png", old_id));
         if old_path.is_file() {
-            let new_path = path.join(&format!("{}.png", time));
+            let new_path = path.join(&format!("{}.png", new_id));
             fs::rename(&old_path, &new_path)?;
         }
         let path = get_path_pending();
         fs::create_dir_all(&path)?;
-        let file_path = &path.join(&time);
+        let file_path = &path.join(&new_id);
         let json_data = serde_json::to_string(self)?;
         let mut file = File::create(file_path)?;
         file.write_all(json_data.as_bytes())?;
         match tx.try_send(MessageChannel::Edit {
-            time,
+            new_id,
             old_id,
             path: file_path.to_str().unwrap().to_string(),
             typ: self.typ.clone(),
@@ -423,10 +423,11 @@ impl UserData {
         }
         let mut path = get_path();
         path.push(id);
-        match fs::remove_file(path) {
+        match fs::remove_file(&path) {
             Ok(_) => Ok(()),
             Err(ref e) if e.kind() == std::io::ErrorKind::NotFound => {
                 info!("File is already removed");
+                debug!("path of remove file {:?}", path);
                 Ok(())
             }
             Err(e) => {
@@ -549,11 +550,13 @@ impl UserSettings {
         } else {
             None
         };
-        let key_bytes:String = match API_KEY{
+        let key_bytes: String = match API_KEY {
             Some(va) => va.to_string(),
-            None => env::var("KEY").expect("Environment variable KEY is not set").to_string()
+            None => env::var("KEY")
+                .expect("Environment variable KEY is not set")
+                .to_string(),
         };
-        
+
         if let Some(file) = file {
             match decrypt_file(key_bytes.as_bytes(), &file) {
                 Ok(va) => {
@@ -746,7 +749,7 @@ pub enum MessageChannel {
     Edit {
         path: String,
         old_id: String,
-        time: String,
+        new_id: String,
         typ: String,
     },
     Remove(String),

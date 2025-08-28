@@ -68,15 +68,9 @@ Download and install the `.msi` installer from the [Releases page](https://githu
 Clippy is licensed under the **GNU General Public License v2.0 (GPL-2.0-only)**.  
 See the [LICENSE](./LICENSE) file for more details.
 
-<<<<<<< HEAD
-## Stay Connected
+## Issues & Feature Requests
 
-For discussions, updates, and questions, join our community:
+Issues & Feature Requests: [GitHub Issues](https://github.com/dhanushl0l/clippy/issues)
 
-- Issues & Feature Requests: [GitHub Issues](https://github.com/dhanushl0l/clippy/issues)
-
-=======
->>>>>>> testing
----
 
 ⭐ **Star this repo to show your support!**

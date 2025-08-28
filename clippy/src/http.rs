@@ -145,7 +145,7 @@ pub async fn health(
                 }
                 MessageChannel::Edit {
                     old_id,
-                    time,
+                    new_id,
                     typ,
                     path,
                 } => {
@@ -155,7 +155,7 @@ pub async fn health(
                             crate::Edit::Edit {
                                 path: path.into(),
                                 typ,
-                                new_id: time,
+                                new_id,
                             },
                         )
                         .await;

@@ -12,10 +12,10 @@ pub fn start_local(rx: &mut Receiver<MessageChannel>, mut usersettings: UserSett
                 MessageChannel::Edit {
                     path: _,
                     old_id: _,
-                    time,
+                    new_id,
                     typ: _,
                 } => {
-                    user_data.add_data(time, usersettings.max_clipboard);
+                    user_data.add_data(new_id, usersettings.max_clipboard);
                 }
                 MessageChannel::New {
                     path: _,
