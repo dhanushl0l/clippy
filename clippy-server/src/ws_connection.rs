@@ -213,7 +213,7 @@ async fn handle_bin(
             old_id: id.clone(),
             new_id: file_name.clone(),
         };
-        state.remove_and_add_edit(&user, &edit).unwrap();
+        state.remove_and_add_edit(&user, &id).unwrap();
         debug!("edit => old if: {}| new id: {}", id, file_name);
         if let Err(e) = tx.send(message) {
             error!("error sending state: {}", e);

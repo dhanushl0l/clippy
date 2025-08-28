@@ -26,7 +26,7 @@ use ws_connection::ws_connection;
 
 pub const DATABASE_PATH: &str = "data-base/users";
 const MAX_SIZE: usize = 10 * 1024 * 1024;
-const MAX_COUNT: usize = 30;
+const MAX_COUNT: usize = 100;
 pub static SMTP_USERNAME: OnceLock<String> = OnceLock::new();
 pub static SMTP_PASSWORD: OnceLock<String> = OnceLock::new();
 pub static SECRET_KEY: OnceLock<String> = OnceLock::new();
@@ -56,12 +56,12 @@ impl UserState {
             .get_mut(username)
             .ok_or("unable to identify user".to_string())?;
 
-        if user.state.remove(remove) {
-            match remove_db_file(username, remove) {
-                Ok(_) => (),
-                Err(err) => debug!("{}", err),
-            };
-        }
+        user.state.remove(remove);
+        println!("remove {}", remove);
+        match remove_db_file(username, remove) {
+            Ok(_) => (),
+            Err(err) => debug!("{}", err),
+        };
 
         if user.remove.len() >= MAX_COUNT {
             user.remove.pop_front();
@@ -563,6 +563,7 @@ fn remove_db_file(username: &str, id: &str) -> Result<(), io::Error> {
     let mut path = PathBuf::from(DATABASE_PATH);
     path.push(username);
     path.push(id);
+    debug!("remove path {:?}", &path);
     fs::remove_file(path)?;
     Ok(())
 }

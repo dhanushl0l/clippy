@@ -244,7 +244,8 @@ async fn process_text<T: AsyncRead + AsyncWrite + Unpin + 'static>(
     let state: ResopnseServerToClient = serde_json::from_slice(&bin)?;
     match state {
         ResopnseServerToClient::Success { old, new } => {
-            let (edit, _state) = match user_data.pop_pending(&old) {
+            let old_id = old;
+            let (edit, _state) = match user_data.pop_pending(&old_id) {
                 Some(v) => v,
                 None => {
                     debug!("{:?}", user_data);
@@ -266,12 +267,12 @@ async fn process_text<T: AsyncRead + AsyncWrite + Unpin + 'static>(
                     user_data.add_data(new.unwrap(), usersettings.max_clipboard);
                 }
                 Edit::Edit { path, typ, new_id } => {
-                    debug!("old edit data id: {:?}| new item id: {}", &path, new_id);
+                    debug!("old edit data id: {:?}| new item id: {}", &old_id, new_id);
                     rewrite_pending_to_data(path, typ, &new.unwrap(), usersettings.store_image);
                     user_data.add_data(new_id, usersettings.max_clipboard);
                 }
                 Edit::Remove => {
-                    user_data.remove_and_remove_file(&old)?;
+                    user_data.remove_and_remove_file(&old_id)?;
                 }
             }
             info!("Surcess sending new data");
@@ -302,7 +303,7 @@ async fn process_text<T: AsyncRead + AsyncWrite + Unpin + 'static>(
             }
         },
         ResopnseServerToClient::Remove(id) => {
-            for id in id {
+            for id in id.iter().rev() {
                 log_error!(user_data.remove_and_remove_file(&id));
             }
             set_global_update_bool(true)
