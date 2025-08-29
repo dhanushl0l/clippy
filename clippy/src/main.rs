@@ -4,26 +4,24 @@
 )]
 
 use clipboard_rs::{ClipboardWatcher, ClipboardWatcherContext};
+use clippy::ipc::ipc::{ipc_check, startup};
+use clippy::local::start_local;
 use clippy::user::start_cloud;
-use clippy::{UserSettings, get_path_local, read_clipboard, watch_for_next_clip_write};
+use clippy::{MessageChannel, UserSettings, read_clipboard};
 use env_logger::{Builder, Env};
-use fs4::fs_std::FileExt;
-use log::debug;
-use log::{error, info, warn};
+use log::error;
+use log::{debug, warn};
 use std::error::Error;
-use std::fs::File;
-use std::time::Duration;
 use std::{process, thread};
 use tokio::sync::mpsc::Sender;
 
 #[cfg(target_os = "linux")]
 use clippy::read_clipboard::read_wayland_clipboard;
-
 #[cfg(target_os = "linux")]
 use wayland_clipboard_listener::{WlClipboardPasteStream, WlListenType};
 
 #[cfg(target_os = "linux")]
-fn run(tx: &Sender<(String, String, String)>) {
+fn run(tx: &Sender<MessageChannel>) {
     use std::env;
 
     if env::var("WAYLAND_DISPLAY").is_ok() {
@@ -44,19 +42,19 @@ fn run(tx: &Sender<(String, String, String)>) {
 
 // need to find a way to monitor clipboard changes in wayland the current way is not optimal
 #[cfg(target_os = "linux")]
-fn read_clipboard_wayland(tx: &Sender<(String, String, String)>) {
+fn read_clipboard_wayland(tx: &Sender<MessageChannel>) {
     let mut stream = WlClipboardPasteStream::init(WlListenType::ListenOnCopy).unwrap();
 
     for _ in stream.paste_stream().flatten().flatten() {
         match read_wayland_clipboard(tx) {
             Ok(_) => (),
-            Err(err) => warn!("{}", err),
+            Err(err) => log::warn!("{}", err),
         }
     }
 }
 
 #[cfg(any(target_os = "windows", target_os = "macos"))]
-fn run(tx: &Sender<(String, String, String)>) {
+fn run(tx: &Sender<MessageChannel>) {
     match read_clipboard(tx) {
         Ok(_) => (),
         Err(err) => {
@@ -72,9 +70,7 @@ fn run(tx: Sender<(String, String)>) {
     process::exit(1);
 }
 
-fn read_clipboard(
-    tx: &Sender<(String, String, String)>,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
+fn read_clipboard(tx: &Sender<MessageChannel>) -> Result<(), Box<dyn Error + Send + Sync>> {
     let manager = read_clipboard::Manager::new(tx);
 
     let mut watcher = ClipboardWatcherContext::new()?;
@@ -86,72 +82,53 @@ fn read_clipboard(
     Ok(())
 }
 
-fn setup(file: &File) -> Result<(), Box<dyn Error>> {
-    Builder::from_env(Env::default().filter_or("LOG", "info")).init();
-
-    if std::env::var("IGNORE_STARTUP_LOCK").is_ok() {
-        warn!("Startup lock ignored due to IGNORE_STARTUP_LOCK=1");
-        return Ok(());
-    }
-
-    match file.try_lock_exclusive()? {
-        true => {
-            debug!("Lock acquired!");
-        }
-        false => {
-            error!(
-                "Another instance of the app is already running. If you're facing issues and the process is not actually running, set the environment variable IGNORE_STARTUP_LOCK=1 to override the lock."
-            );
-            process::exit(1);
-        }
-    }
-
-    Ok(())
-}
-
 fn main() {
-    let mut path = get_path_local();
-    path.push("CLIPPY.LOCK");
-
-    if !path.exists() {
-        File::create(&path).unwrap();
-    }
-    let file = File::open(path).unwrap();
-    match setup(&file) {
-        Ok(_) => {
+    Builder::from_env(Env::default().filter_or("LOG", "info")).init();
+    let channel = match startup() {
+        Ok(x) => {
             debug!("Process startup success");
+            x
         }
-        Err(err) => {
-            error!("Unable to start the app: {}", err);
+        Err(e) => {
+            error!("Another instence of the app is active stop it and try again");
+            debug!("{}", e);
             process::exit(1);
         }
-    }
+    };
 
-    let (tx, rx) = tokio::sync::mpsc::channel::<(String, String, String)>(30);
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<MessageChannel>(30);
 
-    let mut paste_on_click = false;
-    match UserSettings::build_user() {
-        Ok(usersettings) => {
-            paste_on_click = usersettings.paste_on_click && usersettings.click_on_quit;
-            if !usersettings.disable_sync {
-                if let Some(sync) = usersettings.get_sync() {
-                    start_cloud(rx, sync.clone(), usersettings);
-                } else {
+    thread::spawn(move || {
+        loop {
+            match UserSettings::build_user() {
+                Ok(usersettings) => {
+                    if usersettings.disable_sync {
+                        start_local(&mut rx, usersettings);
+                    } else {
+                        if usersettings.get_sync().is_some() {
+                            start_cloud(&mut rx, usersettings);
+                        } else {
+                            start_local(&mut rx, usersettings);
+                        }
+                    }
                 }
-            } else {
+                Err(err) => {
+                    warn!("user not logged in: {}", err);
+                    let usersettings = UserSettings::new();
+                    start_local(&mut rx, usersettings);
+                }
             }
         }
-        Err(err) => {
-            info!("user not logged in: {}", err);
-        }
-    }
+    });
 
     // this thread reads the gui clipboard entry && settings change
     {
-        thread::sleep(Duration::from_secs(1));
-        let path = get_path_local();
+        let tx_c = tx.clone();
         thread::spawn(move || {
-            watch_for_next_clip_write(path, paste_on_click);
+            if let Err(e) = ipc_check(channel, &tx_c) {
+                error!("unable to start background channel {}", e);
+                process::exit(1)
+            }
         });
     }
 

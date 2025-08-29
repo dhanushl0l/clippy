@@ -1,9 +1,15 @@
-use std::{fs::File, io::Write, path::PathBuf, time::Duration};
+use std::{
+    collections::VecDeque,
+    fs::File,
+    io::{Read, Write},
+    path::PathBuf,
+    time::Duration,
+};
 
-use actix_web::web::{Bytes, BytesMut};
-use actix_ws::{Item, Message, MessageStream, Session};
+use actix_web::web::{self, Bytes};
+use actix_ws::{AggregatedMessage, AggregatedMessageStream, Session};
 use chrono::Utc;
-use clippy::Resopnse;
+use clippy::{ResopnseClientToServer, ResopnseServerToClient, ToByteString};
 use futures_util::StreamExt;
 use log::{debug, error};
 use tokio::{
@@ -12,128 +18,101 @@ use tokio::{
     time::{Instant, sleep},
 };
 
-use crate::{DATABASE_PATH, ServResopnse, UserState, get_filename, to_zip};
+use crate::{DATABASE_PATH, MessageMPC, RoomManager, UserState, get_filename};
 
 pub async fn ws_connection(
     mut session: Session,
-    mut msg_stream: MessageStream,
-    tx: Sender<ServResopnse>,
+    mut msg_stream: AggregatedMessageStream,
+    tx: Sender<MessageMPC>,
     state: actix_web::web::Data<UserState>,
     user: String,
+    room: web::Data<RoomManager>,
 ) {
     let mut last_pong = Instant::now();
     let mut rx = tx.subscribe();
-    let mut buffer: Option<BytesMut> = None;
-    let mut old = String::new();
+    let mut old = true;
 
     loop {
         select! {
             msg = msg_stream.next() => {
                 match msg {
                     Some(Ok(msg)) => match msg {
-                        Message::Ping(ping) => {
+                        AggregatedMessage::Ping(ping) => {
                             let _ = session.pong(&ping).await;
                         }
-                        Message::Pong(_) => {
+                        AggregatedMessage::Pong(_) => {
                             last_pong = Instant::now();
                         }
-                        Message::Text(txt) => {
-                            if let Ok(parsed) = serde_json::from_str::<Resopnse>(&txt) {
+                        AggregatedMessage::Text(txt) => {
+                            if let Ok(parsed) = serde_json::from_str::<ResopnseClientToServer>(&txt) {
                                 match parsed {
-                                    Resopnse::CheckVersion(version) =>{
+                                    ResopnseClientToServer::CheckVersion(version) =>{
                                         if state.is_updated(&user, &version){
-                                            let status: Resopnse = Resopnse::Updated;
+                                            let status = ResopnseServerToClient::Updated;
                                             if let Err(e) =  session.text(serde_json::to_string(&status).unwrap()).await{
                                                 debug!("Unable to send response {}",e);
                                             };
                                         }else {
-                                            let status: Resopnse = Resopnse::Outdated;
+                                            let status = ResopnseServerToClient::Outdated;
                                             if let Err(e) =  session.text(serde_json::to_string(&status).unwrap()).await{
                                                 debug!("Unable to send response {}",e);
                                             };
                                         }
                                     }
-                                    Resopnse::CheckVersionArr(version)  =>{
+                                    ResopnseClientToServer::CheckVersionArr(version)  =>{
                                          match state.get(&user, &version) {
                                             Some(data)=> {
                                                 if data.is_empty() {
-                                                    let status: Resopnse = Resopnse::Updated;
+                                                    let status = ResopnseServerToClient::Updated;
                                                     if let Err(e) =  session.text(serde_json::to_string(&status).unwrap()).await{
                                                         debug!("Unable to send response {}",e);
                                                     };
                                                 } else {
-                                                    match to_zip(data) {
-                                                        Ok(data) => {
-                                                            if let Err(e) = session.binary(data).await {
-                                                                error!("Error sending bin to client{}",e);
-                                                            }
-                                                        },
-                                                        Err(err) => {
-                                                            error!("{:?}", err);
-                                                            let status: Resopnse = Resopnse::Error(String::from("Unable to generate tar"));
-                                                            if let Err(e) =  session.text(serde_json::to_string(&status).unwrap()).await{
-                                                                debug!("Unable to send response {}",e);
-                                                            };
-                                                        }
-                                                    }
+                                                    if let Err(e) = send_to_client(data, &mut session).await {
+                                                        debug!("Unable to send response {}",e);
+                                                        break;
+                                                    };
                                                 }
+                                                let data = ResopnseServerToClient::Remove(state.get_remove(&user));
+                                                if let Err(e) = session.text(serde_json::to_string(&data).unwrap()).await{
+                                                    debug!("Unable to send response {}",e);
+                                                };
                                             },
                                             None =>  {
-                                                let status: Resopnse = Resopnse::Updated;
+                                                let status = ResopnseServerToClient::Updated;
                                                 if let Err(e) =  session.text(serde_json::to_string(&status).unwrap()).await{
                                                     debug!("Unable to send response {}",e);
                                                 };
                                             },
                                         };
                                     }
+                                    ResopnseClientToServer::Data{data,id,last,is_it_edit} => {
+                                        handle_bin(&user, &state, &tx, &mut session, data, id, last, &mut old, is_it_edit).await;
+                                    },
+                                    ResopnseClientToServer::Remove(id) => {
+                                        state.remove_and_add_edit(&user, &id).unwrap();
+                                        old = false;
+                                        tx.send(MessageMPC::Remove(id)).unwrap();
+                                    },
                                     _ => {}
                                 }
                             }
                             last_pong = Instant::now();
                         }
-                        Message::Binary(bin) => {
-                            handle_bin(&user,&state,&tx,&mut session,bin,&mut old).await;
-                            last_pong = Instant::now();
+                        AggregatedMessage::Binary(_bin) => {
+                            continue;
                         },
-                        Message::Continuation(item) => {
-                            match item {
-                            Item::FirstBinary(data) => {
-                                buffer = Some(BytesMut::from(&data[..]));
-                            }
-
-                            Item::Continue(data) => {
-                                if let Some(buf) = &mut buffer {
-                                    buf.extend_from_slice(&data);
-                                } else {
-                                    eprintln!("Received CONTINUE without FIRST. Dropping.");
-                                    buffer = None;
-                                }
-                            }
-
-                            Item::Last(data) => {
-                                if let Some(mut buf) = buffer.take() {
-                                    buf.extend_from_slice(&data);
-                                    handle_bin(&user,&state,&tx,&mut session,buf.freeze(),&mut old).await;
-                                } else {
-                                    eprintln!("Received LAST without FIRST. Dropping.");
-                                }
-                            }
-                            _ => {}
-                        }
-                        last_pong = Instant::now();
-                        }
-                        Message::Close(reason) => {
-                            println!("Client closed: {:?}", reason);
+                        AggregatedMessage::Close(reason) => {
+                            debug!("Client closed: {:?}", reason);
                             break;
                         }
-                        Message::Nop => {},
                     }
                     Some(Err(e)) => {
-                        eprintln!("Stream error: {e}");
+                        error!("Stream error: {e}");
                         break;
                     }
                     None => {
-                        eprintln!("Client disconnected");
+                        error!("Client disconnected");
                         break;
                     }
                 }
@@ -142,27 +121,60 @@ pub async fn ws_connection(
             result = rx.recv() => {
                 match result {
                     Ok(val) => {
-                        match val {
-                            ServResopnse::New(new) => {
-                                if new != old {
-                                let status: Resopnse = Resopnse::Outdated;
-                                if let Err(e) =  session.text(serde_json::to_string(&status).unwrap()).await{
-                                    debug!("Unable to send response {}",e);
-                                };
+                        if old {
+                            match val {
+                                MessageMPC::Remove(id) => {
+                                    let mut vec = VecDeque::new();
+                                    vec.push_front(id);
+                                    let status = ResopnseServerToClient::Remove(vec);
+                                    if let Err(e) =  session.text(serde_json::to_string(&status).unwrap()).await {
+                                        debug!("Unable to send response {}",e);
+                                    };
+                                },
+                                MessageMPC::New(id) =>{
+                                    let path = format!("{}/{}/{}", DATABASE_PATH, user, id);
+                                    if let Ok(mut file) = File::open(path){
+                                        let mut buf = String::new();
+                                            if let Err(e) = file.read_to_string(&mut buf) {
+                                                error!("{}", e);
+                                                continue;
+                                            };
+                                        let status = ResopnseServerToClient::Data { data: buf, is_it_last: true, new_id: id };
+                                        if let Err(e) =  session.text(serde_json::to_string(&status).unwrap()).await {
+                                            debug!("Unable to send response {}",e);
+                                        };
+                                    }
+                                },
+                                MessageMPC::Edit{old_id, new_id} => {
+                                    let path = format!("{}/{}/{}", DATABASE_PATH, user, new_id);
+                                    if let Ok(mut file) = File::open(path){
+                                        let mut buf = String::new();
+                                            if let Err(e) = file.read_to_string(&mut buf) {
+                                                error!("{}", e);
+                                                continue;
+                                            };
+                                        let status = ResopnseServerToClient::EditReplace { data: buf, is_it_last: true, old_id, new_id };
+                                        if let Err(e) =  session.text(serde_json::to_string(&status).unwrap()).await {
+                                            debug!("Unable to send response {}",e);
+                                        };
+                                    }
+                                }
+                                MessageMPC::None => {}
                             }
-                            }
+
                         }
+                        old = true;
                     }
                     Err(e) => {
-                        eprintln!("Broadcast receive error: {e}");
+                        error!("Broadcast receive error: {e}");
                         break;
                     }
                 }
                 last_pong = Instant::now();
             }
             _ = sleep(Duration::from_secs(1)) => {
-                if last_pong.elapsed() > Duration::from_secs(15) {
-                    eprintln!("No pong in time. Disconnecting.");
+                if last_pong.elapsed() > Duration::from_secs(300) {
+                    error!("No pong in time. Disconnecting.");
                     return;
                 } else if last_pong.elapsed() > Duration::from_secs(5) {
                     let _ = session.ping(&Bytes::new()).await;
@@ -176,52 +188,78 @@ pub async fn ws_connection(
 async fn handle_bin(
     user: &str,
     state: &actix_web::web::Data<UserState>,
-    tx: &Sender<ServResopnse>,
+    tx: &Sender<MessageMPC>,
     session: &mut Session,
-    bin: Bytes,
-    old: &mut String,
+    data: String,
+    id: String,
+    last: bool,
+    old: &mut bool,
+    is_it_edit: Option<String>,
 ) {
     let mut path: PathBuf = PathBuf::new().join(format!("{}/{}/", DATABASE_PATH, user));
     match std::fs::create_dir_all(&path) {
         Ok(_) => {}
         Err(e) => error!("unable to create user dir {}", e),
     };
-
     let file_name = get_filename(Utc::now().timestamp(), path.clone());
     path.push(&file_name);
-    let bin = bin.to_vec();
-
-    let mut iter = bin.iter().enumerate().filter(|&(_, &b)| b == b'\n');
-
-    let pos1 = iter.next().map(|(i, _)| i);
-    let pos2 = iter.next().map(|(i, _)| i);
-
-    if let (Some(pos1), Some(pos2)) = (pos1, pos2) {
-        let header = &bin[..pos1];
-        let is_last = &bin[pos1 + 1..pos2];
-
-        let file_data = &bin[pos2 + 1..];
-
-        let name = String::from_utf8_lossy(header);
-        let is_last: bool = String::from_utf8_lossy(is_last).parse().unwrap();
-
-        let mut file = File::create(&path).unwrap();
-        file.write_all(file_data).unwrap();
-        state.update(&user, &file_name);
-        debug!("Saved file: {name}");
-        if is_last {
-            if let Err(e) = tx.send(ServResopnse::New(file_name.clone())) {
-                error!("error sending state: {}", e);
-            };
-            *old = file_name.clone();
-        }
-        let file: Resopnse = Resopnse::Success {
-            old: name.to_string(),
-            new: file_name.clone(),
+    let mut file = File::create(&path).unwrap();
+    file.write_all(data.as_bytes()).unwrap();
+    state.update(&user, &file_name);
+    debug!("Saved file: {id}");
+    if let Some(edit) = is_it_edit {
+        *old = false;
+        let message = MessageMPC::Edit {
+            old_id: id.clone(),
+            new_id: file_name.clone(),
         };
-        let file_str = serde_json::to_string(&file).unwrap();
-        session.text(file_str).await.unwrap();
-    } else {
-        error!("No header found");
+        state.remove_and_add_edit(&user, &id).unwrap();
+        debug!("edit => old if: {}| new id: {}", id, file_name);
+        if let Err(e) = tx.send(message) {
+            error!("error sending state: {}", e);
+        };
+    } else if last {
+        *old = false;
+        if let Err(e) = tx.send(MessageMPC::New(file_name.clone())) {
+            error!("error sending state: {}", e);
+        };
     }
+    let file: ResopnseServerToClient = ResopnseServerToClient::Success {
+        old: id.to_string(),
+        new: Some(file_name),
+    };
+    let file_str = serde_json::to_string(&file).unwrap();
+    session.text(file_str).await.unwrap();
+}
+
+async fn send_to_client(
+    data: Vec<(String, String)>,
+    session: &mut Session,
+) -> Result<(), actix_ws::Closed> {
+    for (i, (path, new_id)) in data.iter().enumerate() {
+        match File::open(&path) {
+            Ok(mut va) => {
+                let mut buf = String::new();
+                if let Err(e) = va.read_to_string(&mut buf) {
+                    error!("{}", e);
+                    continue;
+                };
+                session
+                    .text(
+                        ResopnseServerToClient::Data {
+                            data: buf,
+                            is_it_last: (i == data.len() - 1),
+                            new_id: new_id.to_string(),
+                        }
+                        .to_bytestring()
+                        .unwrap(),
+                    )
+                    .await?;
+            }
+            Err(e) => {
+                error!("{}", e)
+            }
+        }
+    }
+    Ok(())
 }

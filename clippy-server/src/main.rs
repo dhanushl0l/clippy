@@ -1,6 +1,8 @@
 mod db;
 mod email;
 
+use std::env;
+
 use crate::{
     db::{add_otp, check_otp, get_user, is_email_exists, is_user_exists},
     email::send_otp,
@@ -15,7 +17,8 @@ use clippy::{
     is_valid_username,
 };
 use clippy_server::{
-    CustomErr, DB, RoomManager, UserCred, UserState, auth, gen_otp, get_auth, hash_key,
+    CustomErr, DB_CONF, RoomManager, SECRET_KEY, SMTP_PASSWORD, SMTP_USERNAME, UserCred, UserState,
+    auth, gen_otp, get_auth, get_oncelock, hash_key,
 };
 use env_logger::{Builder, Env};
 use log::{debug, error};
@@ -178,25 +181,40 @@ async fn handle_connection(
         .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
 
     let (res, session, msg_stream) = actix_ws::handle(&req, stream)?;
-    let msg_stream = msg_stream.max_frame_size(1024 * 1024 * 40);
+    let msg_stream = msg_stream
+        .max_frame_size(30 * 1024 * 1024)
+        .aggregate_continuations()
+        .max_continuation_size(30 * 1024 * 1024);
 
-    room.add_task(username, session, msg_stream, state.clone())
+    room.add_task(username, session, msg_stream, room.clone(), state.clone())
         .await;
     Ok(res)
+}
+
+pub fn init_env() {
+    SMTP_USERNAME
+        .set(env::var("SMTP_USERNAME").expect("SMTP_USERNAME not set"))
+        .ok();
+    SMTP_PASSWORD
+        .set(env::var("SMTP_PASSWORD").expect("SMTP_PASSWORD not set"))
+        .ok();
+    SECRET_KEY.set(env::var("KEY").expect("KEY not set")).ok();
+    DB_CONF.set(env::var("DB_CONF").expect("KEY not set")).ok();
 }
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     Builder::from_env(Env::default().filter_or("LOG", "info")).init();
+    init_env();
 
     let user_state = web::Data::new(UserState::new());
-    let data = web::Data::new(RoomManager::new());
-    let pool = web::Data::new(PgPool::connect(DB.unwrap()).await.unwrap());
+    let room = web::Data::new(RoomManager::new());
+    let pool = web::Data::new(PgPool::connect(get_oncelock(&DB_CONF)).await.unwrap());
 
     HttpServer::new(move || {
         App::new()
             .app_data(user_state.clone())
-            .app_data(data.clone())
+            .app_data(room.clone())
             .app_data(pool.clone())
             .route("/connect", web::get().to(handle_connection))
             .route("/signin", web::post().to(signin))

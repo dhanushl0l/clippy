@@ -1,0 +1,47 @@
+name: Build Release Linux
+
+on:
+  workflow_run:
+    workflows: ["Create Release"] 
+    types:
+      - completed
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: ""
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract tag from release
+        id: extract_tag
+        run: |
+          TAG=$(gh api repos/${{ github.repository }}/releases \
+            --jq '.[0].tag_name')
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libssl-dev libxkbcommon-dev
+
+      - name: Set up Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Build
+        run: build-linux/build.sh -r
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.extract_tag.outputs.tag }}
+          files: "build/clippy-*.tar.xz"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

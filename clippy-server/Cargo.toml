@@ -1,6 +1,6 @@
 [package]
 name = "clippy-server"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 
 [dependencies]
@@ -25,7 +25,6 @@ lettre = { version = "0.11", default-features = false, features = [
 actix-web-httpauth = "0.8.2"
 base64 = "0.22.1"
 sha2 = "0.10.9"
-tar = "0.4.44"
 actix-ws = "0.3.0"
 sqlx = { version = "0.8", features = [
     "runtime-tokio",
@@ -33,3 +32,4 @@ sqlx = { version = "0.8", features = [
     "postgres",
     "chrono",
 ] }
+bytestring = { version = "1.4.0", features = ["serde"] }

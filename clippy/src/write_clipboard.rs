@@ -3,31 +3,22 @@ use base64::{Engine, engine::general_purpose};
 use clipboard_rs::{Clipboard, ClipboardContext, RustImageData, common::RustImage};
 use std::{error::Error, thread, time::Duration};
 
-#[cfg(target_os = "linux")]
-pub fn copy_to_linux(data: Data) -> Result<(), String> {
-    if std::env::var("WAYLAND_DISPLAY").is_ok() {
-        copy_to_clipboard_wl(data)
-    } else if std::env::var("DISPLAY").is_ok() {
-        copy_to_clipboard(data).map_err(|err| format!("{}", err))
-    } else {
-        Err(format!("No display server detected"))
+#[cfg(target_family = "unix")]
+pub fn copy_to_unix(data: Data, paste_on_click: bool) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        if std::env::var("WAYLAND_DISPLAY").is_ok() {
+            return copy_to_clipboard_wl(data, paste_on_click);
+        }
     }
+
+    copy_to_clipboard(data, paste_on_click).map_err(|err| format!("{}", err))
 }
 
 #[cfg(target_os = "linux")]
-fn copy_to_clipboard_wl(data: Data) -> Result<(), String> {
-    set_global_bool(true);
-    push_to_clipboard_wl(data, false, false)
-}
-
-#[cfg(target_os = "linux")]
-pub fn push_to_clipboard_wl(
-    data: Data,
-    _forground: bool,
-    paste_on_click: bool,
-) -> Result<(), String> {
+pub fn copy_to_clipboard_wl(data: Data, paste_on_click: bool) -> Result<(), String> {
     use wayland_clipboard_listener::WlClipboardCopyStream;
-
+    set_global_bool(false);
     thread::spawn(move || {
         let context = if data.typ.starts_with("text") {
             data.data.into_bytes()
@@ -57,7 +48,6 @@ pub fn push_to_clipboard_wl_command(data: Data) -> Result<(), String> {
     let data_u8 = if data.typ.starts_with("image/") {
         general_purpose::STANDARD.decode(&data.data).unwrap()
     } else {
-        println!("{}", data.typ);
         data.data.into_bytes()
     };
 
@@ -77,15 +67,11 @@ pub fn push_to_clipboard_wl_command(data: Data) -> Result<(), String> {
     Ok(())
 }
 
-pub fn copy_to_clipboard(data: Data) -> Result<(), Box<dyn Error + Send + Sync>> {
-    set_global_bool(true);
-    push_to_clipboard(data, false)
-}
-
-pub fn push_to_clipboard(
+pub fn copy_to_clipboard(
     data: Data,
     paste_on_click: bool,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    set_global_bool(false);
     let ctx = ClipboardContext::new()?;
 
     if data.typ.starts_with("image/") {

@@ -1,7 +1,7 @@
 mod ws_connection;
 use actix_multipart::Multipart;
-use actix_web::{HttpResponse, rt};
-use actix_ws::{MessageStream, Session};
+use actix_web::{HttpResponse, rt, web};
+use actix_ws::{AggregatedMessageStream, Session};
 use base64::{Engine, engine::general_purpose};
 use chrono::{Duration, Utc};
 use clippy::{LoginUserCred, NewUserOtp};
@@ -14,23 +14,33 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use sqlx::prelude::FromRow;
 use std::{
-    collections::{BTreeSet, HashMap, hash_map::Entry},
+    collections::{BTreeSet, HashMap, VecDeque, hash_map::Entry},
+    error::Error,
     fs::{self},
-    io::{Error, Write},
-    path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    io::{self, Write},
+    path::PathBuf,
+    sync::{Arc, Mutex, OnceLock},
 };
-use tar::Builder;
 use tokio::sync::{self, broadcast::Sender};
 use ws_connection::ws_connection;
 
 pub const DATABASE_PATH: &str = "data-base/users";
-pub const DB: Option<&str> = option_env!("DB_CONF");
 const MAX_SIZE: usize = 10 * 1024 * 1024;
+const MAX_COUNT: usize = 100;
+pub static SMTP_USERNAME: OnceLock<String> = OnceLock::new();
+pub static SMTP_PASSWORD: OnceLock<String> = OnceLock::new();
+pub static SECRET_KEY: OnceLock<String> = OnceLock::new();
+pub static DB_CONF: OnceLock<String> = OnceLock::new();
 
 #[derive(Debug, Clone)]
 pub struct UserState {
-    data: Arc<Mutex<HashMap<String, BTreeSet<String>>>>,
+    data: Arc<Mutex<HashMap<String, User>>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct User {
+    state: BTreeSet<String>,
+    remove: VecDeque<String>,
 }
 
 impl UserState {
@@ -38,6 +48,27 @@ impl UserState {
         Self {
             data: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    pub fn remove_and_add_edit(&self, username: &str, remove: &str) -> Result<(), String> {
+        let mut map = self.data.lock().map_err(|_| "Mutex poisoned")?;
+        let user = map
+            .get_mut(username)
+            .ok_or("unable to identify user".to_string())?;
+
+        user.state.remove(remove);
+        println!("remove {}", remove);
+        match remove_db_file(username, remove) {
+            Ok(_) => (),
+            Err(err) => debug!("{}", err),
+        };
+
+        if user.remove.len() >= MAX_COUNT {
+            user.remove.pop_front();
+        }
+        user.remove.push_back(remove.to_string());
+
+        Ok(())
     }
 
     pub fn entry(&self, username: &str) -> Result<(), String> {
@@ -48,7 +79,11 @@ impl UserState {
             .map_err(|e| format!("Failed to create dir {}: {}", dir_path, e))?;
 
         if !map.contains_key(username) {
-            map.insert(username.to_string(), BTreeSet::new());
+            let user = User {
+                state: BTreeSet::new(),
+                remove: VecDeque::new(),
+            };
+            map.insert(username.to_string(), user);
             debug!("{:?}", self);
         }
 
@@ -62,21 +97,21 @@ impl UserState {
     pub fn update(&self, username: &str, id: &str) {
         let mut map = self.data.lock().unwrap();
         if let Some(set) = map.get_mut(username) {
-            let len = set.len();
+            let len = set.state.len();
             if len > 29 {
                 let remove_count = len - 29;
-                let to_remove: Vec<_> = set.iter().take(remove_count).cloned().collect();
+                let to_remove: Vec<_> = set.state.iter().take(remove_count).cloned().collect();
                 for val in to_remove {
                     debug!("removing {:?}", val);
                     match remove_db_file(username, &val) {
                         Ok(_) => (),
                         Err(err) => error!("{}", err),
                     };
-                    set.remove(&val);
+                    set.state.remove(&val);
                 }
             }
 
-            set.insert(id.to_string());
+            set.state.insert(id.to_string());
         } else {
             error!("Unabe to update user state: {}", id);
         }
@@ -93,7 +128,7 @@ impl UserState {
 
         let data = guard.get(username);
         if let Some(val) = data {
-            match val.last() {
+            match val.state.last() {
                 Some(last) => {
                     debug!("{},{}", id, last);
                     last == id
@@ -115,8 +150,9 @@ impl UserState {
             .get(username)
             .ok_or_else(|| HttpResponse::Unauthorized().body("Error: authentication failed"))?;
 
-        if let Some(pos) = tree.iter().position(|x| x == id) {
+        if let Some(pos) = tree.state.iter().position(|x| x == id) {
             Ok(tree
+                .state
                 .iter()
                 .skip(pos + 1)
                 .map(|x| format!("{}/{}/{}", DATABASE_PATH, username, x))
@@ -124,6 +160,7 @@ impl UserState {
         } else {
             if !map.is_empty() {
                 Ok(tree
+                    .state
                     .iter()
                     .map(|x| format!("{}/{}/{}", DATABASE_PATH, username, x))
                     .collect())
@@ -133,20 +170,40 @@ impl UserState {
         }
     }
 
-    pub fn get(&self, username: &str, id: &[String]) -> Option<Vec<String>> {
+    pub fn get(&self, username: &str, id: &[String]) -> Option<Vec<(String, String)>> {
         let map = self.data.lock().unwrap();
-
         let tree = map.get(username)?;
-
         let mut temp = Vec::new();
-
-        for i in tree {
+        for i in tree.state.iter() {
             if !id.contains(i) {
-                temp.push(format!("{}/{}/{}", DATABASE_PATH, username, i));
+                temp.push((
+                    format!("{}/{}/{}", DATABASE_PATH, username, i),
+                    i.to_string(),
+                ));
             }
         }
 
         Some(temp)
+    }
+
+    pub fn get_remove(&self, username: &str) -> VecDeque<String> {
+        let map = self.data.lock().unwrap();
+        let tree = map.get(username).unwrap();
+        tree.remove.clone()
+    }
+
+    pub fn remove(&self, username: &str, id: &str) -> Result<(), Box<dyn Error>> {
+        let mut map = self.data.lock().or_else(|_| Err("Unable to lock cred"))?;
+        let tree = map
+            .get_mut(username)
+            .ok_or_else(|| "Unable to identify user")?;
+        if tree.state.remove(id) {
+            match remove_db_file(username, id) {
+                Ok(_) => (),
+                Err(err) => debug!("{}", err),
+            };
+        }
+        Ok(())
     }
 }
 
@@ -302,23 +359,6 @@ pub fn get_filename(id: i64, mut path: PathBuf) -> String {
     file_name
 }
 
-pub fn to_zip(files: Vec<String>) -> Result<Vec<u8>, Error> {
-    let mut buffer = Vec::new();
-    {
-        let mut tar = Builder::new(&mut buffer);
-
-        for file in &files {
-            let path = Path::new(file);
-            tar.append_path(path)?;
-        }
-
-        tar.finish()?;
-    }
-    Ok(buffer)
-}
-
-const SECRET_KEY: Option<&str> = option_env!("KEY");
-
 #[derive(Deserialize)]
 pub struct Claims {
     user: String,
@@ -331,7 +371,7 @@ pub fn auth(key: &str) -> Result<String, jsonwebtoken::errors::Error> {
 
     let token = decode::<Claims>(
         &key,
-        &DecodingKey::from_secret(SECRET_KEY.unwrap().as_ref()),
+        &DecodingKey::from_secret(get_oncelock(&SECRET_KEY).as_ref()),
         &validation,
     )?;
 
@@ -394,9 +434,10 @@ impl OTPState {
 pub struct RoomManager {
     room: sync::Mutex<HashMap<String, Room>>,
 }
+#[derive(Debug)]
 pub struct Room {
     clients: sync::Mutex<Vec<rt::task::JoinHandle<()>>>,
-    tx: Sender<ServResopnse>,
+    tx: Sender<MessageMPC>,
 }
 
 impl RoomManager {
@@ -410,7 +451,8 @@ impl RoomManager {
         &self,
         user: String,
         session: Session,
-        msg_stream: MessageStream,
+        msg_stream: AggregatedMessageStream,
+        room: web::Data<RoomManager>,
         state: actix_web::web::Data<UserState>,
     ) {
         let mut rooms = self.room.lock().await;
@@ -418,14 +460,40 @@ impl RoomManager {
             Entry::Occupied(mut entry) => {
                 let a = entry.get_mut();
                 let tx = a.tx.clone();
-                a.add(session, msg_stream, tx, state, user).await;
+                a.add(session, msg_stream, tx, state, user, room).await;
             }
             Entry::Vacant(entry) => {
-                let mut room = Room::new();
-                let tx = room.tx.clone();
-                room.add(session, msg_stream, tx, state, user).await;
-                entry.insert(room);
+                let mut new_room = Room::new();
+                let tx = new_room.tx.clone();
+                new_room
+                    .add(session, msg_stream, tx, state, user, room)
+                    .await;
+                entry.insert(new_room);
             }
+        }
+    }
+
+    pub async fn remove(&self, user: String, pos: usize) {
+        let rooms = self.room.lock().await;
+        if let Some(room) = &mut rooms.get(&user) {
+            let mut coll = room.clients.lock().await;
+            coll.remove(pos);
+        }
+    }
+
+    pub async fn remove_inactive(&self) {
+        let mut room = self.room.lock().await;
+        let mut remove_room = Vec::new();
+        for (k, v) in room.iter_mut() {
+            let client = v.clients.get_mut();
+            if client.is_empty() {
+                remove_room.push(k.clone());
+            } else {
+                client.retain(|x| !x.is_finished());
+            }
+        }
+        for i in remove_room {
+            room.remove(&i);
         }
     }
 }
@@ -442,26 +510,26 @@ impl Room {
     async fn add(
         &mut self,
         session: Session,
-        msg_stream: MessageStream,
-        tx: Sender<ServResopnse>,
+        msg_stream: AggregatedMessageStream,
+        tx: Sender<MessageMPC>,
         state: actix_web::web::Data<UserState>,
         user: String,
+        room: web::Data<RoomManager>,
     ) {
         let val = self.clients.get_mut();
-        // val.retain(|x| {
-        //     println!("removing{:?}", x);
-        //     !x.is_finished()
-        // });
         val.push(rt::spawn(ws_connection(
-            session, msg_stream, tx, state, user,
+            session, msg_stream, tx, state, user, room,
         )));
-        println!("total threads {}", val.len());
+        debug!("total threads {}", val.len());
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum ServResopnse {
+#[derive(Debug, Clone, PartialEq)]
+pub enum MessageMPC {
     New(String),
+    Edit { old_id: String, new_id: String },
+    Remove(String),
+    None,
 }
 pub fn get_auth(username: &str, exp: i64) -> Result<String, jsonwebtoken::errors::Error> {
     let now = Utc::now();
@@ -480,7 +548,7 @@ pub fn get_auth(username: &str, exp: i64) -> Result<String, jsonwebtoken::errors
     let token = encode(
         &Header::default(),
         &claims,
-        &EncodingKey::from_secret(SECRET_KEY.unwrap().as_ref()),
+        &EncodingKey::from_secret(get_oncelock(&SECRET_KEY).as_ref()),
     )?;
 
     Ok(token)
@@ -491,10 +559,11 @@ fn is_token_expired(expiry_timestamp: i64) -> bool {
     now_timestamp >= expiry_timestamp
 }
 
-fn remove_db_file(username: &str, id: &str) -> Result<(), Error> {
+fn remove_db_file(username: &str, id: &str) -> Result<(), io::Error> {
     let mut path = PathBuf::from(DATABASE_PATH);
     path.push(username);
     path.push(id);
+    debug!("remove path {:?}", &path);
     fs::remove_file(path)?;
     Ok(())
 }
@@ -505,4 +574,8 @@ pub fn hash_key(key: &str, user: &str) -> String {
     hasher.update(user);
     let result = hasher.finalize();
     general_purpose::STANDARD.encode(result)
+}
+
+pub fn get_oncelock(key: &OnceLock<String>) -> &str {
+    key.get().expect("not initialized")
 }

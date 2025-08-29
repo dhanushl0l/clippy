@@ -2,51 +2,46 @@
 
 cd "$(dirname "$0")"
 
-URL="https://repo.dhanu.cloud/clippy/clippy-release.tar.xz"
-ARCHIVE_NAME="clippy-release.tar.xz"
+ARCH=$(uname -m)
+VERSION="0.1.2"
 TARGET_DIR="clippy"
-SOURCE_DIR="target/release"
-BUILD_LINUX="build-linux"
+SOURCE_DIR="target"
 BUILD_ASSETS="assets"
-
-do_r=false
-do_d=false
-
-while getopts "rd" opt; do
-  case $opt in
-  r) do_r=true ;;
-  d) do_d=true ;;
-  \?)
-    echo "Invalid option: -$OPTARG" >&2
-    exit 1
-    ;;
-  esac
-done
-if $do_r; then
-  SOURCE_DIR="../target/release"
-  BUILD_LINUX="../build-linux"
-  BUILD_ASSETS="../assets"
-elif $do_d; then
-  SOURCE_DIR="../target/debug"
-  BUILD_LINUX="../build-linux"
-  BUILD_ASSETS="../assets"
-else
-  echo "Downloading file..."
-  curl -L -o "$ARCHIVE_NAME" "$URL"
-  mkdir -p "$TARGET_DIR"
-  tar -xJf "$ARCHIVE_NAME" -C "$TARGET_DIR"
-  cd "$TARGET_DIR" || {
-    echo "Failed to cd into $TARGET_DIR"
-    exit 1
-  }
-fi
 
 # Define the target locations
 BIN_DIR="/usr/local/bin"
 SERVICE_DIR="/etc/systemd/user"
 SERVICE_NAME="clippy.service"
+BUILD_LINUX="config"
 
-systemctl --user stop "$SERVICE_NAME"
+while getopts "rd" opt; do
+  case "$opt" in
+  r)
+    TYPE="release"
+    ;;
+  d)
+    TYPE="debug"
+    ;;
+  *)
+    echo "Usage: $0 [-r] [-d]"
+    exit 1
+    ;;
+  esac
+done
+
+URL="https://github.com/dhanushl0l/clippy/releases/download/v$VERSION/clippy-$TYPE-$VERSION-$ARCH.tar.xz"
+ARCHIVE_NAME="clippy-release.tar.xz"
+
+curl -L "$URL" -o "$ARCHIVE_NAME"
+tar -xJf $ARCHIVE_NAME -C $TARGET_DIR
+cd $TARGET_DIR
+
+if systemctl --user is-active --quiet "$SERVICE_NAME"; then
+  echo "Hey! You're updating $SERVICE_NAME..."
+  systemctl --user stop "$SERVICE_NAME"
+else
+  echo "Installing clippy"
+fi
 
 echo "Copying file..."
 # Create the service directory if it doesn't exist
@@ -54,11 +49,10 @@ mkdir -p "$SERVICE_DIR"
 
 sudo cp "$SOURCE_DIR/clippy" "$BIN_DIR/clippy"
 sudo cp "$SOURCE_DIR/clippy-gui" "$BIN_DIR/clippy-gui"
-
 sudo cp "$BUILD_LINUX/clippy.service" "$SERVICE_DIR/$SERVICE_NAME"
 
 for f in "$BUILD_ASSETS"/icons/clippy-*.png; do
-  [[ -e "$f" ]] || continue # skip if no file matched
+  [[ -e "$f" ]] || continue
 
   base=$(basename "$f")
   size=$(echo "$base" | sed -E 's/clippy-([0-9]+)-([0-9]+)(@2)?\.png/\1x\2/')
@@ -86,3 +80,8 @@ systemctl --user start "$SERVICE_NAME"
 
 # Provide feedback
 echo "Service has been started and enabled."
+
+cd ..
+
+rm $ARCHIVE_NAME
+rm -r $TARGET_DIR

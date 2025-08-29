@@ -1,4 +1,4 @@
-use crate::{Pending, UserCred, UserSettings};
+use crate::{MessageChannel, UserCred, UserData, UserSettings};
 use core::time;
 use log::{debug, error, warn};
 use once_cell::sync::Lazy;
@@ -13,7 +13,7 @@ pub const SERVER: &str = "http://127.0.0.1:7777";
 pub const SERVER: &str = "https://clippy.dhanu.cloud";
 
 #[cfg(debug_assertions)]
-pub const SERVER_WS: &str = "ws://0.0.0.0:7777/connect";
+pub const SERVER_WS: &str = "ws://127.0.0.1:7777/connect";
 
 #[cfg(not(debug_assertions))]
 pub const SERVER_WS: &str = "wss://clippy.dhanu.cloud/connect";
@@ -82,7 +82,7 @@ pub async fn get_token_serv(user: &UserCred, client: &Client) -> Result<(), Box<
         if response.status() == reqwest::StatusCode::UNAUTHORIZED {
             let mut user = UserSettings::build_user().unwrap();
             user.remove_user();
-            user.write().unwrap();
+            user.write_local().unwrap();
             error!(
                 "Unable to verify credentials, logging out. {:?}",
                 response.text().await
@@ -96,9 +96,9 @@ pub async fn get_token_serv(user: &UserCred, client: &Client) -> Result<(), Box<
 
 pub async fn health(
     client: &Client,
-    rx: &mut Receiver<(String, String, String)>,
-    pending: &mut Pending,
-) {
+    rx: &mut Receiver<MessageChannel>,
+    user_data: &UserData,
+) -> bool {
     let mut log = true;
     loop {
         let response = client
@@ -111,7 +111,7 @@ pub async fn health(
                 if response.status().is_success() && response.status().as_u16() == 200 {
                     if let Ok(text) = response.text().await {
                         if text == "SERVER_ACTIVE" {
-                            break;
+                            break false;
                         }
                     } else {
                         warn!("Server is out");
@@ -126,15 +126,47 @@ pub async fn health(
                 }
             }
             Err(err) => {
-                while let Ok((path, id, typ)) = rx.try_recv() {
-                    pending.add(path, id, typ);
-                }
                 debug!("ubale to connect :{:?}|{}", client, err);
                 thread::sleep(time::Duration::from_secs(5));
             }
         }
-        while let Ok((path, id, typ)) = rx.try_recv() {
-            pending.add(path, id, typ);
+        while let Ok(val) = rx.try_recv() {
+            match val {
+                MessageChannel::New { path, time, typ } => {
+                    user_data
+                        .add_pending(
+                            time,
+                            crate::Edit::New {
+                                path: path.into(),
+                                typ,
+                            },
+                        )
+                        .await;
+                }
+                MessageChannel::Edit {
+                    old_id,
+                    new_id,
+                    typ,
+                    path,
+                } => {
+                    user_data
+                        .add_pending(
+                            old_id,
+                            crate::Edit::Edit {
+                                path: path.into(),
+                                typ,
+                                new_id,
+                            },
+                        )
+                        .await;
+                }
+                MessageChannel::SettingsChanged => {
+                    unimplemented!("to do")
+                }
+                MessageChannel::Remove(id) => {
+                    user_data.add_pending(id, crate::Edit::Remove).await;
+                }
+            }
         }
     }
 }

@@ -10,17 +10,17 @@ Clippy is a cross-platform clipboard and notes manager that syncs across your de
 🚀 **Project Status: Early Development**  
 Clippy is in the initial stages of development. If you're interested, contributions are welcome!
 
-> ⚠️ **Warning: Cloud Sync Features Are Experimental**  
-> Cloud sync functionality is currently broken in the alpha release. The API is under active development and may change frequently.  
-> Please wait for future releases for stable cloud sync support.
-
 ## Demo
 
 <img src="./assets/demo.png" width="400"/>
 
 ## Contributions
 
-We appreciate any contributions! Whether it's reporting bugs, suggesting features, or writing code, your help makes a difference.
+We welcome all contributions — whether it's reporting bugs, suggesting improvements, or submitting code.
+
+- Please refer to the [testing branch](https://github.com/dhanushl0l/clippy/tree/testing) for the latest development work. Contributions should be made to this branch.
+- To report bugs or request features, use the [GitHub Issues](https://github.com/dhanushl0l/clippy/issues) page.
+
 
 ## Roadmap
 
@@ -65,12 +65,9 @@ Download and install the `.msi` installer from the [Releases page](https://githu
 Clippy is licensed under the **GNU General Public License v2.0 (GPL-2.0-only)**.  
 See the [LICENSE](./LICENSE) file for more details.
 
-## Stay Connected
-
-For discussions, updates, and questions, join our community:
+## Issues & Feature Requests
 
 - Issues & Feature Requests: [GitHub Issues](https://github.com/dhanushl0l/clippy/issues)
 
----
 
 ⭐ **Star this repo to show your support!**

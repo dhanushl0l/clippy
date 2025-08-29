@@ -1,13 +1,44 @@
-$env:KEY = ([Convert]::ToBase64String((1..24 | ForEach-Object { [byte](Get-Random -Max 256) }))).Substring(0,32)
+# Read version from Cargo.toml
+$tomlPath = "clippy/Cargo.toml"
+$versionLine = Get-Content $tomlPath | Where-Object { $_ -match '^version\s*=' }
+$version = ($versionLine -split '"')[1]
 
-# 32-bit
+# Update Version in Package.wxs
+$wxsPath = "build-msi/Package.wxs"
+(Get-Content $wxsPath) | ForEach-Object {
+    if ($_ -match '<Package\b.*Version="[\d\.]*"') {
+        $_ -replace 'Version="[\d\.]*"', "Version=`"$version.0`""
+    } else {
+        $_
+    }
+} | Set-Content $wxsPath
+
+# Ensure output dir exists
+New-Item -ItemType Directory -Path "build" -Force | Out-Null
+
+# --- Build 32-bit ---
 cargo build --release --target i686-pc-windows-msvc --bin clippy --bin clippy-gui
-dotnet build build-msi -c Release -p:Platform=x86
+if ($?) {
+    dotnet build build-msi -c Release -p:Platform=x86
+    if ($?) {
+        Copy-Item "build-msi/bin/x86/Release/en-US/clippy.msi" "build/clippy-x86-$version.msi"
+    }
+}
 
-# 64-bit
+# --- Build 64-bit ---
 cargo build --release --target x86_64-pc-windows-msvc --bin clippy --bin clippy-gui
-dotnet build build-msi -c Release -p:Platform=x64
+if ($?) {
+    dotnet build build-msi -c Release -p:Platform=x64
+    if ($?) {
+        Copy-Item "build-msi/bin/x64/Release/en-US/clippy.msi" "build/clippy-x64-$version.msi"
+    }
+}
 
-# ARM64
-# cargo build --release --target aarch64-pc-windows-msvc --bin clippy --bin clippy-gui
-# dotnet build build-msi -c Release -p:Platform=arm64
+# --- Build ARM64 ---
+cargo build --release --target aarch64-pc-windows-msvc --bin clippy --bin clippy-gui
+if ($?) {
+    dotnet build build-msi -c Release -p:Platform=arm64
+    if ($?) {
+        Copy-Item "build-msi/bin/arm64/Release/en-US/clippy.msi" "build/clippy-arm64-$version.msi"
+    }
+}

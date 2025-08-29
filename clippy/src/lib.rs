@@ -1,5 +1,7 @@
 pub mod encryption_decryption;
 pub mod http;
+pub mod ipc;
+pub mod local;
 pub mod macros;
 pub mod read_clipboard;
 pub mod user;
@@ -7,19 +9,17 @@ pub mod write_clipboard;
 
 use base64::Engine;
 use base64::engine::general_purpose;
-use bytes::Bytes;
-use chrono::prelude::Utc;
+use bytestring::ByteString;
 use encryption_decryption::{decrypt_file, encrept_file};
 use image::{ImageReader, load_from_memory};
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::error::Error;
 use std::fs::create_dir;
-use std::io::Write;
-use std::path::Path;
+use std::io::{Read, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime};
 use std::{
     collections::BTreeSet,
     env,
@@ -28,15 +28,31 @@ use std::{
     io::{self},
     path::PathBuf,
 };
-use std::{process, thread};
-use tar::{Archive, Builder};
 use tokio::sync::Notify;
 use tokio::sync::mpsc::Sender;
 
+#[cfg(target_family = "unix")]
+use crate::write_clipboard::copy_to_unix;
+
 pub const APP_ID: &str = "org.clippy.clippy";
 pub const API_KEY: Option<&str> = option_env!("KEY");
-pub static SETTINGS: Mutex<Option<UserSettings>> = Mutex::new(None);
 const IMAGE_DATA: &[u8] = include_bytes!("../../assets/gui_icons/image.png");
+#[cfg(debug_assertions)]
+const GUI_BIN: &str = "target/debug/clippy-gui";
+#[cfg(all(not(debug_assertions), target_family = "unix"))]
+const GUI_BIN: &str = "clippy-gui";
+#[cfg(all(not(debug_assertions), not(target_family = "unix")))]
+const GUI_BIN: &str = "clippy-gui";
+
+static GLOBAL_BOOL: AtomicBool = AtomicBool::new(true);
+
+pub fn set_global_bool(value: bool) {
+    GLOBAL_BOOL.store(value, Ordering::SeqCst);
+}
+
+pub fn get_global_bool() -> bool {
+    GLOBAL_BOOL.load(Ordering::SeqCst)
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Data {
@@ -56,29 +72,44 @@ impl Data {
         }
     }
 
-    pub fn write_to_json(&self, tx: &Sender<(String, String, String)>) -> Result<(), io::Error> {
-        let time = Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
+    pub fn just_write_paste(&self, id: &str, copy: bool, paste: bool) -> Result<(), io::Error> {
+        let path = get_path();
+        fs::create_dir_all(&path)?;
+        let file_path = &path.join(id);
+        let mut file = File::create(file_path)?;
+        let json_data = serde_json::to_vec(self)?;
+        file.write_all(&json_data)?;
+        if self.typ.starts_with("image/") {
+            save_image(&id, &general_purpose::STANDARD.decode(&self.data).unwrap())?;
+        }
+        if copy {
+            #[cfg(target_family = "unix")]
+            copy_to_unix(self.clone(), paste)
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        }
+        set_global_update_bool(true);
+        Ok(())
+    }
+
+    pub fn write_to_json(
+        &self,
+        tx: &Sender<MessageChannel>,
+        time: String,
+    ) -> Result<(), io::Error> {
         let path = get_path_pending();
         fs::create_dir_all(&path)?;
         let file_path = &path.join(&time);
 
-        let store_image = match SETTINGS.lock() {
-            Ok(guard) => guard.as_ref().map_or(true, |va| va.store_image),
-            Err(_) => true,
-        };
-
-        if self.typ.starts_with("image/") && store_image {
-            self.save_image(&time)?;
-        }
-
-        let json_data = serde_json::to_string_pretty(self)?;
+        let json_data = serde_json::to_vec(self)?;
 
         let mut file = File::create(file_path)?;
-        file.write_all(json_data.as_bytes())?;
+        file.write_all(&json_data)?;
 
-        set_global_update_bool(true);
-
-        match tx.try_send((file_path.to_str().unwrap().into(), time, self.typ.clone())) {
+        match tx.try_send(MessageChannel::New {
+            path: file_path.to_str().unwrap().into(),
+            typ: self.typ.clone(),
+            time,
+        }) {
             Ok(_) => (),
             Err(err) => warn!(
                 "Failed to send file '{}' to channel: {}",
@@ -86,7 +117,44 @@ impl Data {
                 err
             ),
         }
+        set_global_update_bool(true);
+        Ok(())
+    }
 
+    pub fn re_write_json(
+        &self,
+        tx: &Sender<MessageChannel>,
+        new_id: String,
+        old_id: String,
+        path: PathBuf,
+    ) -> Result<(), io::Error> {
+        log_error!(fs::remove_file(path));
+        let path = get_path_image();
+        let old_path = path.join(&format!("{}.png", old_id));
+        if old_path.is_file() {
+            let new_path = path.join(&format!("{}.png", new_id));
+            fs::rename(&old_path, &new_path)?;
+        }
+        let path = get_path_pending();
+        fs::create_dir_all(&path)?;
+        let file_path = &path.join(&new_id);
+        let json_data = serde_json::to_string(self)?;
+        let mut file = File::create(file_path)?;
+        file.write_all(json_data.as_bytes())?;
+        match tx.try_send(MessageChannel::Edit {
+            new_id,
+            old_id,
+            path: file_path.to_str().unwrap().to_string(),
+            typ: self.typ.clone(),
+        }) {
+            Ok(_) => (),
+            Err(err) => warn!(
+                "Failed to send file '{}' to channel: {}",
+                file_path.display(),
+                err
+            ),
+        }
+        set_global_update_bool(true);
         Ok(())
     }
 
@@ -99,7 +167,7 @@ impl Data {
     }
 
     pub fn get_image_thumbnail(&self, id: &PathBuf) -> Option<(Vec<u8>, (u32, u32))> {
-        let path = get_image_path(id);
+        let path = get_image_path(id)?;
         let image = if path.is_file() {
             ImageReader::open(path).ok()?.decode().ok()?
         } else {
@@ -139,34 +207,6 @@ impl Data {
         self.data = data.to_string()
     }
 
-    pub fn save_image(&self, time: &str) -> Result<(), io::Error> {
-        let path: PathBuf = crate::get_path_image();
-
-        fs::create_dir_all(&path)?;
-
-        let img_path = path.join(format!("{}.png", time));
-        let mut img_file = File::create(img_path)?;
-
-        let data: Vec<u8> = self
-            .get_image()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Failed to get image data"))?;
-
-        let image = image::load_from_memory(&data).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("Image decode error: {e}"),
-            )
-        })?;
-
-        let resized = image.thumbnail(128, 128);
-
-        resized
-            .write_to(&mut img_file, image::ImageFormat::Png)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Image write error: {e}")))?;
-
-        Ok(())
-    }
-
     pub fn get_meta_data(&self) -> Option<String> {
         let Some(data) = self.get_data() else {
             return Some(String::new());
@@ -175,7 +215,7 @@ impl Data {
         let lines = data.lines().take(10).map(|line| {
             let line = line.trim();
             if line.len() > 100 {
-                format!("{}..", &line[..70])
+                format!("{}..", &line.chars().take(65).collect::<String>())
             } else {
                 line.trim().to_string()
             }
@@ -185,43 +225,160 @@ impl Data {
 
         Some(display_text)
     }
+
+    pub fn build(path: &PathBuf) -> Result<Self, io::Error> {
+        let mut buf = String::new();
+        let mut file = File::open(path)?;
+        file.read_to_string(&mut buf)?;
+        Ok(serde_json::from_str(&buf)?)
+    }
+}
+
+#[derive(PartialEq, Debug)]
+pub enum DataState {
+    WaitingToSend,
+    SentButNotAcked,
 }
 
 #[derive(Debug, Clone)]
 pub struct UserData {
     data: Arc<Mutex<BTreeSet<String>>>,
+    pending: Arc<Mutex<BTreeMap<String, (Edit, DataState)>>>,
+    notify: Arc<Notify>,
 }
 
 impl UserData {
-    pub fn new() -> Self {
+    fn build() -> Self {
+        let mut data = BTreeSet::new();
+        let mut pending = BTreeMap::new();
+
+        Self::build_pending(&mut pending);
+        Self::build_data(&mut data);
+
+        let notify = Notify::new();
+
         Self {
-            data: Arc::new(Mutex::new(BTreeSet::new())),
+            data: Arc::new(Mutex::new(data)),
+            pending: Arc::new(Mutex::new(pending)),
+            notify: Arc::new(notify),
         }
     }
 
-    pub fn build() -> Self {
-        let mut temp = BTreeSet::new();
-
-        fs::create_dir_all(&get_path()).unwrap();
-
-        let folder_path = &get_path();
-
-        if let Ok(entries) = fs::read_dir(folder_path.as_path()) {
-            for entry in entries.flatten() {
-                if let Some(file_name) = entry.file_name().to_str() {
-                    temp.insert(file_name.to_string());
+    fn build_pending(pending: &mut BTreeMap<String, (Edit, DataState)>) {
+        let data_path = get_path_pending();
+        if let Ok(entries) = fs::read_dir(data_path) {
+            for dir in entries {
+                if let Ok(entry) = dir {
+                    if let Ok(metadata) = File::open(entry.path()) {
+                        if let Ok(data) = serde_json::from_reader::<File, Data>(metadata) {
+                            if let Some(name) = entry.file_name().to_str() {
+                                pending.insert(
+                                    name.to_string(),
+                                    (
+                                        Edit::New {
+                                            path: entry.path(),
+                                            typ: data.typ,
+                                        },
+                                        DataState::WaitingToSend,
+                                    ),
+                                );
+                            }
+                        }
+                    }
                 }
             }
         }
+    }
 
-        debug!("{:?}", temp);
+    fn build_data(data: &mut BTreeSet<String>) {
+        let data_path = get_path();
+        if let Ok(entries) = fs::read_dir(data_path) {
+            for dir in entries {
+                if let Ok(entry) = dir {
+                    if let Ok(metadata) = entry.metadata() {
+                        if metadata.is_file() {
+                            if let Some(name) = entry.file_name().to_str() {
+                                data.insert(name.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    fn get_sync_30(&self) -> Vec<String> {
+        self.data
+            .lock()
+            .unwrap()
+            .iter()
+            .rev()
+            .take(30)
+            .cloned()
+            .collect()
+    }
 
-        Self {
-            data: Arc::new(Mutex::new(temp)),
+    pub async fn next(&self) -> Option<(bool, String, Edit)> {
+        loop {
+            let mut found: Option<(&String, &Edit)> = None;
+            let mut count = 0;
+            let val = self.pending.lock().unwrap();
+            for (k, v) in val.iter() {
+                if v.1 == DataState::WaitingToSend {
+                    count += 1;
+                    if found.is_none() {
+                        found = Some((k, &v.0));
+                    } else {
+                        break;
+                    }
+                }
+            }
+
+            if let Some((k, v)) = found {
+                let is_last = count == 1;
+                return Some((is_last, k.clone(), v.clone()));
+            }
+
+            self.notify.notified().await;
         }
     }
 
-    pub fn add(&self, id: String, total: Option<u32>) {
+    async fn add_pending(&self, id: String, act: Edit) {
+        self.notify.notify_one();
+        self.pending
+            .lock()
+            .unwrap()
+            .insert(id, (act, DataState::WaitingToSend));
+    }
+
+    fn change_state(&self, id: &str) {
+        let mut data = self.pending.lock().unwrap();
+        if let Some(val) = data.get_mut(id) {
+            val.1 = DataState::SentButNotAcked
+        }
+    }
+
+    fn pop_pending(&self, id: &str) -> Option<(Edit, DataState)> {
+        let mut data = self.pending.lock().unwrap();
+        data.remove(id)
+    }
+
+    // fn pop_data(&self, id: &str) {
+    //     let mut data = self.data.lock().unwrap();
+    //     data.remove(id);
+    // }
+
+    pub fn get_30_data(&self) -> Vec<String> {
+        self.data
+            .lock()
+            .unwrap()
+            .iter()
+            .rev()
+            .take(30)
+            .cloned()
+            .collect()
+    }
+
+    pub fn add_data(&self, id: String, total: Option<u32>) {
         let mut data = self.data.lock().unwrap();
         data.insert(id);
         debug!("User clipboard count: {}", data.len());
@@ -235,14 +392,22 @@ impl UserData {
                 let mut pined_path = get_path_pined();
                 for i in to_remove {
                     path.push(&i);
-                    let file = File::open(&path).unwrap();
-                    let clipboard: Data = serde_json::from_reader(file).unwrap();
-                    if clipboard.pined {
-                        pined_path.push(&i);
-                        fs::rename(&path, &pined_path).unwrap();
-                        pined_path.pop();
+                    if let Ok(file) = File::open(&path) {
+                        if let Ok(clipboard) = serde_json::from_reader::<_, Data>(file) {
+                            if clipboard.pined {
+                                pined_path.push(&i);
+                                fs::rename(&path, &pined_path).unwrap();
+                                pined_path.pop();
+                            } else {
+                                log_error!(fs::remove_file(&path));
+                            }
+                        } else {
+                            println!("{:?} : to do find the cause of the error", path);
+                            error!("file is correpted!")
+                        }
                     } else {
-                        log_error!(fs::remove_file(&path));
+                        println!("{:?} : to do find the cause of the error", path);
+                        error!("file is correpted!")
                     }
                     path.pop();
                     data.remove(&i);
@@ -252,30 +417,23 @@ impl UserData {
         }
     }
 
-    pub fn get_30(&self) -> Vec<String> {
-        self.data
-            .lock()
-            .unwrap()
-            .iter()
-            .rev()
-            .take(30)
-            .cloned()
-            .collect()
-    }
-
-    pub fn add_vec(&self, id: Vec<String>) {
-        for id in id {
-            self.data.lock().unwrap().insert(id);
+    pub fn remove_and_remove_file(&self, id: &str) -> Result<(), std::io::Error> {
+        if let Ok(mut va) = self.data.lock() {
+            va.remove(id);
         }
-    }
-
-    pub fn last_one(&self) -> String {
-        self.data
-            .lock()
-            .unwrap()
-            .last()
-            .unwrap_or(&"".to_string())
-            .clone()
+        let mut path = get_path();
+        path.push(id);
+        match fs::remove_file(&path) {
+            Ok(_) => Ok(()),
+            Err(ref e) if e.kind() == std::io::ErrorKind::NotFound => {
+                info!("File is already removed");
+                debug!("path of remove file {:?}", path);
+                Ok(())
+            }
+            Err(e) => {
+                return Err(e.into());
+            }
+        }
     }
 }
 
@@ -315,6 +473,7 @@ pub struct UserSettings {
     pub click_on_quit: bool,
     pub paste_on_click: bool,
     pub disable_sync: bool,
+    pub always_on_top: bool,
     encrept: Option<String>,
     pub intrevel: u32,
     pub max_clipboard: Option<u32>,
@@ -335,6 +494,7 @@ impl UserSettings {
             disable_sync: false,
             store_image: true,
             encrept: None,
+            always_on_top: true,
             click_on_quit: true,
             paste_on_click: true,
             intrevel: 3,
@@ -359,6 +519,12 @@ impl UserSettings {
         !(self.sync == None)
     }
 
+    pub fn update(&mut self) -> Result<(), Box<dyn Error>> {
+        let new_self = Self::build_user()?;
+        *self = new_self;
+        Ok(())
+    }
+
     pub fn build_user() -> Result<Self, Box<dyn Error>> {
         let mut user_config = get_path_local();
         user_config.push("user");
@@ -367,7 +533,16 @@ impl UserSettings {
         }
         user_config.push(".settings");
         let file = fs::read(&user_config)?;
-        let mut settings: UserSettings = serde_json::from_slice(&file).unwrap();
+        let mut settings: UserSettings = match serde_json::from_slice(&file) {
+            Ok(s) => s,
+            Err(e) => {
+                error!("Failed to parse user settings: {e}");
+                if let Err(err) = fs::remove_file(&user_config) {
+                    error!("Also failed to remove corrupted settings file: {err}");
+                }
+                UserSettings::new()
+            }
+        };
         user_config.pop();
         user_config.push(".user");
         let file = if let Ok(data) = fs::read(&user_config) {
@@ -375,8 +550,15 @@ impl UserSettings {
         } else {
             None
         };
+        let key_bytes: String = match API_KEY {
+            Some(va) => va.to_string(),
+            None => env::var("KEY")
+                .expect("Environment variable KEY is not set")
+                .to_string(),
+        };
+
         if let Some(file) = file {
-            match decrypt_file(API_KEY.unwrap().as_bytes(), &file) {
+            match decrypt_file(key_bytes.as_bytes(), &file) {
                 Ok(va) => {
                     let data: UserCred =
                         serde_json::from_str(&String::from_utf8(va).unwrap()).unwrap();
@@ -389,13 +571,11 @@ impl UserSettings {
                 }
             };
         }
-        if let Ok(mut va) = SETTINGS.lock() {
-            *va = Some(settings.clone());
-        }
+
         Ok(settings)
     }
 
-    pub fn write(&self) -> Result<(), Box<dyn Error>> {
+    pub fn write_local(&self) -> Result<(), Box<dyn Error>> {
         let mut user_config = get_path_local();
         user_config.push("user");
         user_config.push(".user");
@@ -428,151 +608,19 @@ impl UserSettings {
     }
 }
 
-#[derive(PartialEq, Debug)]
-pub enum DataState {
-    WaitingToSend,
-    SentButNotAcked,
-}
-
-#[derive(Debug)]
-pub struct Value {
-    path: PathBuf,
-    typ: String,
-    state: DataState,
-}
-
-impl Value {
-    fn new(path: PathBuf, typ: String) -> Self {
-        Self {
-            path,
-            typ,
-            state: DataState::WaitingToSend,
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct Pending {
-    data: BTreeMap<String, Value>,
-    notify: Arc<Notify>,
-}
-
-impl Pending {
-    pub fn new() -> Self {
-        Self {
-            data: BTreeMap::new(),
-            notify: Arc::new(Notify::new()),
-        }
-    }
-
-    pub fn build() -> Result<Self, io::Error> {
-        let mut temp = BTreeMap::new();
-        for entry in fs::read_dir(get_path_pending())? {
-            let path: PathBuf = entry?.path();
-
-            let file_content = fs::read_to_string(&path)?;
-            let data: Data = serde_json::from_str(&file_content)?;
-            let file_name = if let Some(name) = path.file_name().and_then(|f| f.to_str()) {
-                name.to_string()
-            } else {
-                continue;
-            };
-            temp.insert(file_name, Value::new(path, data.typ));
-        }
-        Ok(Self {
-            data: temp,
-            notify: Arc::new(Notify::new()),
-        })
-    }
-
-    pub fn len(&self) -> usize {
-        self.data.len()
-    }
-
-    pub async fn next(&self) -> Option<(bool, String, &Value)> {
-        loop {
-            let mut found: Option<(&String, &Value)> = None;
-            let mut count = 0;
-
-            for (k, v) in &self.data {
-                if v.state == DataState::WaitingToSend {
-                    count += 1;
-                    if found.is_none() {
-                        found = Some((k, v));
-                    } else {
-                        break;
-                    }
-                }
-            }
-
-            if let Some((k, v)) = found {
-                let is_last = count == 1;
-                return Some((is_last, k.clone(), v));
-            }
-
-            self.notify.notified().await;
-        }
-    }
-
-    pub fn add(&mut self, path: String, id: String, typ: String) {
-        self.notify.notify_one();
-        self.data.insert(id, Value::new(PathBuf::from(path), typ));
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.data.is_empty()
-    }
-
-    pub fn get(&self, id: &str) -> Option<&Value> {
-        self.data.get(id)
-    }
-
-    pub fn remove(&mut self, id: &str) -> Option<Value> {
-        self.data.remove(id)
-    }
-
-    pub fn empty(&mut self) {
-        self.data.clear();
-    }
-
-    pub fn get_zip(&self) -> Result<(Vec<u8>, usize), ()> {
-        let mut buffer = Vec::new();
-        {
-            let mut tar = Builder::new(&mut buffer);
-
-            for (id, value) in self.data.iter() {
-                let path = &value.path;
-                if !path.is_file() {
-                    warn!("Unable to locate {}", id);
-                    continue;
-                }
-                tar.append_path_with_name(path, path.file_name().unwrap())
-                    .unwrap();
-            }
-            tar.finish().unwrap();
-        }
-
-        Ok((buffer, self.len()))
-    }
-
-    pub fn pop(&mut self, id: &str) {
-        self.data.remove(id);
-    }
-
-    pub fn get_pending(&self) -> Vec<(&String, &Value)> {
-        let mut temp = Vec::new();
-        for (id, value) in self.data.iter() {
-            temp.push((id, value));
-        }
-        temp
-    }
-
-    pub fn change_state(&mut self, id: &str) {
-        let temp = self.data.get_mut(id);
-        if let Some(val) = temp {
-            val.state = DataState::SentButNotAcked;
-        }
-    }
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub enum Edit {
+    New {
+        path: PathBuf,
+        typ: String,
+    },
+    // edit represent add new entry and remove the old one
+    Edit {
+        path: PathBuf,
+        typ: String,
+        new_id: String,
+    },
+    Remove,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -614,18 +662,98 @@ impl NewUserOtp {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-pub enum Resopnse {
+pub enum ResopnseClientToServer {
     Updated,
     Outdated,
     CheckVersion(String),
     CheckVersionArr(Vec<String>),
-    Success { old: String, new: String },
     Error(String),
+    Data {
+        data: String,
+        id: String,
+        last: bool,
+        is_it_edit: Option<String>,
+    },
+    Remove(String),
+}
+
+pub trait ToByteString: Serialize {
+    fn to_bytestring(&self) -> Result<ByteString, serde_json::Error> {
+        let json = serde_json::to_string(self)?;
+        Ok(ByteString::from(json))
+    }
+}
+
+impl ToByteString for ResopnseClientToServer {}
+impl ToByteString for ResopnseServerToClient {}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub enum ResopnseServerToClient {
+    Data {
+        data: String,
+        is_it_last: bool,
+        new_id: String,
+    },
+    Success {
+        old: String,
+        new: Option<String>,
+    },
+    Remove(VecDeque<String>),
+    EditReplace {
+        data: String,
+        is_it_last: bool,
+        old_id: String,
+        new_id: String,
+    },
+    Updated,
+    Outdated,
 }
 
 pub enum MessageType {
     Text,
     Binary,
+}
+
+#[derive(Serialize, Deserialize)]
+pub enum MessageIPC {
+    None,
+    OpentGUI,
+    Paste(Data, bool),
+    New(Data),
+    Edit(EditData),
+    UpdateSettings(UserSettings),
+    Delete(PathBuf, String),
+    Updated,
+    Close,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct EditData {
+    data: Data,
+    id: String,
+    path: PathBuf,
+}
+
+impl EditData {
+    pub fn new(data: Data, id: String, path: PathBuf) -> Self {
+        Self { data, id, path }
+    }
+}
+
+pub enum MessageChannel {
+    New {
+        path: String,
+        time: String,
+        typ: String,
+    },
+    Edit {
+        path: String,
+        old_id: String,
+        new_id: String,
+        typ: String,
+    },
+    Remove(String),
+    SettingsChanged,
 }
 
 pub fn get_path_local() -> PathBuf {
@@ -824,79 +952,6 @@ pub fn cache_path() -> PathBuf {
     path
 }
 
-pub fn extract_zip(data: Bytes) -> Result<Vec<String>, Box<dyn Error>> {
-    let target_dir = get_path();
-    let mut id = Vec::new();
-    let reader = std::io::Cursor::new(data);
-    let mut archive = Archive::new(reader);
-
-    debug!("Extracting into {}", target_dir.display());
-
-    for (i, entry) in archive.entries()?.enumerate() {
-        debug!("Processing entry index: {}", i);
-        let mut file = match entry {
-            Ok(f) => f,
-            Err(e) => {
-                error!("Failed to read entry {}: {}", i, e);
-                continue;
-            }
-        };
-
-        let path = match file.path() {
-            Ok(p) => p.to_path_buf(),
-            Err(e) => {
-                error!("Invalid path at entry {}: {}", i, e);
-                continue;
-            }
-        };
-
-        let name = match path.file_name().and_then(|n| n.to_str()) {
-            Some(n) => n.to_string(),
-            None => {
-                error!("Invalid file name at entry {}: {:?}", i, path);
-                continue;
-            }
-        };
-
-        let mut out_path = target_dir.clone();
-        out_path.push(&name);
-        id.push(name.clone());
-
-        if let Some(parent) = out_path.parent() {
-            if let Err(e) = fs::create_dir_all(parent) {
-                error!(
-                    "Directory creation failed for {}: {}",
-                    out_path.display(),
-                    e
-                );
-                continue;
-            }
-        }
-
-        match File::create(&out_path) {
-            Ok(mut out_file) => {
-                if let Err(e) = std::io::copy(&mut file, &mut out_file) {
-                    error!("Copy failed for {}: {}", out_path.display(), e);
-                    continue;
-                }
-            }
-            Err(e) => {
-                error!("File creation failed for {}: {}", out_path.display(), e);
-                continue;
-            }
-        }
-
-        info!("Extracted file: {}", out_path.display());
-    }
-
-    if let Err(e) = store_image(&id, target_dir.clone()) {
-        error!("store_image failed: {}", e);
-    }
-
-    info!("Extraction done, total files: {}", id.len());
-    Ok(id)
-}
-
 pub fn store_image(id: &[String], target_dir: PathBuf) -> Result<(), Box<dyn Error>> {
     for i in id {
         let mut path = target_dir.clone();
@@ -905,45 +960,18 @@ pub fn store_image(id: &[String], target_dir: PathBuf) -> Result<(), Box<dyn Err
         let file = fs::read_to_string(path)?;
         let data: Data = serde_json::from_str(&file)?;
 
-        if data.typ.starts_with("image/") {
-            data.save_image(i)?;
+        if let Some(val) = data.get_image() {
+            save_image(i, &val)?;
         }
     }
     Ok(())
 }
 
-pub fn get_image_path(id: &PathBuf) -> PathBuf {
+pub fn get_image_path(id: &PathBuf) -> Option<PathBuf> {
     let mut path = get_path_image();
-    let file_nema = format!("{}.png", id.file_name().unwrap().to_str().unwrap());
+    let file_nema = format!("{}.png", id.file_name()?.to_str()?);
     path.push(file_nema);
-    path
-}
-
-pub fn set_global_bool(value: bool) {
-    let path = get_path_local();
-    if let Err(e) = fs::create_dir_all(path.parent().unwrap()) {
-        error!("Failed to create directories: {}", e);
-        return;
-    }
-
-    let path = Path::new(&path).join("OK");
-
-    if value {
-        if let Err(e) = fs::File::create(&path) {
-            error!("Failed to create state file: {}", e);
-        }
-    } else {
-        if let Err(e) = fs::remove_file(&path) {
-            error!("Failed to delete state file: {}", e);
-        }
-    }
-}
-
-// This tell the gui to refresh the db
-pub fn get_global_bool() -> bool {
-    let path = get_path_local();
-    let path = Path::new(&path).join("OK");
-    !path.exists()
+    Some(path)
 }
 
 pub fn set_global_update_bool(value: bool) {
@@ -971,93 +999,13 @@ pub fn get_global_update_bool() -> bool {
     path.exists()
 }
 
-pub fn create_past_lock(path: &PathBuf) -> Result<(), io::Error> {
-    let mut dir = get_path_local();
-    fs::create_dir_all(&dir)?;
-    dir.push(".next");
-    let mut file = File::create(&dir)?;
-
-    file.write_all(path.to_str().unwrap().as_bytes())?;
-    Ok(())
-}
-
-pub fn watch_for_next_clip_write(dir: PathBuf, paste_on_click: bool) {
-    let mut target = dir.clone();
-    target.push(".next");
-
-    let mut settings = dir;
-    settings.push("user");
-    settings.push(".settings");
-
-    if !settings.is_file() {
-        log_error!(UserSettings::new().write());
-    }
-
-    let last_modified = fs::metadata(&settings)
-        .and_then(|meta| meta.modified())
-        .unwrap();
-
-    loop {
-        if fs::metadata(&target).is_ok() {
-            match read_parse(&target, paste_on_click) {
-                Ok(_) => {
-                    info!("New item copied")
-                }
-                Err(err) => error!("{}", err),
-            }
-        }
-
-        check_settings_updated(Path::new(&settings), last_modified);
-
-        thread::sleep(Duration::from_secs(1));
-    }
-
-    fn check_settings_updated(path: &Path, last_modified: SystemTime) {
-        match fs::metadata(path) {
-            Ok(meta) => {
-                if !meta.is_file() {
-                    warn!("Settings updated (not a file)");
-                    process::exit(0);
-                }
-                if let Ok(modified) = meta.modified() {
-                    if modified > last_modified {
-                        warn!("Settings updated (modified)");
-                        process::exit(0);
-                    }
-                }
-            }
-            Err(_) => {
-                warn!("Settings updated (deleted or missing)");
-                process::exit(0);
-            }
-        }
-    }
-
-    fn read_parse(target: &PathBuf, paste_on_click: bool) -> Result<(), String> {
-        let contents = fs::read_to_string(&target)
-            .map_err(|e| format!("Failed to read file {:?}: {}", target, e))?;
-
-        let data = serde_json::from_str(&fs::read_to_string(&contents).unwrap()).unwrap();
-
-        #[cfg(target_os = "linux")]
-        copy_to_linux(data, paste_on_click);
-
-        #[cfg(not(target_os = "linux"))]
-        write_clipboard::push_to_clipboard(data, paste_on_click).unwrap();
-
-        fs::remove_file(&target).map_err(|e| format!("Failed to remove {:?}: {}", target, e))?;
-        Ok(())
-    }
-}
-
 #[cfg(target_os = "linux")]
 pub fn copy_to_linux(data: Data, paste_on_click: bool) {
-    use write_clipboard::{push_to_clipboard, push_to_clipboard_wl};
-
+    use crate::write_clipboard::{copy_to_clipboard, copy_to_clipboard_wl};
     if std::env::var("WAYLAND_DISPLAY").is_ok() {
-        log_error!(push_to_clipboard_wl(data, false, paste_on_click));
+        log_error!(copy_to_clipboard_wl(data, paste_on_click));
     } else if std::env::var("DISPLAY").is_ok() {
-        log_error!(push_to_clipboard(data, paste_on_click));
+        log_error!(copy_to_clipboard(data, paste_on_click));
     }
 }
 
@@ -1140,27 +1088,45 @@ pub fn is_valid_otp(otp: &str) -> bool {
     }
 }
 
-pub fn remove(mut path: PathBuf, typ: String, time: &str, thumbnail: bool) {
-    match fs::rename(&path, get_path().join(&time)) {
-        Ok(_) => (),
-        Err(err) => error!("{:?}", err),
+pub fn rewrite_pending_to_data(path: PathBuf, typ: String, time: &str, thumbnail: bool) {
+    if let Err(err) = fs::rename(&path, get_path().join(&time)) {
+        error!("unable to rewrite data: {:?}", err)
     };
 
-    if thumbnail {
-        if typ.starts_with("image/") {
-            let file_name = format!(
-                "{}.png",
-                path.file_name()
-                    .unwrap()
-                    .to_os_string()
-                    .into_string()
-                    .unwrap()
-            );
-            path.pop();
-            path.pop();
-            path.push("image");
-            path.push(format!("{}", file_name));
-            fs::rename(path, get_path_image().join(format!("{}.png", time))).unwrap();
+    if thumbnail && typ.starts_with("image/") {
+        if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+            let image_path = get_path_image();
+            let old_img_file_name = format!("{}.png", file_name);
+            let old_img = image_path.join(&old_img_file_name);
+            let new_image = image_path.join(format!("{}.png", time));
+
+            if let Err(e) = fs::rename(&old_img, &new_image) {
+                log::error!("Failed to rename file: {}", e);
+            }
         }
     }
+}
+
+pub fn save_image(time: &str, data: &[u8]) -> Result<(), io::Error> {
+    let path: PathBuf = crate::get_path_image();
+
+    fs::create_dir_all(&path)?;
+
+    let img_path = path.join(format!("{}.png", time));
+    let mut img_file = File::create(img_path)?;
+
+    let image = image::load_from_memory(&data).map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Image decode error: {e}"),
+        )
+    })?;
+
+    let resized = image.thumbnail(128, 128);
+
+    resized
+        .write_to(&mut img_file, image::ImageFormat::Png)
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Image write error: {e}")))?;
+
+    Ok(())
 }

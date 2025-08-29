@@ -1,58 +1,50 @@
 #!/bin/bash
 
-# Defaults
-MODE="release"
-NAME="clippy-release.tar.xz"
-KEY=$(head -c 32 /dev/urandom | base64 | head -c 32)
-
-# Files to include
+NAME=clippy
+VIRSION=$(grep '^version' clippy/Cargo.toml | head -n1 | cut -d'"' -f2)
 FILES=("build-linux/clippy.desktop" "build-linux/clippy.service")
 FILES_RELEASE=("target/release/clippy-gui" "target/release/clippy")
 FILES_DEBUG=("target/debug/clippy-gui" "target/debug/clippy")
-DIR=("assets")
+CONFIG_DIR="config"
+ARCH=$(uname -m)
 
-# Parse flags
-while getopts "rvd" opt; do
-  case "$opt" in
-  r)
-    MODE="release"
-    NAME="clippy-release.tar.xz"
-    ;;
-  v) MODE="version" ;;
-  d)
-    MODE="debug"
-    NAME="clippy-debug.tar.xz"
-    ;;
-  *)
-    echo "Usage: $0 [-r] [-v] [-d]"
-    exit 1
-    ;;
-  esac
+rm temp/*
+mkdir -p temp
+mkdir -p "temp/${CONFIG_DIR}"
+for file in "${FILES[@]}"; do
+    cp "$file" "temp/${CONFIG_DIR}/"
+done
+cp -r assets temp/assets
+while getopts "rd" opt; do
+    case "$opt" in
+    r)
+        MODE="release"
+        ;;
+    d)
+        MODE="debug"
+        ;;
+    *)
+        echo "Usage: $0 [-r] [-d]"
+        MODE="debug"
+        ;;
+    esac
 done
 
-# Ask for version if -v
-if [ "$MODE" == "version" ]; then
-  read -p "Enter version: " VER
-  NAME="clippy-$VER.tar.xz"
-  MODE="release"
-fi
+echo "Building version $VERSION"
 
-# Build
-if [ "$MODE" == "debug" ]; then
-  KEY="$KEY" cargo build
+mkdir -p "temp/target"
+KEY=$(head -c 32 /dev/urandom | base64 | head -c 32)
+if [ "$MODE" == "release" ]; then
+    KEY="$KEY" cargo build --release --bin clippy --bin clippy-gui
+    cp "${FILES_RELEASE[0]}" "temp/target/"
+    cp "${FILES_RELEASE[1]}" "temp/target/"
 else
-  KEY="$KEY" cargo build --release
+    KEY="$KEY" cargo build --bin clippy --bin clippy-gui
+    cp "${FILES_DEBUG[0]}" "temp/target/"
+    cp "${FILES_DEBUG[1]}" "temp/target/"
+
 fi
 
-# Collect files based on mode
-INCLUDE_FILES=("${FILES[@]}" "${DIR[@]}")
-if [ "$MODE" == "debug" ]; then
-  INCLUDE_FILES+=("${FILES_DEBUG[@]}")
-else
-  INCLUDE_FILES+=("${FILES_RELEASE[@]}")
-fi
-
-# Create archive
-tar -cJf "$NAME" "${INCLUDE_FILES[@]}"
-
-echo "Created archive: $NAME"
+mkdir -p build
+tar -cJf "build/${NAME}-${MODE}-${VIRSION}-${ARCH}.tar.xz" -C temp .
+rm -rf temp
