@@ -3,7 +3,7 @@
 cd "$(dirname "$0")"
 
 ARCH=$(uname -m)
-VERSION="0.1.2"
+VERSION="0.1.3"
 TARGET_DIR="clippy"
 SOURCE_DIR="target"
 BUILD_ASSETS="assets"
@@ -33,6 +33,7 @@ URL="https://github.com/dhanushl0l/clippy/releases/download/v$VERSION/clippy-$TY
 ARCHIVE_NAME="clippy-release.tar.xz"
 
 curl -L "$URL" -o "$ARCHIVE_NAME"
+mkdir -p $TARGET_DIR
 tar -xJf $ARCHIVE_NAME -C $TARGET_DIR
 cd $TARGET_DIR
 

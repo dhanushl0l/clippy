@@ -53,7 +53,7 @@ Below is our planned development roadmap. Features and priorities may change ove
 Run the following command in your terminal:
 
 ```bash
-curl -s https://raw.githubusercontent.com/dhanushl0l/clippy/main/build-linux/install.sh | bash
+curl -s https://raw.githubusercontent.com/dhanushl0l/clippy/main/build-linux/install.sh | bash -s -- -r
 ```
 
 ### Windows
