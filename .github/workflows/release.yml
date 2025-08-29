@@ -1,7 +1,8 @@
 name: Create Release
 
 on:
-  push:
+  pull_request:
+    types: [closed]
     branches:
       - main
 
@@ -10,39 +11,40 @@ permissions:
 
 jobs:
   create-release:
+    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Read version from Cargo.toml
-        id: get_version
+      - name: Read version from merge message and update Cargo.toml
+        id: update_version
         run: |
-          tomlPath="clippy/Cargo.toml"
-          versionLine=$(grep '^version\s*=' $tomlPath)
-          version=$(echo $versionLine | cut -d'"' -f2)
-          echo "version=$version" >> $GITHUB_OUTPUT
+          MERGE_TITLE="${{ github.event.pull_request.title }}"
+          echo "Merge title: $MERGE_TITLE"
 
-      - name: Get merge commit info
-        id: merge_info
-        run: |
-          # Get last merge commit on main
-          COMMIT_SHA=$(git log -n 1 --merges --pretty=format:"%H")
-          echo "commit_sha=$COMMIT_SHA" >> $GITHUB_OUTPUT
-          # Get commit message
-          NAME=$(git log -1 --pretty=format:"%s" $COMMIT_SHA)
-          echo "name=$NAME" >> $GITHUB_OUTPUT
-          # Get commit body
-          BODY=$(git log -1 --pretty=format:"%b" $COMMIT_SHA)
-          echo "body=$BODY" >> $GITHUB_OUTPUT
+          VERSION=$(echo "$MERGE_TITLE" | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sed 's/^v//')
+          echo "Extracted version: $VERSION"
+
+          # Update Cargo.toml
+          for TOML_PATH in clippy/Cargo.toml clippy-gui/Cargo.toml clippy-server/Cargo.toml; do
+            sed -i "s/^version\s*=.*/version = \"$VERSION\"/" "$TOML_PATH"
+          done
+
+          # Update install.sh
+          INSTALL_SH=build-linux/install.sh
+          sed -i "s/^VERSION\s*=.*/VERSION=\"$VERSION\"/" "$INSTALL_SH"
+
+          # Export version for later steps
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: "v${{ steps.get_version.outputs.version }}"
-          name: "${{ steps.merge_info.outputs.name }}"
-          body: "${{ steps.merge_info.outputs.body }}"
-          draft: false
+          tag_name: "v${{ steps.update_version.outputs.version }}"
+          name: "${{ github.event.pull_request.name }}"
+          body: "${{ github.event.pull_request.body }}"
+          draft: true
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

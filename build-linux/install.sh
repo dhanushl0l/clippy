@@ -2,20 +2,25 @@
 
 cd "$(dirname "$0")"
 
-URL="https://repo.dhanu.cloud/clippy/clippy-release.tar.xz"
-ARCHIVE_NAME="clippy-release.tar.xz"
+ARCH=$(uname -m)
+VERSION="0.1.2"
 TARGET_DIR="clippy"
 SOURCE_DIR="target"
-BUILD_LINUX="config"
 BUILD_ASSETS="assets"
+
+# Define the target locations
+BIN_DIR="/usr/local/bin"
+SERVICE_DIR="/etc/systemd/user"
+SERVICE_NAME="clippy.service"
+BUILD_LINUX="config"
 
 while getopts "rd" opt; do
   case "$opt" in
   r)
-    BUILD_LINUX="build-linux"
+    TYPE="release"
     ;;
   d)
-    BUILD_LINUX="build-linux"
+    TYPE="debug"
     ;;
   *)
     echo "Usage: $0 [-r] [-d]"
@@ -24,13 +29,15 @@ while getopts "rd" opt; do
   esac
 done
 
-# Define the target locations
-BIN_DIR="/usr/local/bin"
-SERVICE_DIR="/etc/systemd/user"
-SERVICE_NAME="clippy.service"
+URL="https://github.com/dhanushl0l/clippy/releases/download/v$VERSION/clippy-$TYPE-$VERSION-$ARCH.tar.xz"
+ARCHIVE_NAME="clippy-release.tar.xz"
+
+curl -L "$URL" -o "$ARCHIVE_NAME"
+tar -xJf $ARCHIVE_NAME -C $TARGET_DIR
+cd $TARGET_DIR
 
 if systemctl --user is-active --quiet "$SERVICE_NAME"; then
-  echo "👋 Hey! You're updating $SERVICE_NAME..."
+  echo "Hey! You're updating $SERVICE_NAME..."
   systemctl --user stop "$SERVICE_NAME"
 else
   echo "Installing clippy"
@@ -73,3 +80,8 @@ systemctl --user start "$SERVICE_NAME"
 
 # Provide feedback
 echo "Service has been started and enabled."
+
+cd ..
+
+rm $ARCHIVE_NAME
+rm -r $TARGET_DIR

@@ -215,7 +215,7 @@ impl Data {
         let lines = data.lines().take(10).map(|line| {
             let line = line.trim();
             if line.len() > 100 {
-                format!("{}..", &line.chars().take(77).collect::<String>())
+                format!("{}..", &line.chars().take(65).collect::<String>())
             } else {
                 line.trim().to_string()
             }

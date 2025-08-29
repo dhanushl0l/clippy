@@ -1,6 +1,6 @@
 [Unit]
 Description=clippy
-After=network.target
+PartOf=graphical-session.target
 
 [Service]
 ExecStart=/usr/local/bin/clippy
@@ -10,4 +10,4 @@ Environment="LOG=debug"
 Environment="CLIPPY_SERVICE=1"
 
 [Install]
-WantedBy=default.target
+WantedBy=graphical-session.target

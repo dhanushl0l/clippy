@@ -33,6 +33,7 @@ done
 echo "Building version $VERSION"
 
 mkdir -p "temp/target"
+KEY=$(head -c 32 /dev/urandom | base64 | head -c 32)
 if [ "$MODE" == "release" ]; then
     KEY="$KEY" cargo build --release --bin clippy --bin clippy-gui
     cp "${FILES_RELEASE[0]}" "temp/target/"
