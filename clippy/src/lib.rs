@@ -31,6 +31,8 @@ use std::{
 use tokio::sync::Notify;
 use tokio::sync::mpsc::Sender;
 
+#[cfg(target_os="windows")]
+use crate::write_clipboard::copy_to_clipboard;
 #[cfg(target_family = "unix")]
 use crate::write_clipboard::copy_to_unix;
 
@@ -86,6 +88,9 @@ impl Data {
             #[cfg(target_family = "unix")]
             copy_to_unix(self.clone(), paste)
                 .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+
+            #[cfg(target_os="windows")]
+            copy_to_clipboard(self.clone(), paste).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
         }
         set_global_update_bool(true);
         Ok(())

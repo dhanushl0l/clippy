@@ -42,4 +42,4 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/opencart:${{ steps.tag.outputs.image_tag }}
+          tags: ghcr.io/${{ github.repository_owner }}/clippy-server:${{ steps.tag.outputs.image_tag }}

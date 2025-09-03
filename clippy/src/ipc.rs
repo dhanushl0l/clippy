@@ -271,6 +271,8 @@ pub mod ipc {
                 } else {
                     break;
                 }
+            }else {
+                break;
             }
         }
         Ok(process.kill()?)
