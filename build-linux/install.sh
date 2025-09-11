@@ -3,7 +3,7 @@
 cd "$(dirname "$0")"
 
 ARCH=$(uname -m)
-VERSION="0.1.2"
+VERSION="0.1.5"
 TARGET_DIR="clippy"
 SOURCE_DIR="target"
 BUILD_ASSETS="assets"
