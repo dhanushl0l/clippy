@@ -23,8 +23,8 @@ while getopts "rd" opt; do
     TYPE="debug"
     ;;
   *)
-    TYPE="release"
-    ;;
+    echo "Usage: $0 [-r] [-d]"
+    exit 1
     ;;
   esac
 done

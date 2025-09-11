@@ -59,19 +59,16 @@ class MainActivity : ComponentActivity() {
             ClippyTheme {
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
-                    bottomBar = {
-                        Navbar(navigation)
-                    }
+                    bottomBar = { navbar(navigation) },
                 ) { innerPadding ->
                     NavHost(
                         navController = navigation,
                         startDestination = "Clipboard",
-                        modifier = Modifier.padding(innerPadding)
+                        modifier = Modifier.padding(innerPadding),
                     ) {
                         composable("Notifications") { notification() }
-                        composable("Clipboard") { Clipboard(navigation) }
+                        composable("Clipboard") { clipboard() }
                         composable("Settings") { settings() }
-                        composable("Search") { Search() }
                     }
                 }
             }
@@ -89,7 +86,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun Navbar(navController: NavController) {
+fun navbar(navController: NavController) {
     val items = listOf("Clipboard", "Notifications", "Settings")
     val selectedIcons = listOf(Icons.Filled.Email, Icons.Filled.Notifications, Icons.Filled.Settings)
     val unselectedIcons = listOf(Icons.Outlined.Email, Icons.Outlined.Notifications, Icons.Outlined.Settings)

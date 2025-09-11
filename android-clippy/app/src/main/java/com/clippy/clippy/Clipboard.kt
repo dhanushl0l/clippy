@@ -36,11 +36,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
-import androidx.navigation.NavHostController
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun Clipboard(navigation: NavHostController) {
+fun clipboard() {
     Scaffold(
         topBar = {
             TopAppBar(
@@ -49,7 +48,7 @@ fun Clipboard(navigation: NavHostController) {
                         .height(80.dp),
                 title = { Text("Clipboard") },
                 actions = {
-                    IconButton(onClick = { navigation.navigate("Search") }) {
+                    IconButton(onClick = { /* First action */ }) {
                         Icon(Icons.Default.Search, contentDescription = "Search")
                     }
                     IconButton(onClick = { /* Second action */ }) {
