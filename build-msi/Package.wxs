@@ -2,7 +2,7 @@
   <Package
     Name="clippy"
     Manufacturer="clippy"
-    Version="0.1.1.0"
+    Version="0.1.5.0"
     UpgradeCode="76afa0e9-3c34-40ca-8092-b3f673a50d13"
     InstallerVersion="500"
     Compressed="yes">
