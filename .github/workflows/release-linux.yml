@@ -42,7 +42,6 @@ jobs:
           draft: true
           tag: ${{ steps.extract_tag.outputs.tag }}
           artifacts: |
-            tag_name: ${{ steps.extract_tag.outputs.tag }}
-            files: "build/clippy-*.tar.xz"
+            build/clippy-*.tar.xz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

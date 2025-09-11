@@ -51,9 +51,8 @@ jobs:
       - name: Upload Windows MSI (all architectures)
         uses: ncipollo/release-action@v1
         with:
-          files: |
+          artifacts: |
             build/clippy-windows-*.msi
-
-          tag_name: ${{ steps.extract_tag.outputs.tag }}
+          tag: ${{ steps.extract_tag.outputs.tag }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
