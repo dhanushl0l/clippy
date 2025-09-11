@@ -20,6 +20,7 @@ New-Item -ItemType Directory -Path "build" -Force | Out-Null
 $bytes = New-Object byte[] 24
 [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
 $KEY = [Convert]::ToBase64String($bytes)
+$env:KEY = $KEY 
 
 # --- Build 32-bit ---
 cargo build --release --target i686-pc-windows-msvc --bin clippy --bin clippy-gui
