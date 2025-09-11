@@ -26,7 +26,7 @@ cargo build --release --target i686-pc-windows-msvc --bin clippy --bin clippy-gu
 if ($?) {
     dotnet build build-msi -c Release -p:Platform=x86
     if ($?) {
-        Copy-Item "build-msi/bin/x86/Release/en-US/clippy.msi" "build/clippy-windows-x86-$version.msi"
+        Copy-Item "build-msi/bin/x86/Release/en-US/clippy.msi" "build/clippy-$version-windows-x86.msi"
     }
 }
 
@@ -35,7 +35,7 @@ cargo build --release --target x86_64-pc-windows-msvc --bin clippy --bin clippy-
 if ($?) {
     dotnet build build-msi -c Release -p:Platform=x64
     if ($?) {
-        Copy-Item "build-msi/bin/x64/Release/en-US/clippy.msi" "build/clippy-windows-x64-$version.msi"
+        Copy-Item "build-msi/bin/x64/Release/en-US/clippy.msi" "build/clippy-$version-windows-x64.msi"
     }
 }
 
@@ -44,6 +44,6 @@ cargo build --release --target aarch64-pc-windows-msvc --bin clippy --bin clippy
 if ($?) {
     dotnet build build-msi -c Release -p:Platform=arm64
     if ($?) {
-        Copy-Item "build-msi/bin/arm64/Release/en-US/clippy.msi" "build/clippy-windows-arm64-$version.msi"
+        Copy-Item "build-msi/bin/arm64/Release/en-US/clippy.msi" "build/clippy-$version-windows-arm64-$version.msi"
     }
 }
