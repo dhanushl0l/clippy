@@ -7,7 +7,7 @@ on:
       - main
 
 permissions:
-  contents: write
+  contents: write # minimal permission needed for release creation
 
 jobs:
   create-release:
@@ -23,10 +23,11 @@ jobs:
           MERGE_TITLE="${{ github.event.pull_request.title }}"
           echo "Merge title: $MERGE_TITLE"
 
+          # Extract version from merge title
           VERSION=$(echo "$MERGE_TITLE" | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sed 's/^v//')
           echo "Extracted version: $VERSION"
 
-          # Update Cargo.toml
+          # Update Cargo.toml files
           for TOML_PATH in clippy/Cargo.toml clippy-gui/Cargo.toml clippy-server/Cargo.toml; do
             sed -i "s/^version\s*=.*/version = \"$VERSION\"/" "$TOML_PATH"
           done
@@ -42,7 +43,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: "v${{ steps.update_version.outputs.version }}"
-          name: "${{ github.event.pull_request.name }}"
+          name: "Release v${{ steps.update_version.outputs.version }}"
           body: "${{ github.event.pull_request.body }}"
           draft: true
           prerelease: false
@@ -50,16 +51,19 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   call-linux:
+    needs: create-release
     uses: ./.github/workflows/release-linux.yml
     secrets: inherit
     permissions: write-all
 
   call-win:
+    needs: create-release
     uses: ./.github/workflows/release-win.yml
     secrets: inherit
     permissions: write-all
 
   call-mac:
+    needs: create-release
     uses: ./.github/workflows/release-mac.yml
     secrets: inherit
     permissions: write-all
