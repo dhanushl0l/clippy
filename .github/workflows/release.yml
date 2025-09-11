@@ -48,3 +48,18 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  call-linux:
+    uses: ./.github/workflows/release-linux.yml
+    secrets: inherit
+    permissions: write-all
+
+  call-win:
+    uses: ./.github/workflows/release-win.yml
+    secrets: inherit
+    permissions: write-all
+
+  call-mac:
+    uses: ./.github/workflows/release-mac.yml
+    secrets: inherit
+    permissions: write-all
