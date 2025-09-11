@@ -1,10 +1,7 @@
 name: Build Release Linux
 
 on:
-  workflow_run:
-    workflows: ["Create Release"]
-    types:
-      - completed
+  workflow_call:
 
 permissions:
   contents: write
