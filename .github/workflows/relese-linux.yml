@@ -2,7 +2,7 @@ name: Build Release Linux
 
 on:
   workflow_run:
-    workflows: ["Create Release"] 
+    workflows: ["Create Release"]
     types:
       - completed
 
@@ -39,9 +39,13 @@ jobs:
         run: build-linux/build.sh -r
 
       - name: Upload Release Asset
-        uses: softprops/action-gh-release@v1
+        uses: ncipollo/release-action@v1
         with:
-          tag_name: ${{ steps.extract_tag.outputs.tag }}
-          files: "build/clippy-*.tar.xz"
+          allowUpdates: true
+          draft: true
+          tag: ${{ steps.extract_tag.outputs.tag }}
+          artifacts: |
+            tag_name: ${{ steps.extract_tag.outputs.tag }}
+            files: "build/clippy-*.tar.xz"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
