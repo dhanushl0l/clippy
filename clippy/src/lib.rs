@@ -367,11 +367,6 @@ impl UserData {
         data.remove(id)
     }
 
-    // fn pop_data(&self, id: &str) {
-    //     let mut data = self.data.lock().unwrap();
-    //     data.remove(id);
-    // }
-
     pub fn get_30_data(&self) -> Vec<String> {
         self.data
             .lock()

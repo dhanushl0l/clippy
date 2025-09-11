@@ -12,22 +12,22 @@ rm temp/*
 mkdir -p temp
 mkdir -p "temp/${CONFIG_DIR}"
 for file in "${FILES[@]}"; do
-    cp "$file" "temp/${CONFIG_DIR}/"
+	cp "$file" "temp/${CONFIG_DIR}/"
 done
 cp -r assets temp/assets
 while getopts "rd" opt; do
-    case "$opt" in
-    r)
-        MODE="release"
-        ;;
-    d)
-        MODE="debug"
-        ;;
-    *)
-        echo "Usage: $0 [-r] [-d]"
-        MODE="debug"
-        ;;
-    esac
+	case "$opt" in
+	r)
+		MODE="release"
+		;;
+	d)
+		MODE="debug"
+		;;
+	*)
+		echo "Usage: $0 [-r] [-d]"
+		MODE="debug"
+		;;
+	esac
 done
 
 echo "Building version $VERSION"
@@ -35,16 +35,16 @@ echo "Building version $VERSION"
 mkdir -p "temp/target"
 KEY=$(head -c 32 /dev/urandom | base64 | head -c 32)
 if [ "$MODE" == "release" ]; then
-    KEY="$KEY" cargo build --release --bin clippy --bin clippy-gui
-    cp "${FILES_RELEASE[0]}" "temp/target/"
-    cp "${FILES_RELEASE[1]}" "temp/target/"
+	KEY="$KEY" cargo build --release --bin clippy --bin clippy-gui
+	cp "${FILES_RELEASE[0]}" "temp/target/"
+	cp "${FILES_RELEASE[1]}" "temp/target/"
 else
-    KEY="$KEY" cargo build --bin clippy --bin clippy-gui
-    cp "${FILES_DEBUG[0]}" "temp/target/"
-    cp "${FILES_DEBUG[1]}" "temp/target/"
+	KEY="$KEY" cargo build --bin clippy --bin clippy-gui
+	cp "${FILES_DEBUG[0]}" "temp/target/"
+	cp "${FILES_DEBUG[1]}" "temp/target/"
 
 fi
 
 mkdir -p build
-tar -cJf "build/${NAME}-${MODE}-${VIRSION}-${ARCH}.tar.xz" -C temp .
+tar -cJf "build/${NAME}-${VIRSION}-linux-${ARCH}.tar.xz" -C temp .
 rm -rf temp

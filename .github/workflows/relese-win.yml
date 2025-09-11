@@ -52,12 +52,11 @@ jobs:
           powershell.exe ./build-msi/build.ps1
 
       - name: Upload Windows MSI (all architectures)
-        uses: softprops/action-gh-release@v1
+        uses: ncipollo/release-action@v1
         with:
           files: |
-            build/clippy-x86-*.msi
-            build/clippy-x64-*.msi
-            build/clippy-arm64-*.msi
+            build/clippy-windows-*.msi
+
           tag_name: ${{ steps.extract_tag.outputs.tag }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
