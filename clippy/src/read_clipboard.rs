@@ -12,6 +12,7 @@ use tokio::sync::mpsc::Sender;
 
 #[cfg(target_os = "linux")]
 pub fn read_wayland_clipboard(tx: &Sender<MessageChannel>) -> Result<(), std::io::Error> {
+    use std::process;
     use wayland_clipboard_listener::{WlClipboardPasteStream, WlListenType};
 
     let preferred_formats: Vec<String> = [
@@ -32,10 +33,11 @@ pub fn read_wayland_clipboard(tx: &Sender<MessageChannel>) -> Result<(), std::io
 
     let mut stream = WlClipboardPasteStream::init(WlListenType::ListenOnCopy).unwrap();
     stream.set_priority(preferred_formats);
-    for i in stream.paste_stream().flatten().flatten() {
+    for i in stream.paste_stream().flatten() {
         if get_global_bool() {
             if let Err(e) = parse_wayland_clipboard(i.context, tx) {
                 error!("Unable read clipboard: {}", e);
+                process::exit(1);
             };
         } else {
             set_global_bool(true);

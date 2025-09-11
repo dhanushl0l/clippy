@@ -40,15 +40,14 @@ fn run(tx: &Sender<MessageChannel>) {
     }
 }
 
-// need to find a way to monitor clipboard changes in wayland the current way is not optimal
+// need to find a way to monitor clipboard changes in wayland the current way current way is not optimal
 #[cfg(target_os = "linux")]
 fn read_clipboard_wayland(tx: &Sender<MessageChannel>) {
-    let mut stream = WlClipboardPasteStream::init(WlListenType::ListenOnCopy).unwrap();
-
-    for _ in stream.paste_stream().flatten().flatten() {
-        match read_wayland_clipboard(tx) {
-            Ok(_) => (),
-            Err(err) => log::warn!("{}", err),
+    match read_wayland_clipboard(tx) {
+        Ok(_) => (),
+        Err(err) => {
+            log::warn!("{}", err);
+            process::exit(1)
         }
     }
 }

@@ -28,7 +28,7 @@ bytestring = "1.4.0"
 
 
 [target.'cfg(target_os = "linux")'.dependencies]
-wayland-clipboard-listener = "0.3.1"
+wayland-clipboard-listener = "0.5.0"
 enigo = { version = "0.6.1", features = ["wayland"], optional = true }
 
 

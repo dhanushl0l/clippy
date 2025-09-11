@@ -32,7 +32,7 @@ URL="https://github.com/dhanushl0l/clippy/releases/download/v$VERSION/clippy-$VE
 ARCHIVE_NAME="clippy-release.tar.xz"
 
 curl -L "$URL" -o "$ARCHIVE_NAME"
-mkdir $TARGET_DIR
+mkdir -p $TARGET_DIR
 tar -xJf $ARCHIVE_NAME -C $TARGET_DIR
 cd $TARGET_DIR
 

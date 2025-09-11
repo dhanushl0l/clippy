@@ -6279,10 +6279,11 @@ dependencies = [
 
 [[package]]
 name = "wayland-clipboard-listener"
-version = "0.3.1"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04e1ff259f1ed9022cb6a75cb436554d7da14f98c9e7c036a2e685d4b8730e81"
+checksum = "0a66d6882cfcf7f683728d701c050a3d1a39239816f6a0fae11eb38be8dce333"
 dependencies = [
+ "log",
  "os_pipe",
  "thiserror 2.0.12",
  "wayland-client",
