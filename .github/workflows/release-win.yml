@@ -48,11 +48,13 @@ jobs:
         run: |
           powershell.exe ./build-msi/build.ps1
 
-      - name: Upload Windows MSI (all architectures)
+      - name: Upload Release Asset
         uses: ncipollo/release-action@v1
         with:
-          artifacts: |
-            build/clippy-windows-*.msi
+          allowUpdates: true
+          draft: true
           tag: ${{ steps.extract_tag.outputs.tag }}
+          artifacts: |
+            build/clippy-*.msi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
