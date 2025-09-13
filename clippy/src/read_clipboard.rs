@@ -1,3 +1,4 @@
+use crate::get_lisson_clipboard;
 use crate::{Data, get_global_bool, set_global_bool};
 use crate::{MessageChannel, UserSettings};
 use base64::{Engine, engine::general_purpose};
@@ -5,13 +6,15 @@ use chrono::Utc;
 use clipboard_rs::common::RustImage;
 use clipboard_rs::{Clipboard, ClipboardContext, ClipboardHandler};
 use image::{ImageFormat, ImageReader, imageops};
-use log::{debug, error};
+use log::{debug, error, warn};
 use std::error;
 use std::io::Cursor;
 use tokio::sync::mpsc::Sender;
+#[cfg(target_os = "linux")]
+use wayland_clipboard_listener::WlClipboardListenerError;
 
 #[cfg(target_os = "linux")]
-pub fn read_wayland_clipboard(tx: &Sender<MessageChannel>) -> Result<(), std::io::Error> {
+pub fn read_wayland_clipboard(tx: &Sender<MessageChannel>) -> Result<(), WlClipboardListenerError> {
     use std::process;
     use wayland_clipboard_listener::{WlClipboardPasteStream, WlListenType};
 
@@ -31,18 +34,67 @@ pub fn read_wayland_clipboard(tx: &Sender<MessageChannel>) -> Result<(), std::io
     .map(|s| s.to_string())
     .collect();
 
-    let mut stream = WlClipboardPasteStream::init(WlListenType::ListenOnCopy).unwrap();
+    let mut stream = WlClipboardPasteStream::init(WlListenType::ListenOnCopy)?;
     stream.set_priority(preferred_formats);
     for i in stream.paste_stream().flatten() {
         if get_global_bool() {
-            if let Err(e) = parse_wayland_clipboard(i.context, tx) {
-                error!("Unable read clipboard: {}", e);
-                process::exit(1);
-            };
+            if get_lisson_clipboard() {
+                if let Err(e) = parse_wayland_clipboard(i.context.mime_type, i.context.context, tx)
+                {
+                    error!("Unable read clipboard: {}", e);
+                    process::exit(1);
+                };
+            }
         } else {
             set_global_bool(true);
         }
     }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+pub fn read_wayland_clipboard_once(
+    rx: &Sender<MessageChannel>,
+) -> Result<(), wl_clipboard_rs::paste::Error> {
+    use std::io::Read;
+    use wl_clipboard_rs::paste::{ClipboardType, Error, MimeType, Seat, get_contents};
+
+    let mut contents = vec![];
+    let mut typ = String::new();
+
+    let result = get_contents(
+        ClipboardType::Regular,
+        Seat::Unspecified,
+        MimeType::Specific("image/png"),
+    );
+    match result {
+        Ok((mut pipe, mem_typ)) => {
+            typ = mem_typ;
+            pipe.read_to_end(&mut contents).unwrap();
+            println!("Pasted: {}", String::from_utf8_lossy(&contents));
+        }
+
+        Err(Error::NoMimeType) => {
+            let result = get_contents(ClipboardType::Regular, Seat::Unspecified, MimeType::Text);
+            match result {
+                Ok((mut pipe, mem_typ)) => {
+                    typ = mem_typ;
+                    pipe.read_to_end(&mut contents).unwrap();
+                    println!("Pasted: {}", String::from_utf8_lossy(&contents));
+                }
+
+                Err(Error::NoSeats) | Err(Error::ClipboardEmpty) | Err(Error::NoMimeType) => {
+                    warn!("Unsupported type clipboard");
+                    return Ok(());
+                }
+
+                Err(err) => return Err(err),
+            }
+        }
+
+        Err(err) => return Err(err),
+    }
+    parse_wayland_clipboard(typ, contents, rx).unwrap();
     Ok(())
 }
 
@@ -65,22 +117,23 @@ impl<'a> ClipboardHandler for Manager<'a> {
             let types = ctx.available_formats().unwrap();
 
             debug!("Available types: {:?}", types);
-
-            if let Ok(val) = ctx.get_image() {
-                debug!("Type img");
-                write_to_json(
-                    val.to_png().unwrap().get_bytes().to_vec(),
-                    String::from("image/png"),
-                    String::from("os"),
-                    &self.tx,
-                );
-            } else if let Ok(val) = ctx.get_text() {
-                write_to_json(
-                    val.into_bytes(),
-                    String::from("String"),
-                    String::from("os"),
-                    &self.tx,
-                );
+            if get_lisson_clipboard() {
+                if let Ok(val) = ctx.get_image() {
+                    debug!("Type img");
+                    write_to_json(
+                        val.to_png().unwrap().get_bytes().to_vec(),
+                        String::from("image/png"),
+                        String::from("os"),
+                        &self.tx,
+                    );
+                } else if let Ok(val) = ctx.get_text() {
+                    write_to_json(
+                        val.into_bytes(),
+                        String::from("String"),
+                        String::from("os"),
+                        &self.tx,
+                    );
+                }
             }
         } else {
             set_global_bool(true);
@@ -129,13 +182,14 @@ pub fn write_to_json(data: Vec<u8>, typ: String, device: String, tx: &Sender<Mes
 
 #[cfg(target_os = "linux")]
 pub fn parse_wayland_clipboard(
-    data: wayland_clipboard_listener::ClipBoardListenContext,
+    typ: String,
+    data: Vec<u8>,
     tx: &Sender<MessageChannel>,
 ) -> Result<(), Box<dyn error::Error>> {
     use crate::UserSettings;
     use chrono::Utc;
 
-    let (typ, data) = (data.mime_type, data.context);
+    let (typ, data) = (typ, data);
     log::info!("Clipboard data stored: {}", typ);
     let time = Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
 

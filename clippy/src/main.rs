@@ -7,18 +7,16 @@ use clipboard_rs::{ClipboardWatcher, ClipboardWatcherContext};
 use clippy::ipc::ipc::{ipc_check, startup};
 use clippy::local::start_local;
 use clippy::user::start_cloud;
-use clippy::{MessageChannel, UserSettings, read_clipboard};
+use clippy::{MessageChannel, UserSettings, read_clipboard, set_lisson_clipboard};
 use env_logger::{Builder, Env};
 use log::error;
-use log::{debug, warn};
+use log::{debug, info, warn};
 use std::error::Error;
 use std::{process, thread};
 use tokio::sync::mpsc::Sender;
 
 #[cfg(target_os = "linux")]
 use clippy::read_clipboard::read_wayland_clipboard;
-#[cfg(target_os = "linux")]
-use wayland_clipboard_listener::{WlClipboardPasteStream, WlListenType};
 
 #[cfg(target_os = "linux")]
 fn run(tx: &Sender<MessageChannel>) {
@@ -43,12 +41,24 @@ fn run(tx: &Sender<MessageChannel>) {
 // need to find a way to monitor clipboard changes in wayland the current way current way is not optimal
 #[cfg(target_os = "linux")]
 fn read_clipboard_wayland(tx: &Sender<MessageChannel>) {
+    use wayland_clipboard_listener::WlClipboardListenerError;
+
     match read_wayland_clipboard(tx) {
         Ok(_) => (),
-        Err(err) => {
-            log::warn!("{}", err);
-            process::exit(1)
-        }
+        Err(err) => match err {
+            WlClipboardListenerError::InitFailed(err) => {
+                error!("Failed to initialize clipboard: This Wayland system may not be supported");
+                debug!("Clipboard initialization error: {}", err);
+                info!("Listen to Clipboard Changes feature disabled");
+                let mut settings = UserSettings::build_user().unwrap();
+                settings.listen_lipboard_changes = false;
+                settings.write_local().unwrap();
+            }
+            _ => {
+                log::warn!("{}", err);
+                process::exit(1)
+            }
+        },
     }
 }
 
@@ -101,6 +111,7 @@ fn main() {
         loop {
             match UserSettings::build_user() {
                 Ok(usersettings) => {
+                    set_lisson_clipboard(usersettings.listen_lipboard_changes);
                     if usersettings.disable_sync {
                         start_local(&mut rx, usersettings);
                     } else {
@@ -112,6 +123,7 @@ fn main() {
                     }
                 }
                 Err(err) => {
+                    set_lisson_clipboard(true);
                     warn!("user not logged in: {}", err);
                     let usersettings = UserSettings::new();
                     start_local(&mut rx, usersettings);
@@ -121,15 +133,13 @@ fn main() {
     });
 
     // this thread reads the gui clipboard entry && settings change
-    {
-        let tx_c = tx.clone();
-        thread::spawn(move || {
-            if let Err(e) = ipc_check(channel, &tx_c) {
-                error!("unable to start background channel {}", e);
-                process::exit(1)
-            }
-        });
-    }
+    let tx_c = tx.clone();
+    thread::spawn(move || {
+        if let Err(e) = ipc_check(channel, &tx_c) {
+            error!("unable to start background channel {}", e);
+            process::exit(1)
+        }
+    });
 
     run(&tx)
 }

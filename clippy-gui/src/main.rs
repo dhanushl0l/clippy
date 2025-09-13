@@ -1019,6 +1019,16 @@ impl App for Clipboard {
                                     });
                                 });
                             }
+                            ui.horizontal(|ui| {
+                                ui.label("Listen to Clipboard Changes");
+                                ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
+                                    if ui.add(toggle(&mut self.settings.listen_lipboard_changes)).changed() {
+                                        log_error!(send_process(clippy::MessageIPC::UpdateSettings(
+                                            self.settings.clone(),
+                                        )));
+                                    }
+                                });
+                            });
                             let note = "If enabled, copied images are also stored as thumbnails. \
                             If disabled, image previews won’t be shown in the app.";
                             ui.horizontal(|ui| {
@@ -1083,17 +1093,6 @@ impl App for Clipboard {
                                     ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
                                         if ui.add(toggle(&mut self.settings.disable_sync)).changed()
                                         {
-                                                log_error!(send_process(clippy::MessageIPC::UpdateSettings(
-                                                    self.settings.clone(),
-                                                )));
-                                        }
-                                    });
-                                });
-
-                                ui.horizontal(|ui| {
-                                    ui.label("Placeholder");
-                                    ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
-                                        if ui.add(toggle(&mut true)).changed() {
                                                 log_error!(send_process(clippy::MessageIPC::UpdateSettings(
                                                     self.settings.clone(),
                                                 )));

@@ -31,7 +31,7 @@ use std::{
 use tokio::sync::Notify;
 use tokio::sync::mpsc::Sender;
 
-#[cfg(target_os="windows")]
+#[cfg(target_os = "windows")]
 use crate::write_clipboard::copy_to_clipboard;
 #[cfg(target_family = "unix")]
 use crate::write_clipboard::copy_to_unix;
@@ -47,6 +47,7 @@ const GUI_BIN: &str = "clippy-gui";
 const GUI_BIN: &str = "clippy-gui";
 
 static GLOBAL_BOOL: AtomicBool = AtomicBool::new(true);
+pub static LISSON_CLIPBOARD: AtomicBool = AtomicBool::new(true);
 
 pub fn set_global_bool(value: bool) {
     GLOBAL_BOOL.store(value, Ordering::SeqCst);
@@ -54,6 +55,14 @@ pub fn set_global_bool(value: bool) {
 
 pub fn get_global_bool() -> bool {
     GLOBAL_BOOL.load(Ordering::SeqCst)
+}
+
+pub fn set_lisson_clipboard(value: bool) {
+    LISSON_CLIPBOARD.store(value, Ordering::SeqCst);
+}
+
+pub fn get_lisson_clipboard() -> bool {
+    LISSON_CLIPBOARD.load(Ordering::SeqCst)
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -89,8 +98,9 @@ impl Data {
             copy_to_unix(self.clone(), paste)
                 .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
-            #[cfg(target_os="windows")]
-            copy_to_clipboard(self.clone(), paste).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            #[cfg(target_os = "windows")]
+            copy_to_clipboard(self.clone(), paste)
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
         }
         set_global_update_bool(true);
         Ok(())
@@ -478,6 +488,7 @@ pub struct UserSettings {
     pub intrevel: u32,
     pub max_clipboard: Option<u32>,
     pub theme: SystemTheam,
+    pub listen_lipboard_changes: bool,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Clone)]
@@ -500,6 +511,7 @@ impl UserSettings {
             intrevel: 3,
             max_clipboard: Some(100),
             theme: SystemTheam::System,
+            listen_lipboard_changes: true,
         }
     }
 
@@ -723,6 +735,7 @@ pub enum MessageIPC {
     Edit(EditData),
     UpdateSettings(UserSettings),
     Delete(PathBuf, String),
+    Readclipboard,
     Updated,
     Close,
 }

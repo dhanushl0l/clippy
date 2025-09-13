@@ -1,12 +1,12 @@
 #[cfg(target_family = "unix")]
 pub mod ipc {
+    use crate::read_clipboard::read_wayland_clipboard_once;
     use crate::write_clipboard::copy_to_unix;
     use crate::{
         API_KEY, GUI_BIN, MessageChannel, MessageIPC, get_image_path, get_path_local, log_error,
     };
-    use log::{debug, error, warn};
+    use log::{debug, error, info, warn};
     use serde_json::Deserializer;
-    use std::fs::File;
     use std::io::{BufReader, Error, Read};
     use std::os::fd::{FromRawFd, IntoRawFd};
     use std::process::{Command, Stdio};
@@ -21,9 +21,12 @@ pub mod ipc {
 
     pub fn startup() -> Result<UnixListener, std::io::Error> {
         let mut path = get_path_local();
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
         path.push(".LOCK");
-        if let Err(e) = File::create(&path) {
-            debug!("{}", e);
+        if !path.exists() {
+            fs::File::create_new(&path)?;
         }
         match UnixStream::connect(&path) {
             Ok(mut stream) => {
@@ -31,8 +34,13 @@ pub mod ipc {
                     eprintln!("Another Clippy service is already running. Please stop it first.");
                     process::exit(1);
                 } else {
-                    let msg = serde_json::to_vec(&MessageIPC::OpentGUI)?;
-                    stream.write_all(&msg)?;
+                    let msg = if env::var("COPY").is_ok() {
+                        info!("Sending request to copy new item");
+                        MessageIPC::Readclipboard
+                    } else {
+                        MessageIPC::OpentGUI
+                    };
+                    stream.write_all(&serde_json::to_vec(&msg)?)?;
                     process::exit(0);
                 }
             }
@@ -118,13 +126,12 @@ pub mod ipc {
             if let Ok(mut val) = i {
                 let mut buf = String::new();
                 val.read_to_string(&mut buf)?;
+                let rx_clone = rx.clone();
                 match serde_json::from_str(&buf)? {
                     MessageIPC::OpentGUI => {
-                        let rx = rx.clone();
                         if let Ok(mut guard) = is_it_new.lock() {
                             if guard.is_none() {
                                 let is_it_new_clone = Arc::clone(&is_it_new);
-                                let rx_clone = rx.clone();
 
                                 let handle = thread::spawn(move || {
                                     if let Err(e) = start_gui(&rx_clone) {
@@ -138,6 +145,12 @@ pub mod ipc {
                                 *guard = Some(handle);
                             }
                         }
+                    }
+                    MessageIPC::Readclipboard => {
+                        if let Err(err) = read_wayland_clipboard_once(&rx_clone) {
+                            error!("Unable to read clipboard");
+                            debug!("{:?}", err);
+                        };
                     }
                     _ => {}
                 }
@@ -271,7 +284,7 @@ pub mod ipc {
                 } else {
                     break;
                 }
-            }else {
+            } else {
                 break;
             }
         }
