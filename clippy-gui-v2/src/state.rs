@@ -6,14 +6,14 @@ use crate::UIData;
 
 #[derive(Debug, Clone)]
 pub struct ClipboardState {
-    pub changed: Vec<UIData>,
+    pub clipboard_data: Vec<UIData>,
     pub settings: UserSettings,
     pub value: f32,
 }
 
 impl ClipboardState {
     pub fn build() -> Self {
-        let mut changed = vec![];
+        let mut clipboard_data = vec![];
         let path = get_path_pending();
         let mut count = 0;
         for i in fs::read_dir(path).unwrap() {
@@ -24,7 +24,7 @@ impl ClipboardState {
                     let data = UIData::build(&path);
                     match data {
                         Ok(val) => {
-                            changed.push(val);
+                            clipboard_data.push(val);
                         }
                         Err(e) => {
                             println!("err: {:?}", e)
@@ -39,7 +39,7 @@ impl ClipboardState {
             }
         }
         let data = Self {
-            changed,
+            clipboard_data,
             settings: UserSettings::new(),
             value: 1.1,
         };
@@ -49,7 +49,7 @@ impl ClipboardState {
 impl Default for ClipboardState {
     fn default() -> Self {
         Self {
-            changed: vec![],
+            clipboard_data: vec![],
             settings: UserSettings::new(),
             value: 1.1,
         }

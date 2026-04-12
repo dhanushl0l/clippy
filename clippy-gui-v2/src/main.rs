@@ -15,11 +15,11 @@ fn theme(_state: &ClipboardState) -> Theme {
             text: iced::Color::from_rgb8(205, 214, 244),
             primary: iced::Color::from_rgb8(243, 139, 168),
             success: iced::Color::from_rgb8(166, 227, 161),
-            warning: iced::Color::from_rgb8(250, 179, 135), // peach
+            warning: iced::Color::from_rgb8(250, 179, 135),
             danger: iced::Color::from_rgb8(243, 139, 168),
         },
-    )
-    // Theme::Ferra
+    );
+    Theme::SolarizedDark
 }
 
 pub fn main() -> iced::Result {
@@ -29,7 +29,7 @@ pub fn main() -> iced::Result {
         .antialiasing(true)
         .window(window::Settings {
             size: Size::new(1024.0, 768.0),
-            min_size: Some(Size::new(300.0, 300.0)),
+            min_size: Some(Size::new(500.0, 300.0)),
             level: window::Level::AlwaysOnTop,
             position: window::Position::Centered,
             decorations: true,
