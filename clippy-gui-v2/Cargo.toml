@@ -1,0 +1,11 @@
+[package]
+name = "clippy-gui-v2"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+iced = { version = "0.14.0", features = ["advanced", "svg"] }
+clippy = { path = "../clippy" }
+uuid = "1.23.0"
+serde_json.workspace = true
+serde.workspace = true

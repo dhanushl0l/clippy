@@ -31,7 +31,7 @@ use std::{
 use tokio::sync::Notify;
 use tokio::sync::mpsc::Sender;
 
-#[cfg(target_os="windows")]
+#[cfg(target_os = "windows")]
 use crate::write_clipboard::copy_to_clipboard;
 #[cfg(target_family = "unix")]
 use crate::write_clipboard::copy_to_unix;
@@ -60,7 +60,7 @@ pub fn get_global_bool() -> bool {
 pub struct Data {
     data: String,
     pub typ: String,
-    device: String,
+    pub device: String,
     pub pined: bool,
 }
 
@@ -89,8 +89,9 @@ impl Data {
             copy_to_unix(self.clone(), paste)
                 .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
-            #[cfg(target_os="windows")]
-            copy_to_clipboard(self.clone(), paste).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            #[cfg(target_os = "windows")]
+            copy_to_clipboard(self.clone(), paste)
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
         }
         set_global_update_bool(true);
         Ok(())
@@ -212,7 +213,7 @@ impl Data {
         self.data = data.to_string()
     }
 
-    pub fn get_meta_data(&self) -> Option<String> {
+    pub fn get_meta_data_option(&self) -> Option<String> {
         let Some(data) = self.get_data() else {
             return Some(String::new());
         };
@@ -229,6 +230,24 @@ impl Data {
         let display_text = lines.collect::<Vec<_>>().join("\n");
 
         Some(display_text)
+    }
+
+    pub fn get_meta_data(&self) -> String {
+        let data = match self.get_data() {
+            Some(d) => d,
+            None => return String::new(),
+        };
+
+        let lines = data.lines().take(5).map(|line| {
+            let line = line.trim();
+            if line.len() > 100 {
+                format!("{}..", line.chars().take(65).collect::<String>())
+            } else {
+                line.to_string()
+            }
+        });
+
+        lines.collect::<Vec<_>>().join("\n")
     }
 
     pub fn build(path: &PathBuf) -> Result<Self, io::Error> {
@@ -466,7 +485,7 @@ impl LoginUserCred {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct UserSettings {
     sync: Option<UserCred>,
     pub store_image: bool,
@@ -480,7 +499,7 @@ pub struct UserSettings {
     pub theme: SystemTheam,
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Clone, Debug)]
 pub enum SystemTheam {
     System,
     Dark,

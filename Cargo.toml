@@ -1,5 +1,5 @@
 [workspace]
-members = ["clippy", "clippy-gui", "clippy-server"]
+members = ["clippy", "clippy-gui", "clippy-gui-v2", "clippy-server"]
 
 
 [workspace.dependencies]

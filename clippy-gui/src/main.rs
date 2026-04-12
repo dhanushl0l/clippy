@@ -211,7 +211,7 @@ impl Clipboard {
                                     count += 1;
                                 }
                             } else {
-                                if let Some(val) = file.get_meta_data() {
+                                if let Some(val) = file.get_meta_data_option() {
                                     page_data.push((
                                         Thumbnail::Text(val),
                                         path.0.clone(),
@@ -224,7 +224,7 @@ impl Clipboard {
                         }
                         Page::Notification => {
                             if file.typ.starts_with("notification/") {
-                                if let Some(val) = file.get_meta_data() {
+                                if let Some(val) = file.get_meta_data_option() {
                                     page_data.push((
                                         Thumbnail::Text(val),
                                         path.0.clone(),
@@ -248,7 +248,7 @@ impl Clipboard {
                                         count += 1;
                                     }
                                 } else {
-                                    if let Some(val) = file.get_meta_data() {
+                                    if let Some(val) = file.get_meta_data_option() {
                                         page_data.push((
                                             Thumbnail::Text(val),
                                             path.0.clone(),
