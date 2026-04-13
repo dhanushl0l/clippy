@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::state::ClipboardState;
+use crate::{footer::FooterButton, state::ClipboardState};
 
 #[derive(Debug, Clone)]
 pub enum ClipboardAction {
@@ -13,6 +13,7 @@ pub enum ClipboardAction {
 #[derive(Debug, Clone)]
 pub enum Message {
     Clipboard(ClipboardAction),
+    FooterAction(FooterButton),
 }
 
 pub fn update(clipboard: &mut ClipboardState, message: Message) {

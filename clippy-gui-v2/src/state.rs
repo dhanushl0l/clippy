@@ -9,6 +9,7 @@ pub struct ClipboardState {
     pub clipboard_data: Vec<UIData>,
     pub settings: UserSettings,
     pub value: f32,
+    pub scroll_offset: f32,
 }
 
 impl ClipboardState {
@@ -42,6 +43,7 @@ impl ClipboardState {
             clipboard_data,
             settings: UserSettings::new(),
             value: 1.1,
+            scroll_offset: 0.0,
         };
         data
     }
@@ -52,6 +54,7 @@ impl Default for ClipboardState {
             clipboard_data: vec![],
             settings: UserSettings::new(),
             value: 1.1,
+            scroll_offset: 0.0,
         }
     }
 }

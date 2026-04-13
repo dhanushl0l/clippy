@@ -4,11 +4,11 @@ use crate::header::header;
 use super::state::ClipboardState;
 use super::update::Message;
 use iced::Alignment::Center;
-use iced::widget::{column, container, scrollable};
+use iced::widget::{column, container, scrollable, stack};
 use iced::{Element, Length};
 
 pub fn view(clipboard_state: &ClipboardState) -> Element<'_, Message> {
-    column![
+    let content = column![
         header(),
         container(
             scrollable(
@@ -30,7 +30,6 @@ pub fn view(clipboard_state: &ClipboardState) -> Element<'_, Message> {
         .width(Length::Fill)
         .height(Length::Fill)
         .align_x(Center),
-        footer(),
-    ]
-    .into()
+    ];
+    stack![content, footer(),].into()
 }

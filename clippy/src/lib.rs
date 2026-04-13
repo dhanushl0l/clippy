@@ -37,6 +37,7 @@ use crate::write_clipboard::copy_to_clipboard;
 use crate::write_clipboard::copy_to_unix;
 
 pub const APP_ID: &str = "org.clippy.clippy";
+pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const API_KEY: Option<&str> = option_env!("KEY");
 const IMAGE_DATA: &[u8] = include_bytes!("../../assets/gui_icons/image.png");
 #[cfg(debug_assertions)]
